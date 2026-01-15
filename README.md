@@ -1,14 +1,29 @@
 # Josh Workflow
 
-An autonomous development pipeline for Claude Code that processes backlog tasks through a rigorous 8-phase workflow with built-in expert personas.
+An autonomous development pipeline for Claude Code with expert personas for planning, design, review, and testing.
 
 ## Overview
 
-Josh Workflow automates the software development lifecycle by:
-1. Reading tasks from a markdown backlog
-2. Processing each task through plan, review, build, test, and commit phases
-3. Using expert personas (Principal Engineer, QA Engineer) for quality gates
-4. Clearing context between tasks for reliability
+Josh Workflow provides two modes:
+
+1. **Builder Mode** (`/build`) - Start a new project from scratch with expert guidance
+2. **Workflow Mode** (`./workflow.sh`) - Execute backlog tasks autonomously
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│  /build                                                              │
+│  ├── Product Manager → PROJECT_[name].md                            │
+│  ├── UX Designer → DESIGN_[name].md (optional)                      │
+│  └── Generate → BACKLOG.md                                          │
+└─────────────────────────────────────────────────────────────────────┘
+                                │
+                                ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│  ./workflow.sh                                                       │
+│  └── For each task in BACKLOG.md:                                   │
+│      Plan → Review → Build → Review → Test → Commit                 │
+└─────────────────────────────────────────────────────────────────────┘
+```
 
 ```
 ┌─────────┐   ┌─────────────┐   ┌─────────┐   ┌─────────────┐
@@ -29,9 +44,23 @@ Josh Workflow automates the software development lifecycle by:
 
 ## Quick Start
 
-### 1. Add Tasks to Your Backlog
+### Option A: Start a New Project (Builder Mode)
 
-Edit `BACKLOG.md`:
+Use `/build` to create a new project from scratch:
+
+```
+/build
+```
+
+This launches an interactive session with expert personas:
+
+1. **Product Manager** asks about your vision, users, and goals
+2. **UX Designer** (optional) helps define visual style and user flows
+3. **Backlog Generator** creates `BACKLOG.md` from your plan
+
+### Option B: Execute an Existing Backlog
+
+If you already have tasks, add them to `BACKLOG.md`:
 
 ```markdown
 ## High Priority
@@ -42,7 +71,7 @@ Edit `BACKLOG.md`:
 - [ ] Refactor API error handling
 ```
 
-### 2. Run the Workflow
+Then run the workflow:
 
 ```bash
 ./workflow.sh              # Process all tasks
@@ -50,11 +79,73 @@ Edit `BACKLOG.md`:
 ./workflow.sh --dry-run    # Preview without executing
 ```
 
-### 3. Watch It Work
+---
 
-The workflow runs in your terminal, showing progress through each phase.
+## Builder Mode (`/build`)
 
-## The 8 Phases
+For greenfield projects, the builder guides you through comprehensive planning before any code is written.
+
+### The Builder Flow
+
+```
+/build
+   │
+   ▼
+┌─────────────────────────────────────────┐
+│  PRODUCT MANAGER                         │
+│  "What are you trying to build?"        │
+│  "What problem does this solve?"        │
+│  "Who are the users?"                   │
+│  → Creates PROJECT_[name].md            │
+└─────────────────────────────────────────┘
+   │
+   ▼
+┌─────────────────────────────────────────┐
+│  UX DESIGNER (if UI needed)             │
+│  "What's the visual style?"             │
+│  "Walk me through the user flows"       │
+│  → Creates DESIGN_[name].md             │
+└─────────────────────────────────────────┘
+   │
+   ▼
+┌─────────────────────────────────────────┐
+│  BACKLOG GENERATOR                       │
+│  Converts phases → BACKLOG.md           │
+│  Ready for ./workflow.sh                │
+└─────────────────────────────────────────┘
+```
+
+### Product Manager Persona
+
+A Senior PM with 12+ years experience who:
+- Asks probing questions to understand the real problem
+- **Pushes back** on over-complication
+- Values simple, elegant solutions
+- Creates phased implementation plans
+
+### UX Designer Persona
+
+A Senior Designer with 10+ years experience who:
+- Follows **7 Design Principles**: Hierarchy, Progressive Disclosure, Consistency, Contrast, Accessibility, Proximity, Alignment
+- Favors easily-grokable UI over novelty
+- Thinks through user flows before placing elements
+- Creates comprehensive design specs
+
+### Output Files
+
+| File | Contents |
+|------|----------|
+| `PROJECT_[name].md` | Vision, users, success metrics, phased tasks |
+| `DESIGN_[name].md` | Colors, typography, components, wireframes |
+| `BACKLOG.md` | Tasks extracted from project, ready to execute |
+
+---
+
+## Workflow Mode (`./workflow.sh`)
+
+Processes backlog tasks autonomously through an 8-phase cycle with quality gates.
+
+### The 8 Phases
 
 | Phase | Description | Persona |
 |-------|-------------|---------|
@@ -98,14 +189,23 @@ Creates test plans before writing tests, follows the test pyramid.
 
 ```
 josh-workflow/
-├── workflow.sh                          # Orchestrator script
-├── BACKLOG.md                           # Your task backlog
-├── README.md                            # This file
+├── workflow.sh                          # Workflow orchestrator
+├── BACKLOG.md                           # Task backlog
+├── PROJECT_[name].md                    # Project plan (from /build)
+├── DESIGN_[name].md                     # Design spec (from /build)
 └── .claude/
     ├── settings.json                    # Permissions allowlist
+    ├── commands/
+    │   └── build.md                     # /build slash command
     ├── skills/
+    │   ├── builder/
+    │   │   └── SKILL.md                 # Builder orchestrator
+    │   ├── product-manager/
+    │   │   └── SKILL.md                 # PM persona
+    │   ├── ux-designer/
+    │   │   └── SKILL.md                 # Designer persona
     │   ├── josh-workflow/
-    │   │   └── SKILL.md                 # Main workflow (8 phases)
+    │   │   └── SKILL.md                 # Workflow (8 phases)
     │   ├── principal-engineer/
     │   │   └── SKILL.md                 # PE persona
     │   └── qa-engineer/
