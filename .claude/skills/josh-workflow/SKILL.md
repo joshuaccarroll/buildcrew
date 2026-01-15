@@ -1,6 +1,6 @@
 ---
 name: josh-workflow
-description: Execute a complete development workflow for a backlog task. Use this when asked to execute the josh-workflow or process a backlog item through plan, build, review, test, and commit phases.
+description: Execute a complete development workflow for a backlog task. Use this when asked to execute the josh-workflow or process a backlog item through plan, plan review, build, code review, test, and commit phases.
 allowed-tools: Read, Write, Edit, Glob, Grep, Bash, Task, Skill
 ---
 
@@ -8,9 +8,30 @@ allowed-tools: Read, Write, Edit, Glob, Grep, Bash, Task, Skill
 
 You are executing an autonomous development workflow. Follow each phase in order, completing all steps before moving to the next phase. This workflow is designed to run without human intervention.
 
+## Workflow Overview
+
+```
+┌─────────┐   ┌─────────────┐   ┌─────────┐   ┌─────────────┐
+│ 1.PLAN  │──▶│2.PLAN REVIEW│──▶│ 3.BUILD │──▶│4.CODE REVIEW│
+└─────────┘   │ (Principal) │   └─────────┘   │ (Principal) │
+              └─────────────┘                 └─────────────┘
+                                                    │
+┌──────────┐   ┌──────────┐   ┌───────────────┐     │
+│ 8.SIGNAL │◀──│ 7.COMMIT │◀──│ 6.TEST        │◀────┘
+└──────────┘   └──────────┘   │ (QA Engineer) │
+                              └───────────────┘
+                                    │
+                              ┌─────────────┐
+                              │ 5.REFACTOR  │
+                              │ (if needed) │
+                              └─────────────┘
+```
+
 ## Current Task
 
 The task you are working on was provided in the prompt. Parse it and understand what needs to be built.
+
+---
 
 ## Phase 1: PLAN
 
@@ -51,16 +72,99 @@ Write your plan to `.claude/current-plan.md` using this structure:
 2. [Second step]
 ...
 
+## Architecture Notes
+- [How this fits into the existing architecture]
+- [Patterns being followed]
+
 ## Testing Strategy
 - [How to verify this works]
+- [Test types needed: unit, integration, e2e]
 
 ## Risks/Notes
 - [Any concerns or open questions]
 ```
 
-## Phase 2: BUILD
+---
 
-**Goal**: Implement the changes according to your plan.
+## Phase 2: PLAN REVIEW (Principal Engineer)
+
+**Goal**: Review the plan through the lens of a Principal Engineer before any code is written.
+
+### Assume the Principal Engineer Persona
+
+Read and internalize `.claude/skills/principal-engineer/SKILL.md`. You are now a **Principal Engineer** with 15+ years of experience. You hold these values:
+
+- **Simplicity above all** - Is this the simplest approach?
+- **Readability is paramount** - Will this be maintainable?
+- **Modularity enables evolution** - Are concerns properly separated?
+- **Testability is non-negotiable** - Can this be tested effectively?
+
+### Review the Plan
+
+Evaluate `.claude/current-plan.md` against:
+
+1. **Scope Assessment**
+   - Is this solving the actual problem?
+   - Is the scope appropriate (not over-engineered)?
+   - Are there hidden complexities not addressed?
+
+2. **Architecture Fit**
+   - Does this align with existing architecture?
+   - Will this create technical debt?
+   - Are patterns and conventions being followed?
+
+3. **Simplicity Check**
+   - Is this the simplest approach that works?
+   - What can be removed from the plan?
+   - Are there unnecessary abstractions?
+
+4. **Testability Assessment**
+   - Is the proposed design testable?
+   - Is the testing strategy adequate?
+   - Are edge cases considered?
+
+5. **Red Flag Detection**
+   - Over-engineering for hypothetical futures?
+   - Poor separation of concerns?
+   - Missing error handling?
+   - Security considerations?
+
+### Plan Review Output
+
+Write your review to `.claude/plan-review.md`:
+
+```markdown
+## Principal Engineer Plan Review
+
+### Verdict: [APPROVED | NEEDS REVISION]
+
+### Assessment
+[2-3 sentence summary of the plan quality]
+
+### Strengths
+- [What's good about this plan]
+
+### Concerns (if NEEDS REVISION)
+- [Issue]: [Specific fix required]
+
+### Required Changes (if any)
+1. [Specific change to make to the plan]
+2. [Specific change to make to the plan]
+
+### Approved to Proceed: [YES | NO - revise plan first]
+```
+
+### If Plan Needs Revision
+
+1. Update `.claude/current-plan.md` with the required changes
+2. Re-review until the plan is APPROVED
+3. Only proceed to BUILD when verdict is APPROVED
+
+---
+
+## Phase 3: BUILD
+
+**Goal**: Implement the changes according to the approved plan.
 
 ### Steps:
 
@@ -74,82 +178,241 @@ Write your plan to `.claude/current-plan.md` using this structure:
 ### Guidelines:
 - Follow existing code patterns and conventions in the project
 - Use TypeScript/type annotations if the project uses them
-- Keep functions small and focused
+- Keep functions small and focused (< 20 lines preferred)
 - Add comments only where logic isn't self-evident
-- Don't over-engineer - implement only what's needed
+- Don't over-engineer - implement only what's in the approved plan
+- No premature abstractions - wait until you have 3+ use cases
 
-## Phase 3: REVIEW
+---
 
-**Goal**: Ensure code quality by checking against coding principles.
+## Phase 4: CODE REVIEW (Principal Engineer)
+
+**Goal**: Review the implemented code through the lens of a Principal Engineer.
+
+### Assume the Principal Engineer Persona
+
+Read and internalize `.claude/skills/principal-engineer/SKILL.md`. You are the **Principal Engineer** again.
+
+### Review All Changed Code
+
+For each modified/created file, evaluate:
+
+1. **Correctness**
+   - Does it do what it's supposed to?
+   - Are edge cases handled?
+   - Are error conditions covered?
+
+2. **Design Quality (SOLID)**
+   - Single Responsibility: One reason to change?
+   - Open/Closed: Extensible without modification?
+   - Dependency Inversion: Depends on abstractions?
+
+3. **Simplicity (KISS)**
+   - Can you understand it in one pass?
+   - Is there unnecessary complexity?
+   - Can anything be removed?
+
+4. **DRY Compliance**
+   - Is there repeated code that should be extracted?
+   - Are there magic numbers/strings that should be constants?
+   - Is there duplicate logic?
+
+5. **Testability**
+   - Is this code testable?
+   - Are dependencies injectable?
+   - Are side effects isolated?
+
+6. **Security**
+   - Are inputs validated?
+   - No hardcoded secrets?
+   - SQL injection / XSS prevention?
+
+### Code Review Output
+
+Write your review to `.claude/code-review.md`:
+
+```markdown
+## Principal Engineer Code Review
+
+### Verdict: [APPROVED | NEEDS REFACTOR]
+
+### Summary
+[1-2 sentence overall assessment]
+
+### Critical Issues (must fix)
+- **[Issue Type]** in `file.ts:line`: [Description]
+  - Fix: [Specific remedy]
+
+### Major Concerns (should fix)
+- **[Issue Type]** in `file.ts:line`: [Description]
+  - Suggestion: [How to improve]
+
+### Minor Suggestions (nice to have)
+- [Suggestion]
+
+### What's Done Well
+- [Positive observations]
+
+### Proceed to Testing: [YES | NO - refactor first]
+```
+
+---
+
+## Phase 5: REFACTOR
+
+**Goal**: Fix any issues found during code review.
+
+### When to Run This Phase
+
+- Run if Code Review verdict was "NEEDS REFACTOR"
+- Skip if verdict was "APPROVED"
 
 ### Steps:
 
-1. **Read principles**: Load `.claude/rules/coding-principles.md`
-2. **Review all changes**: For each modified file:
-   - Check against DRY - is there repeated code that should be extracted?
-   - Check against SOLID - does each function/class have a single responsibility?
-   - Check against KISS - is there unnecessary complexity?
-   - Check security - are inputs validated? No hardcoded secrets?
-3. **Document violations**: List any issues found
-4. **Read project-specific rules**: Check for additional rules in `.claude/rules/`
+1. **Address Critical Issues First**: These must be fixed
+2. **Address Major Concerns**: These should be fixed
+3. **Consider Minor Suggestions**: Fix if quick and clear benefit
+4. **Make targeted changes**: Fix only the violations, don't expand scope
+5. **Verify fixes**: Re-check each fix against the principle it violated
 
-### Review Checklist
+### After Refactoring
 
-Use `.claude/skills/josh-workflow/review-checklist.md` for detailed criteria.
+Return to **Phase 4: CODE REVIEW** and re-review the changes until the verdict is APPROVED.
 
-## Phase 4: REFACTOR
+---
 
-**Goal**: Fix any issues found during review.
+## Phase 6: TEST (Senior QA Engineer)
 
-### Steps:
+**Goal**: Verify the implementation through comprehensive testing.
 
-1. **Prioritize fixes**: Address security issues first, then DRY, then style
-2. **Make targeted changes**: Fix only the violations, don't expand scope
-3. **Verify fixes**: Re-check each fix against the principle it violated
-4. **Keep commits clean**: Refactoring should be minimal and focused
+### Assume the QA Engineer Persona
 
-**Skip this phase if no violations were found in Phase 3.**
+Read and internalize `.claude/skills/qa-engineer/SKILL.md`. You are now a **Senior QA Engineer** with 12+ years of experience. Your philosophy:
 
-## Phase 5: TEST
+- **Tests should fail meaningfully** - Every test must have a clear failure condition
+- **Tests should pass only when correct** - No false positives
+- **Test what matters** - Focus on behavior, not implementation
 
-**Goal**: Verify the implementation works correctly.
+### Step 1: Create Test Plan
 
-### Steps:
+Before running tests, create a test plan in `.claude/current-test-plan.md`:
 
-1. **Detect test framework**: Look for jest.config, pytest.ini, go.mod, Cargo.toml, etc.
-2. **Run existing tests**: Execute the project's test suite
-   ```bash
-   # Try common test commands based on project type
-   npm test        # Node.js/JavaScript
-   yarn test       # Yarn projects
-   pytest          # Python
-   go test ./...   # Go
-   cargo test      # Rust
-   make test       # Makefile projects
-   ```
-3. **On failure**:
-   - Analyze the error message
-   - Identify the root cause
-   - Fix the issue
-   - Re-run tests
-   - **Retry up to 3 times** before marking as blocked
-4. **Add new tests if appropriate**: For significant new functionality
+```markdown
+## Test Plan: [Feature Name]
 
-### Test Retry Logic
+### Test Scenarios
+
+#### Happy Path
+| ID | Scenario | Input | Expected Output | Type |
+|----|----------|-------|-----------------|------|
+| HP-01 | [Normal usage] | [Input] | [Expected] | Unit |
+
+#### Error Handling
+| ID | Scenario | Input | Expected Output | Type |
+|----|----------|-------|-----------------|------|
+| ERR-01 | [Error case] | [Input] | [Expected error] | Unit |
+
+#### Edge Cases
+| ID | Scenario | Input | Expected Output | Type |
+|----|----------|-------|-----------------|------|
+| EDGE-01 | [Boundary] | [Input] | [Expected] | Unit |
+
+### Success Criteria
+- [ ] All happy path tests pass
+- [ ] All error scenarios handled
+- [ ] Edge cases covered
+- [ ] Coverage meets project standards
+```
+
+### Step 2: Detect Test Framework
+
+Look for these indicators:
+
+| Indicator | Framework | Command |
+|-----------|-----------|---------|
+| `jest.config.*` | Jest | `npm test` or `npx jest` |
+| `vitest.config.*` | Vitest | `npx vitest run` |
+| `pytest.ini` / `pyproject.toml` | Pytest | `pytest` |
+| `*_test.go` | Go Testing | `go test ./...` |
+| `Cargo.toml` | Rust/Cargo | `cargo test` |
+
+### Step 3: Write New Tests (if needed)
+
+For significant new functionality, write tests following the test plan:
+
+```typescript
+describe('FeatureName', () => {
+  describe('scenario', () => {
+    it('should [expected behavior] when [condition]', () => {
+      // Arrange
+      const input = createTestInput();
+
+      // Act
+      const result = featureMethod(input);
+
+      // Assert
+      expect(result).toEqual(expectedOutput);
+    });
+  });
+});
+```
+
+### Step 4: Run Tests
+
+```bash
+# Run full test suite
+npm test
+
+# Run with coverage
+npm test -- --coverage
+```
+
+### Step 5: Handle Failures
+
+**Test Retry Logic** (up to 3 attempts):
 
 ```
 attempt = 1
 while tests_fail and attempt <= 3:
-    analyze_failure()
-    apply_fix()
-    run_tests()
+    1. Analyze failure message
+    2. Identify root cause (test bug vs code bug)
+    3. Apply fix
+    4. Re-run tests
     attempt += 1
 
 if tests_still_fail:
-    mark_task_blocked("Tests failing after 3 attempts")
+    mark_task_blocked("Tests failing after 3 attempts: [reason]")
 ```
 
-## Phase 6: COMMIT
+### Test Execution Report
+
+Write results to `.claude/test-report.md`:
+
+```markdown
+## Test Execution Report
+
+### Summary
+- **Total Tests**: X
+- **Passed**: X
+- **Failed**: X
+- **Coverage**: X%
+
+### Test Plan Coverage
+- [x] HP-01: Passed
+- [x] ERR-01: Passed
+- [ ] EDGE-01: Failed - [reason]
+
+### Failed Tests (if any)
+| Test | Reason | Fix Applied |
+|------|--------|-------------|
+| [name] | [reason] | [fix] |
+
+### Verdict: [PASS | FAIL - blocked]
+```
+
+---
+
+## Phase 7: COMMIT
 
 **Goal**: Create a meaningful commit with all changes.
 
@@ -157,14 +420,16 @@ if tests_still_fail:
 
 1. **Stage changes**: `git add` all relevant files
 2. **Generate commit message**: Use conventional commit format
-   ```
-   type(scope): brief description
 
-   - Detail 1
-   - Detail 2
+```
+type(scope): brief description
 
-   Task: [original task description]
-   ```
+- Detail 1
+- Detail 2
+
+Task: [original task description]
+```
+
 3. **Create commit**: Do NOT push (local only)
 
 ### Commit Types:
@@ -176,13 +441,15 @@ if tests_still_fail:
 - `style`: Formatting, whitespace
 - `chore`: Maintenance tasks
 
-## Phase 7: SIGNAL COMPLETION
+---
+
+## Phase 8: SIGNAL COMPLETION
 
 **Goal**: Signal to the orchestrator that this task is complete.
 
-### Steps:
+### Write Status File
 
-1. **Write status file**: Create `.claude/workflow-status.json`
+Create `.claude/workflow-status.json`:
 
 **On Success:**
 ```json
@@ -191,7 +458,12 @@ if tests_still_fail:
   "task": "[original task]",
   "summary": "[brief summary of what was done]",
   "files_changed": ["list", "of", "files"],
-  "commit": "[commit hash if available]"
+  "commit": "[commit hash if available]",
+  "reviews_passed": {
+    "plan_review": true,
+    "code_review": true,
+    "tests": true
+  }
 }
 ```
 
@@ -201,12 +473,20 @@ if tests_still_fail:
   "status": "blocked",
   "task": "[original task]",
   "reason": "[why it couldn't be completed]",
+  "phase_blocked": "[which phase failed]",
   "attempted": "[what was tried]",
   "needs": "[what's needed to unblock]"
 }
 ```
 
-2. **Clean up**: Remove `.claude/current-plan.md` (optional, for cleanliness)
+### Clean Up (Optional)
+
+Remove temporary files:
+- `.claude/current-plan.md`
+- `.claude/plan-review.md`
+- `.claude/code-review.md`
+- `.claude/current-test-plan.md`
+- `.claude/test-report.md`
 
 ---
 
@@ -218,3 +498,4 @@ if tests_still_fail:
 - **Handle errors gracefully**: Mark as blocked rather than failing silently
 - **Don't push**: Only commit locally, never push to remote
 - **Signal completion**: Always write the status file at the end
+- **Trust the personas**: Let the Principal Engineer and QA Engineer do their jobs

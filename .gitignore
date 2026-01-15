@@ -1,6 +1,10 @@
 # Josh Workflow - Runtime files
 .claude/workflow-status.json
 .claude/current-plan.md
+.claude/plan-review.md
+.claude/code-review.md
+.claude/current-test-plan.md
+.claude/test-report.md
 .claude/settings.local.json
 
 # OS files
