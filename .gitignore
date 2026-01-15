@@ -1,0 +1,19 @@
+# Josh Workflow - Runtime files
+.claude/workflow-status.json
+.claude/current-plan.md
+.claude/settings.local.json
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Editor files
+*.swp
+*.swo
+*~
+.idea/
+.vscode/
+
+# Logs
+*.log
+workflow.log
