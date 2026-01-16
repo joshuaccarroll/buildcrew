@@ -624,6 +624,11 @@ cmd_uninstall() {
         echo ""
         echo -e "${GREEN}✓${NC} BuildCrew has been uninstalled."
         echo ""
+        echo -e "${YELLOW}Note:${NC} If you added BuildCrew to your PATH, remove this line from your shell config:"
+        echo -e "  ${CYAN}export PATH=\"\$HOME/.local/bin:\$PATH\"${NC}"
+        echo ""
+        echo "Common locations: ~/.bashrc, ~/.zshrc, ~/.profile, ~/.bash_profile"
+        echo ""
         echo "To reinstall, run:"
         echo "  curl -fsSL https://raw.githubusercontent.com/joshuaccarroll/buildcrew/main/install.sh | bash"
     else
