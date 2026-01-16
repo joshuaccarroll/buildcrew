@@ -45,31 +45,36 @@ Every feature goes through:
 
 ## Quick Start
 
-### Install (once, globally)
+### 1. Install (once, globally)
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/joshuaccarroll/buildcrew/main/install.sh | bash
 ```
 
-### Use in any project
+### 2. Initialize your project
 
 ```bash
 cd your-project
-buildcrew init           # Link to BuildCrew
+buildcrew init
 ```
 
-In Claude Code:
+### 3. Define your project (in Claude Code)
+
 ```
-/build                   # Start a new project with expert guidance
-/buildcrew product-manager   # Invoke a persona ad-hoc
+/build
 ```
 
-Run the workflow:
+This launches the Product Manager to help you scope your project and create a backlog.
+
+### 4. Execute the backlog
+
 ```bash
-buildcrew run            # Process your backlog autonomously
+buildcrew run
 ```
 
-That's it. Install once, use everywhere.
+BuildCrew processes each task through the full persona pipeline: plan → review → build → test → security → commit.
+
+**Ad-hoc usage:** Invoke any persona directly with `/buildcrew <persona-name>` (e.g., `/buildcrew security-engineer` for a security audit).
 
 ---
 
