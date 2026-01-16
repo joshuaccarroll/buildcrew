@@ -223,11 +223,57 @@ buildcrew uninstall    # Remove BuildCrew
 
 ---
 
-## Safety
+## Permissions & Safety
+
+BuildCrew configures Claude Code with comprehensive permissions for **autonomous operation** while blocking genuinely dangerous commands.
+
+### What's Allowed (No Prompts)
+
+| Category | Commands |
+|----------|----------|
+| **File Operations** | Read, Write, Edit, Glob, Grep |
+| **Package Managers** | npm, yarn, pnpm, bun, pip, poetry, cargo, go, gem, composer |
+| **Build Tools** | make, cmake, gcc, docker, kubectl, terraform |
+| **Git Operations** | All except force-push and hard reset |
+| **Shell Utilities** | ls, cat, grep, find, sed, awk, curl, jq, tar, etc. |
+| **File Management** | mkdir, cp, mv, rm, chmod, ln |
+| **Project Scripts** | ./test.sh, ./build.sh, ./scripts/* |
+
+### What's Blocked (Always)
+
+| Category | Why |
+|----------|-----|
+| **Privilege escalation** | `sudo`, `su`, `doas` |
+| **System destruction** | `rm -rf /`, `rm -rf ~`, system directories |
+| **Git destruction** | `git push --force`, `git reset --hard`, `git clean -fd` |
+| **Remote access** | `ssh`, `scp`, `rsync` |
+| **System control** | `shutdown`, `reboot`, `systemctl`, `launchctl` |
+| **Secrets files** | `.env`, `*.pem`, `*.key`, `.aws/*`, credentials |
+
+### Customize Permissions
+
+Add project-specific permissions in `.claude/settings.local.json`:
+
+```json
+{
+  "permissions": {
+    "allow": [
+      "Bash(ssh deploy@staging:*)"
+    ],
+    "deny": [
+      "Bash(npm publish:*)"
+    ]
+  }
+}
+```
+
+The local file merges with the global settings. Deny rules always win.
+
+### Safety Features
 
 - **No auto-push** - Commits stay local until you review and push
 - **Blocking gates** - Security issues must be fixed before commit
-- **Allowlist permissions** - Only pre-approved commands run without prompts
+- **Deny-list protection** - System directories protected even when `rm` is allowed
 
 ---
 
