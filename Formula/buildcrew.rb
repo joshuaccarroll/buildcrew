@@ -2,22 +2,22 @@
 # frozen_string_literal: true
 
 # Homebrew formula for BuildCrew
-# To use: brew tap joshuacarroll/tap && brew install buildcrew
+# To use: brew tap joshuaccarroll/tap && brew install buildcrew
 #
 # For maintainers:
 # 1. Update version number below
 # 2. Download new release tarball
 # 3. Run: shasum -a 256 buildcrew-X.X.X.tar.gz
 # 4. Update sha256 below
-# 5. Push to joshuacarroll/homebrew-tap repository
+# 5. Push to joshuaccarroll/homebrew-tap repository
 
 class Buildcrew < Formula
   desc "Autonomous AI development workflow with expert personas for Claude Code"
-  homepage "https://github.com/joshuacarroll/buildcrew"
-  url "https://github.com/joshuacarroll/buildcrew/archive/refs/tags/v1.0.0.tar.gz"
+  homepage "https://github.com/joshuaccarroll/buildcrew"
+  url "https://github.com/joshuaccarroll/buildcrew/archive/refs/tags/v1.0.0.tar.gz"
   sha256 "PLACEHOLDER_SHA256_UPDATE_AFTER_RELEASE"
   license "MIT"
-  head "https://github.com/joshuacarroll/buildcrew.git", branch: "main"
+  head "https://github.com/joshuaccarroll/buildcrew.git", branch: "main"
 
   depends_on "jq"
 
@@ -43,7 +43,7 @@ class Buildcrew < Formula
         3. Use /build in Claude Code to create a project plan
         4. Run: buildcrew run
 
-      Documentation: https://github.com/joshuacarroll/buildcrew
+      Documentation: https://github.com/joshuaccarroll/buildcrew
 
       Note: Claude Code CLI must be installed separately.
       Visit: https://claude.ai/code

@@ -7,7 +7,7 @@ CACHE_TTL=3600  # 1 hour in seconds
 # Fetch latest version from GitHub
 fetch_latest_version() {
     local latest
-    latest=$(curl -s --max-time 5 "https://api.github.com/repos/joshuacarroll/buildcrew/releases/latest" 2>/dev/null | grep '"tag_name":' | sed -E 's/.*"v([^"]+)".*/\1/')
+    latest=$(curl -s --max-time 5 "https://api.github.com/repos/joshuaccarroll/buildcrew/releases/latest" 2>/dev/null | grep '"tag_name":' | sed -E 's/.*"v([^"]+)".*/\1/')
     echo "$latest"
 }
 

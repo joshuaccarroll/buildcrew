@@ -1,189 +1,194 @@
 # BuildCrew
 
-An autonomous AI development pipeline for Claude Code with expert personas for planning, design, review, and testing.
+**AI-powered development with expert personas that review each other's work.**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-## Overview
+---
 
-BuildCrew provides two modes for AI-assisted software development:
+## The Problem
 
-1. **Builder Mode** (`/build`) - Start a new project from scratch with expert guidance
-2. **Workflow Mode** (`buildcrew run`) - Execute backlog tasks autonomously
+AI can write code fast. But fast code without review becomes technical debt.
 
-```
-┌─────────────────────────────────────────────────────────────────────┐
-│  /build                                                              │
-│  ├── Product Manager → PROJECT_[name].md                            │
-│  ├── UX Designer → DESIGN_[name].md (optional)                      │
-│  └── Generate → BACKLOG.md                                          │
-└─────────────────────────────────────────────────────────────────────┘
-                                │
-                                ▼
-┌─────────────────────────────────────────────────────────────────────┐
-│  buildcrew run                                                       │
-│  └── For each task in BACKLOG.md:                                   │
-│      Plan → Review → Build → Review → Test → Commit                 │
-└─────────────────────────────────────────────────────────────────────┘
-```
+When you let AI code without guardrails, you get:
+- Over-engineered abstractions nobody asked for
+- Security vulnerabilities hiding in plain sight
+- Tests that pass but don't test anything meaningful
+- Features that ship but don't solve the actual problem
 
-## Installation
+**BuildCrew fixes this by giving AI the same quality gates your human team uses.**
 
-### Quick Install (Recommended)
+---
 
-```bash
-curl -fsSL https://raw.githubusercontent.com/joshuacarroll/buildcrew/main/install.sh | bash
-```
+## The Solution
 
-### Homebrew (macOS/Linux)
+BuildCrew is an autonomous development pipeline where **expert AI personas review each other's work**.
 
-```bash
-brew tap joshuacarroll/tap
-brew install buildcrew
-```
+Every feature goes through:
+1. A **Product Manager** who challenges scope and finds the real problem
+2. A **Principal Engineer** who reviews plans and code for quality
+3. A **Feature Engineer** who ships pragmatic, user-focused code
+4. A **QA Engineer** who writes tests that actually catch bugs
+5. A **Security Engineer** who blocks vulnerabilities before they ship
 
-### Manual Installation
+**No single AI agent has the final say.** Each persona has expertise, standards, and veto power.
 
-```bash
-git clone https://github.com/joshuacarroll/buildcrew.git
-cd buildcrew
-./install.sh
-```
+---
 
 ## Quick Start
 
-### 1. Initialize in Your Project
+### Install (once, globally)
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/joshuaccarroll/buildcrew/main/install.sh | bash
+```
+
+### Use in any project
 
 ```bash
 cd your-project
-buildcrew init
+buildcrew init           # Link to BuildCrew
 ```
 
-This creates:
-- `.claude/skills/` - AI workflow skills
-- `.claude/commands/` - Slash commands (like `/build`)
-- `.claude/rules/` - Coding principles
-- `BACKLOG.md` - Task backlog template
-- `.claude/settings.json` - Permissions configuration
-
-### 2. Start a New Project (Builder Mode)
-
-In Claude Code, run:
+In Claude Code:
 ```
-/build
+/build                   # Start a new project with expert guidance
+/buildcrew product-manager   # Invoke a persona ad-hoc
 ```
 
-This launches an interactive session with expert personas:
-1. **Product Manager** asks about your vision, users, and goals
-2. **UX Designer** (optional) helps define visual style and user flows
-3. **Backlog Generator** creates `BACKLOG.md` from your plan
+Run the workflow:
+```bash
+buildcrew run            # Process your backlog autonomously
+```
 
-### 3. Execute the Workflow
+That's it. Install once, use everywhere.
+
+---
+
+## The Expert Personas
+
+### Product Manager
+*"Users tell you what they want. Your job is to understand what they need."*
+
+- Challenges scope and finds the real problem
+- Pushes back on over-complication
+- Creates phased implementation plans
+- **Invoked via**: `/build` or `/buildcrew product-manager`
+
+### UX Designer
+*"Good design is invisible. Users shouldn't have to think."*
+
+- Applies 7 core design principles
+- Creates comprehensive design specs
+- Champions accessibility from the start
+- **Invoked via**: `/build` (optional) or `/buildcrew ux-designer`
+
+### Principal Engineer
+*"The best code is the code you don't have to write."*
+
+- Reviews plans before implementation
+- Reviews code for quality and patterns
+- Blocks over-engineering and code smells
+- **Will reject**: Functions > 20 lines, files > 300 lines, deep nesting, magic numbers
+
+### Feature Engineer
+*"A feature in production is worth 10 features in planning."*
+
+- Ships user-focused features pragmatically
+- Follows existing codebase patterns
+- Balances velocity with quality
+- **Will avoid**: Scope creep, gold-plating, premature abstraction
+
+### QA Engineer
+*"A test that can't fail is worthless."*
+
+- Creates test plans with real coverage
+- Writes tests that fail meaningfully
+- Covers happy paths AND edge cases
+- **Will catch**: Untested business logic, false positives, missing boundaries
+
+### Security Engineer
+*"Security is not a feature. It's a foundation."*
+
+- Performs OWASP Top 10 audits
+- Detects hardcoded secrets
+- Validates input handling
+- **Will block**: Any critical/high vulnerabilities before commit
+
+---
+
+## The Workflow
+
+```
+┌──────────────────────────────────────────────────────────────────┐
+│                         BuildCrew Pipeline                        │
+├──────────────────────────────────────────────────────────────────┤
+│                                                                   │
+│   PLAN ──► PLAN REVIEW ──► BUILD ──► CODE REVIEW ──► TEST        │
+│              (Principal)      (Feature)   (Principal)    (QA)     │
+│                                                                   │
+│                           ┌─────────────┐                         │
+│   COMMIT ◄── SECURITY ◄──┤   VERIFY    │◄── REFACTOR (if needed) │
+│              (blocks!)    │  (blocking) │                         │
+│                           └─────────────┘                         │
+│                                                                   │
+└──────────────────────────────────────────────────────────────────┘
+```
+
+**Key features:**
+- **Quality gates** at every phase
+- **Automatic iteration** when reviews find issues
+- **Blocking security** - no commit until vulnerabilities are fixed
+- **Customizable** - modify phases or remove them entirely
+
+---
+
+## Customization
+
+### Custom Workflow
+
+Skip phases, add new ones, or change the flow:
 
 ```bash
-buildcrew run              # Process all tasks
-buildcrew run --single     # Process just one task
-buildcrew run --dry-run    # Preview without executing
+# Copy the example and edit
+cp .buildcrew/workflow.md.example .buildcrew/workflow.md
 ```
 
----
+```markdown
+# Minimal workflow - just build, test, commit
+## Phases
 
-## The Workflow Pipeline
+### Phase 1: BUILD
+agent: feature-engineer
 
-BuildCrew processes each task through a **9-phase pipeline** with quality gates:
+### Phase 2: TEST
+agent: qa-engineer
 
-```
-┌─────────┐   ┌─────────────┐   ┌─────────┐   ┌─────────────┐
-│ 1.PLAN  │──▶│2.PLAN REVIEW│──▶│ 3.BUILD │──▶│4.CODE REVIEW│
-└─────────┘   │ (Principal) │   │(Feature │   │ (Principal) │
-              └─────────────┘   │Engineer)│   └─────────────┘
-                                └─────────┘          │
-┌──────────┐   ┌──────────┐   ┌────────────┐   ┌─────────────┐
-│ 9.SIGNAL │◀──│ 8.COMMIT │◀──│ 7.VERIFY   │◀──│ 6.TEST      │
-└──────────┘   └──────────┘   │(BLOCKING)  │   │(QA Engineer)│
-                              │- Tests     │   └─────────────┘
-                              │- Code Rev  │         ▲
-                              │- Security  │   ┌─────────────┐
-                              └────────────┘   │ 5.REFACTOR  │
-                                               │ (if needed) │
-                                               └─────────────┘
+### Phase 3: COMMIT
+agent: none
 ```
 
-### The 9 Phases
+### Project Rules
 
-| Phase | Description | Persona |
-|-------|-------------|---------|
-| **1. PLAN** | Analyze task, explore codebase, create implementation plan | - |
-| **2. PLAN REVIEW** | Review plan for architecture, simplicity, testability | Principal Engineer |
-| **3. BUILD** | Implement changes with focus on user value | Feature Engineer |
-| **4. CODE REVIEW** | Review code for quality, SOLID principles, security | Principal Engineer |
-| **5. REFACTOR** | Fix issues found in code review (if needed) | - |
-| **6. TEST** | Create test plan, write tests, run test suite | QA Engineer |
-| **7. VERIFY** | **Blocking gate**: All tests, reviews, and security checks must pass | Security Engineer |
-| **8. COMMIT** | Create conventional commit (local only) | - |
-| **9. SIGNAL** | Write completion status for orchestrator | - |
+Add your team's standards:
 
----
+```bash
+# Copy the example and edit
+cp .buildcrew/rules/project-rules.md.example .buildcrew/rules/project-rules.md
+```
 
-## Expert Personas
+```markdown
+## Extend: Custom Rules
 
-### Product Manager (Builder Mode)
+### API Design
+- All endpoints return { data, error, meta }
+- Use plural nouns: /users, /products
+- Version all APIs: /v1/users
 
-A Senior PM with 12+ years experience who:
-- Asks probing questions to understand the real problem
-- **Pushes back** on over-complication
-- Values simple, elegant solutions
-- Creates phased implementation plans
-
-### UX Designer (Builder Mode)
-
-A Senior Designer with 10+ years experience who:
-- Follows **7 Design Principles**: Hierarchy, Progressive Disclosure, Consistency, Contrast, Accessibility, Proximity, Alignment
-- Favors easily-grokable UI over novelty
-- Thinks through user flows before placing elements
-- Creates comprehensive design specs
-
-### Feature Engineer (Workflow Mode)
-
-Builds features with 8+ years at high-velocity startups. Focuses on:
-- **Ship Value to Users** - Features in production matter most
-- **Pragmatic Quality** - Good enough today beats perfect never
-- **Respect the Architecture** - Works with the codebase, not against it
-- **User Delight** - Every interaction is an opportunity
-
-### Principal Engineer (Workflow Mode)
-
-Reviews plans and code with 15+ years of experience. Enforces:
-- **Simplicity** - Is this the simplest approach?
-- **Readability** - Will this be maintainable?
-- **Modularity** - Are concerns properly separated?
-- **Testability** - Can this be tested effectively?
-
-Will **NOT** tolerate:
-- Over-engineering for hypothetical futures
-- Poor separation of concerns
-- God classes, deep nesting, magic numbers
-- Untested business logic
-
-### Senior QA Engineer (Workflow Mode)
-
-Handles testing with 12+ years of experience. Ensures:
-- **Tests fail meaningfully** - Clear failure conditions
-- **Tests pass only when correct** - No false positives
-- **Comprehensive coverage** - Happy paths, errors, edge cases
-
-### Security Engineer (Workflow Mode)
-
-Performs security audits with 10+ years in application security. Checks:
-- **OWASP Top 10** - Injection, XSS, broken auth, etc.
-- **Secrets Detection** - API keys, passwords, tokens
-- **Input Validation** - All user inputs validated
-- **Dependency Audit** - No vulnerable packages
-
-Will **BLOCK** deployment if:
-- Critical or high vulnerabilities found
-- Hardcoded secrets detected
-- Missing input validation on user data
+### Database
+- No N+1 query patterns
+- Index all foreign keys
+```
 
 ---
 
@@ -191,183 +196,65 @@ Will **BLOCK** deployment if:
 
 ```bash
 buildcrew              # Show help
-buildcrew init         # Initialize in current project
+buildcrew init         # Link project to BuildCrew
 buildcrew run          # Run workflow on BACKLOG.md
-buildcrew plugins      # Show recommended plugins for your project
-buildcrew update       # Check for and install updates
-buildcrew version      # Show version
-buildcrew uninstall    # Remove buildcrew from system
-```
-
-### Run Options
-
-```bash
-buildcrew run              # Process all pending tasks
-buildcrew run --single     # Process one task and exit
-buildcrew run --dry-run    # Preview without executing
+buildcrew run --single # Process one task and stop
+buildcrew run --dry-run # Preview without executing
+buildcrew plugins      # Show recommended plugins
+buildcrew update       # Update BuildCrew
+buildcrew uninstall    # Remove BuildCrew
 ```
 
 ---
 
-## Backlog Format
+## Ad-hoc Persona Invocation
 
-Tasks use markdown checklist format:
+Use personas outside the workflow for specific tasks:
 
-```markdown
-## High Priority
-- [ ] Implement user authentication with JWT
-- [ ] Add dark mode toggle to settings page
-
-## Medium Priority
-- [ ] Refactor API error handling
 ```
-
-### Task States
-
-```markdown
-- [ ] Pending task
-- [x] Completed task
-- [!] Blocked task (reason)
+/buildcrew security-engineer    # Security audit on current code
+/buildcrew product-manager      # Discovery for a new feature
+/buildcrew principal-engineer   # Review a pull request
+/buildcrew qa-engineer          # Create a test plan
+/buildcrew ux-designer          # Design spec for a component
 ```
-
-Write clear, actionable descriptions:
-- **Good**: `Implement user login with email/password authentication`
-- **Bad**: `Add login` (too vague)
 
 ---
 
-## Project Structure
+## How It Works
 
-After `buildcrew init`, your project will have:
+### Global Installation
+BuildCrew installs once to `~/.buildcrew/` with all personas, rules, and workflows.
 
+### Project Linking
+Running `buildcrew init` creates a lightweight link:
 ```
 your-project/
 ├── .claude/
-│   ├── skills/                      # AI workflow skills
-│   │   ├── builder/                 # Greenfield project builder
-│   │   ├── product-manager/         # Product discovery
-│   │   ├── ux-designer/             # Design discovery
-│   │   ├── buildcrew/               # Main workflow orchestration
-│   │   ├── feature-engineer/        # Pragmatic feature building
-│   │   ├── principal-engineer/      # Plan & code review
-│   │   ├── qa-engineer/             # Testing
-│   │   └── security-engineer/       # Security audits
-│   ├── commands/
-│   │   └── build.md                 # /build slash command
-│   ├── rules/
-│   │   └── coding-principles.md     # Coding standards
-│   └── settings.json                # Permissions
-├── BACKLOG.md                       # Task backlog
-├── PROJECT_[name].md                # Project plan (from /build)
-└── DESIGN_[name].md                 # Design spec (from /build)
+│   ├── .buildcrew-link    # Points to ~/.buildcrew
+│   └── settings.json      # Permissions
+├── .buildcrew/            # Your customizations
+│   ├── rules/             # Project-specific rules
+│   └── workflow.md        # Custom workflow (optional)
+└── BACKLOG.md             # Your task list
 ```
 
----
-
-## Customization
-
-### Add Your Own Coding Rules
-
-Edit `.claude/rules/coding-principles.md` and add rules under "Custom Rules":
-
-```markdown
-## Custom Rules
-
-### API Design
-- All endpoints must return consistent error format
-- Use plural nouns for resource collections
-
-### Database
-- All queries must use parameterized statements
-- No N+1 query patterns
-```
-
-### Extend Permissions
-
-Edit `.claude/settings.json` to allow additional commands:
-
-```json
-{
-  "permissions": {
-    "allow": [
-      "Bash(npm run:*)",
-      "Bash(your-command:*)"
-    ]
-  }
-}
-```
-
----
-
-## Plugin Recommendations
-
-BuildCrew detects your project type and recommends useful plugins:
-
-```bash
-buildcrew plugins
-```
-
-**Recommended plugins include:**
-
-| Plugin | Type | When Recommended |
-|--------|------|------------------|
-| `frontend-design` | skill | Frontend frameworks detected |
-| `playwright-mcp` | mcp | Frontend/E2E testing |
-| `github-mcp` | mcp | Git repository detected |
-| `typescript-lsp` | lsp | TypeScript project |
-| `python-lsp` | lsp | Python project |
-
-Plugins are recommended:
-- During `buildcrew init`
-- On first `buildcrew run` (one-time tip)
-- Anytime via `buildcrew plugins`
-
----
-
-## The Verify Stage
-
-The **VERIFY** stage is a **blocking gate** that ensures all quality checks pass before commit:
-
-### What Gets Verified
-
-1. **Test Suite** - All tests must pass
-2. **Code Review** - Must be APPROVED by Principal Engineer
-3. **Security Audit** - No critical/high vulnerabilities
-4. **Architecture** - No breaking changes
-
-### Blocking Behavior
-
-If any check fails:
-- The task returns to the appropriate phase for fixes
-- Maximum 3 attempts before marking task as BLOCKED
-- All fixes must be verified before commit
-
-### Security Audit Details
-
-The Security Engineer checks for:
-- OWASP Top 10 vulnerabilities
-- Hardcoded secrets (API keys, passwords)
-- Input validation gaps
-- Dependency vulnerabilities (`npm audit`, etc.)
+### Rule Hierarchy
+Rules merge in order (later overrides earlier):
+1. `~/.buildcrew/rules/core-principles.md`
+2. `~/.buildcrew/rules/{persona}-rules.md`
+3. `.buildcrew/rules/project-rules.md`
+4. `.buildcrew/rules/{persona}-rules.md`
 
 ---
 
 ## Safety Features
 
-- **Allowlist permissions**: Only pre-approved commands run without prompts
-- **No auto-push**: Commits stay local until you push manually
-- **Blocked tasks**: Tasks that can't complete are marked, not retried forever
-- **Context isolation**: Each task runs in a fresh Claude session
-
----
-
-## Updating
-
-BuildCrew checks for updates automatically on each run. To update:
-
-```bash
-buildcrew update
-```
+- **Allowlist permissions** - Only pre-approved commands run without prompts
+- **No auto-push** - Commits stay local until you push
+- **Blocking gates** - Security issues must be fixed before commit
+- **Attempt limits** - Tasks that can't complete are marked blocked, not retried forever
+- **Context isolation** - Each task runs in a fresh Claude session
 
 ---
 
@@ -378,13 +265,38 @@ buildcrew update
 
 ---
 
-## Uninstalling
+## Installation Options
 
+### Quick Install (Recommended)
 ```bash
-buildcrew uninstall
+curl -fsSL https://raw.githubusercontent.com/joshuaccarroll/buildcrew/main/install.sh | bash
 ```
 
-This removes BuildCrew from your system. Project files (`.claude/`, `BACKLOG.md`, etc.) are NOT removed.
+### Homebrew
+```bash
+brew tap joshuaccarroll/tap
+brew install buildcrew
+```
+
+### Manual
+```bash
+git clone https://github.com/joshuaccarroll/buildcrew.git
+cd buildcrew && ./install.sh
+```
+
+---
+
+## Why BuildCrew?
+
+| Without BuildCrew | With BuildCrew |
+|-------------------|----------------|
+| AI writes code fast, you review later | Expert personas review in real-time |
+| Security issues slip through | Security blocks deployment |
+| Tests for coverage, not correctness | Tests that catch real bugs |
+| Over-engineered for hypothetical futures | Pragmatic code for today's needs |
+| Features that miss the point | Problems solved at the root |
+
+**BuildCrew is your AI development team with built-in code review, security audit, and quality gates.**
 
 ---
 
@@ -394,11 +306,8 @@ MIT
 
 ---
 
-## Contributing
+## Links
 
-Contributions are welcome! Please open an issue or submit a pull request.
-
-## Support
-
-- **Issues**: [GitHub Issues](https://github.com/joshuacarroll/buildcrew/issues)
-- **Documentation**: [GitHub Wiki](https://github.com/joshuacarroll/buildcrew/wiki)
+- **Repository**: [github.com/joshuaccarroll/buildcrew](https://github.com/joshuaccarroll/buildcrew)
+- **Issues**: [GitHub Issues](https://github.com/joshuaccarroll/buildcrew/issues)
+- **Claude Code**: [claude.ai/code](https://claude.ai/code)

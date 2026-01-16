@@ -1,7 +1,7 @@
 #!/bin/bash
 # ═══════════════════════════════════════════════════════════════════════════════
 # BuildCrew - Autonomous Claude Code Development Pipeline
-# https://github.com/joshuacarroll/buildcrew
+# https://github.com/joshuaccarroll/buildcrew
 # ═══════════════════════════════════════════════════════════════════════════════
 #
 # This script orchestrates an autonomous development workflow using Claude Code.

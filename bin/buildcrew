@@ -1,6 +1,6 @@
 #!/bin/bash
 # BuildCrew - Autonomous AI Development Workflow
-# https://github.com/joshuacarroll/buildcrew
+# https://github.com/joshuaccarroll/buildcrew
 
 set -e
 
@@ -64,7 +64,7 @@ print_help() {
     echo "    3. Run ${CYAN}buildcrew run${NC} to execute the backlog"
     echo ""
     echo -e "${BOLD}DOCUMENTATION:${NC}"
-    echo "    https://github.com/joshuacarroll/buildcrew"
+    echo "    https://github.com/joshuaccarroll/buildcrew"
     echo ""
 }
 
@@ -72,39 +72,114 @@ cmd_init() {
     echo -e "${BOLD}Initializing BuildCrew in current project...${NC}"
     echo ""
 
-    # Create .claude directory structure
-    mkdir -p .claude/skills .claude/commands .claude/rules
+    # Create .claude directory (minimal - uses global installation)
+    mkdir -p .claude
 
-    # Copy skills if not present
-    local skills_copied=0
-    for skill_dir in "$BUILDCREW_HOME/skills"/*; do
-        skill_name=$(basename "$skill_dir")
-        if [ ! -d ".claude/skills/$skill_name" ]; then
-            cp -r "$skill_dir" ".claude/skills/"
-            echo -e "  ${GREEN}✓${NC} Installed skill: $skill_name"
-            skills_copied=$((skills_copied + 1))
-        else
-            echo -e "  ${YELLOW}○${NC} Skill exists: $skill_name"
-        fi
-    done
-
-    # Copy commands if not present
-    for cmd_file in "$BUILDCREW_HOME/commands"/*; do
-        cmd_name=$(basename "$cmd_file")
-        if [ ! -f ".claude/commands/$cmd_name" ]; then
-            cp "$cmd_file" ".claude/commands/"
-            echo -e "  ${GREEN}✓${NC} Installed command: $cmd_name"
-        else
-            echo -e "  ${YELLOW}○${NC} Command exists: $cmd_name"
-        fi
-    done
-
-    # Copy default rules if not present
-    if [ ! -f ".claude/rules/coding-principles.md" ]; then
-        cp "$BUILDCREW_HOME/rules/coding-principles.md" ".claude/rules/"
-        echo -e "  ${GREEN}✓${NC} Installed coding principles"
+    # Create .buildcrew-link marker pointing to global installation
+    if [ ! -f ".claude/.buildcrew-link" ]; then
+        echo "BUILDCREW_HOME=$BUILDCREW_HOME" > .claude/.buildcrew-link
+        echo -e "  ${GREEN}✓${NC} Linked to BuildCrew at $BUILDCREW_HOME"
     else
-        echo -e "  ${YELLOW}○${NC} Coding principles exist"
+        echo -e "  ${YELLOW}○${NC} BuildCrew link exists"
+    fi
+
+    # Create .buildcrew directory for project-specific overrides
+    mkdir -p .buildcrew/rules
+
+    # Create workflow.md.example if not present
+    if [ ! -f ".buildcrew/workflow.md.example" ]; then
+        cat > .buildcrew/workflow.md.example << 'EOF'
+# Custom Workflow (Example)
+
+Copy this file to workflow.md to customize your project's workflow.
+Delete phases you don't need, or add new ones.
+
+---
+
+## Phases
+
+### Phase 1: PLAN
+agent: none
+description: Create implementation plan
+
+### Phase 2: BUILD
+agent: feature-engineer
+description: Implement the feature
+
+### Phase 3: TEST
+agent: qa-engineer
+description: Write and run tests
+
+### Phase 4: COMMIT
+agent: none
+description: Create git commit
+
+---
+
+## Available Agents
+
+- principal-engineer: Architecture & code review
+- feature-engineer: Pragmatic implementation
+- security-engineer: Security audits
+- qa-engineer: Testing
+- product-manager: Product discovery
+- ux-designer: Design specs
+
+---
+
+## Customization Tips
+
+1. Remove PLAN_REVIEW and CODE_REVIEW for faster iteration
+2. Add a DEPLOY phase after COMMIT for CI/CD
+3. Change agents to match your team's needs
+4. Add gate conditions to enforce quality
+
+See ~/.buildcrew/workflows/default-workflow.md for the full default workflow.
+EOF
+        echo -e "  ${GREEN}✓${NC} Created .buildcrew/workflow.md.example"
+    else
+        echo -e "  ${YELLOW}○${NC} Workflow example exists"
+    fi
+
+    # Create project-rules.md.example if not present
+    if [ ! -f ".buildcrew/rules/project-rules.md.example" ]; then
+        cat > .buildcrew/rules/project-rules.md.example << 'EOF'
+# Project-Specific Rules (Example)
+
+Copy this file to project-rules.md to add custom rules for your project.
+These rules extend the core BuildCrew principles.
+
+---
+
+## Override: Functions
+<!-- Use ## Override: to replace a default rule -->
+- Keep functions under 30 lines (default is 20)
+
+## Extend: Custom Rules
+<!-- Use ## Extend: to add to existing rules -->
+
+### API Design
+- All endpoints must return { data, error, meta }
+- Use plural nouns for resource collections
+- Version all public APIs: /v1/users
+
+### Database
+- All queries must use parameterized statements
+- No N+1 query patterns
+- Index foreign keys
+
+### Frontend
+- Components must be under 200 lines
+- State management through designated store only
+- All interactive elements must be keyboard accessible
+
+## Disable: YAGNI
+<!-- Use ## Disable: to remove a rule section entirely -->
+<!-- Uncomment to disable YAGNI enforcement -->
+EOF
+        echo -e "  ${GREEN}✓${NC} Created .buildcrew/rules/project-rules.md.example"
+    else
+        echo -e "  ${YELLOW}○${NC} Rules example exists"
     fi
 
     # Create BACKLOG.md template if not present
@@ -181,14 +256,24 @@ EOF
     echo ""
     echo -e "${GREEN}${BOLD}BuildCrew initialized!${NC}"
     echo ""
+    echo -e "${BOLD}What was created:${NC}"
+    echo -e "  • ${CYAN}.claude/.buildcrew-link${NC} - Links to global BuildCrew installation"
+    echo -e "  • ${CYAN}.claude/settings.json${NC} - Permissions for Claude Code"
+    echo -e "  • ${CYAN}.buildcrew/${NC} - Directory for project-specific customization"
+    echo -e "  • ${CYAN}BACKLOG.md${NC} - Your task backlog"
+    echo ""
+    echo -e "${BOLD}Optional customization:${NC}"
+    echo -e "  • Copy ${CYAN}.buildcrew/workflow.md.example${NC} to ${CYAN}workflow.md${NC} to customize phases"
+    echo -e "  • Copy ${CYAN}.buildcrew/rules/project-rules.md.example${NC} to add project rules"
+    echo ""
     echo -e "${BOLD}Next steps:${NC}"
-    echo -e "  1. Start Claude Code and run ${CYAN}/build${NC} to create a project plan"
+    echo -e "  1. Run ${CYAN}/build${NC} in Claude Code to create a project plan"
     echo -e "  2. Or add tasks to ${CYAN}BACKLOG.md${NC} manually"
     echo -e "  3. Run ${CYAN}buildcrew run${NC} to process your backlog"
+    echo -e "  4. Use ${CYAN}/buildcrew <persona>${NC} to invoke a persona ad-hoc"
     echo ""
 
     # Show plugin recommendations
-    echo ""
     check_plugins
 }
 
@@ -254,7 +339,7 @@ cmd_update() {
         local tmp_dir=$(mktemp -d)
         local archive="$tmp_dir/buildcrew.tar.gz"
 
-        curl -fsSL "https://github.com/joshuacarroll/buildcrew/archive/refs/tags/v$latest.tar.gz" -o "$archive"
+        curl -fsSL "https://github.com/joshuaccarroll/buildcrew/archive/refs/tags/v$latest.tar.gz" -o "$archive"
 
         echo "Installing..."
         tar -xzf "$archive" -C "$tmp_dir"
@@ -274,7 +359,7 @@ cmd_update() {
 cmd_version() {
     local version=$(get_version)
     echo -e "${BOLD}BuildCrew${NC} v$version"
-    echo "https://github.com/joshuacarroll/buildcrew"
+    echo "https://github.com/joshuaccarroll/buildcrew"
 }
 
 cmd_uninstall() {
@@ -299,7 +384,7 @@ cmd_uninstall() {
         echo -e "${GREEN}✓${NC} BuildCrew has been uninstalled."
         echo ""
         echo "To reinstall, run:"
-        echo "  curl -fsSL https://raw.githubusercontent.com/joshuacarroll/buildcrew/main/install.sh | bash"
+        echo "  curl -fsSL https://raw.githubusercontent.com/joshuaccarroll/buildcrew/main/install.sh | bash"
     else
         echo "Uninstall cancelled."
     fi

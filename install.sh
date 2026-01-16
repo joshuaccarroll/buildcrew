@@ -1,14 +1,14 @@
 #!/bin/bash
 # ═══════════════════════════════════════════════════════════════════════════════
 # BuildCrew Installer
-# https://github.com/joshuacarroll/buildcrew
+# https://github.com/joshuaccarroll/buildcrew
 # ═══════════════════════════════════════════════════════════════════════════════
 #
 # Usage:
-#   curl -fsSL https://raw.githubusercontent.com/joshuacarroll/buildcrew/main/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/joshuaccarroll/buildcrew/main/install.sh | bash
 #
 # Or manually:
-#   git clone https://github.com/joshuacarroll/buildcrew.git
+#   git clone https://github.com/joshuaccarroll/buildcrew.git
 #   cd buildcrew && ./install.sh
 #
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -25,7 +25,7 @@ BOLD='\033[1m'
 NC='\033[0m'
 
 # Configuration
-REPO="joshuacarroll/buildcrew"
+REPO="joshuaccarroll/buildcrew"
 INSTALL_DIR="$HOME/.buildcrew"
 BIN_DIR="$HOME/.local/bin"
 
@@ -285,7 +285,7 @@ main() {
     echo -e "  3. Use ${CYAN}/build${NC} in Claude Code to create a project plan"
     echo -e "  4. Run ${CYAN}buildcrew run${NC} to execute the workflow"
     echo ""
-    echo -e "${BOLD}Documentation:${NC} https://github.com/joshuacarroll/buildcrew"
+    echo -e "${BOLD}Documentation:${NC} https://github.com/joshuaccarroll/buildcrew"
     echo ""
 }
 

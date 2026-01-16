@@ -1,6 +1,6 @@
 #!/bin/bash
 # BuildCrew Plugin Recommendation System
-# https://github.com/joshuacarroll/buildcrew
+# https://github.com/joshuaccarroll/buildcrew
 
 # Colors
 RED='\033[0;31m'

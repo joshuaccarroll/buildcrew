@@ -1,7 +1,7 @@
 #!/bin/bash
 # ═══════════════════════════════════════════════════════════════════════════════
 # BuildCrew Uninstaller
-# https://github.com/joshuacarroll/buildcrew
+# https://github.com/joshuaccarroll/buildcrew
 # ═══════════════════════════════════════════════════════════════════════════════
 #
 # This script removes BuildCrew from your system.
@@ -72,5 +72,5 @@ echo ""
 echo -e "${GREEN}${BOLD}BuildCrew has been uninstalled.${NC}"
 echo ""
 echo "To reinstall, run:"
-echo -e "  ${CYAN}curl -fsSL https://raw.githubusercontent.com/joshuacarroll/buildcrew/main/install.sh | bash${NC}"
+echo -e "  ${CYAN}curl -fsSL https://raw.githubusercontent.com/joshuaccarroll/buildcrew/main/install.sh | bash${NC}"
 echo ""

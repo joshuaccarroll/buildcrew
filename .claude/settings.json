@@ -43,15 +43,11 @@
       "Grep"
     ],
     "deny": [
-      "Bash(rm -rf:*)",
-      "Bash(rm -r:*)",
-      "Bash(git push:*)",
+      "Bash(rm -rf /:*)",
+      "Bash(rm -rf ~:*)",
+      "Bash(git push --force:*)",
       "Bash(git reset --hard:*)",
-      "Bash(git clean -fd:*)",
-      "Bash(curl:*)",
-      "Bash(wget:*)",
-      "Bash(ssh:*)",
-      "Bash(scp:*)"
+      "Bash(git clean -fd:*)"
     ]
   }
 }
