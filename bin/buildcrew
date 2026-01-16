@@ -1,0 +1,318 @@
+#!/bin/bash
+# BuildCrew - Autonomous AI Development Workflow
+# https://github.com/joshuacarroll/buildcrew
+
+set -e
+
+# Determine script location (follow symlinks)
+SOURCE="${BASH_SOURCE[0]}"
+while [ -L "$SOURCE" ]; do
+    DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
+    SOURCE="$(readlink "$SOURCE")"
+    [[ $SOURCE != /* ]] && SOURCE="$DIR/$SOURCE"
+done
+SCRIPT_DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
+BUILDCREW_HOME="$(dirname "$SCRIPT_DIR")"
+
+# Source library files
+source "$BUILDCREW_HOME/lib/version.sh"
+source "$BUILDCREW_HOME/lib/update.sh"
+
+# Colors
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[0;33m'
+BLUE='\033[0;34m'
+CYAN='\033[0;36m'
+NC='\033[0m' # No Color
+BOLD='\033[1m'
+
+print_logo() {
+    echo -e "${CYAN}"
+    echo "  ____        _ _     _  ____                    "
+    echo " | __ ) _   _(_) | __| |/ ___|_ __ _____      __ "
+    echo " |  _ \\| | | | | |/ _\` | |   | '__/ _ \\ \\ /\\ / / "
+    echo " | |_) | |_| | | | (_| | |___| | |  __/\\ V  V /  "
+    echo " |____/ \\__,_|_|_|\\__,_|\\____|_|  \\___| \\_/\\_/   "
+    echo -e "${NC}"
+}
+
+print_help() {
+    print_logo
+    echo -e "${BOLD}BuildCrew${NC} - Autonomous AI Development Workflow"
+    echo ""
+    echo -e "${BOLD}USAGE:${NC}"
+    echo "    buildcrew <command> [options]"
+    echo ""
+    echo -e "${BOLD}COMMANDS:${NC}"
+    echo "    init        Initialize BuildCrew in current project"
+    echo "    run         Execute workflow on BACKLOG.md"
+    echo "    update      Check for and install updates"
+    echo "    version     Show version information"
+    echo "    uninstall   Remove BuildCrew from system"
+    echo "    help        Show this help message"
+    echo ""
+    echo -e "${BOLD}OPTIONS:${NC}"
+    echo "    --single    Process only one task (with 'run')"
+    echo "    --dry-run   Preview without executing (with 'run')"
+    echo ""
+    echo -e "${BOLD}GETTING STARTED:${NC}"
+    echo "    1. Run ${CYAN}buildcrew init${NC} in your project"
+    echo "    2. Use ${CYAN}/build${NC} in Claude Code to create a project plan"
+    echo "    3. Run ${CYAN}buildcrew run${NC} to execute the backlog"
+    echo ""
+    echo -e "${BOLD}DOCUMENTATION:${NC}"
+    echo "    https://github.com/joshuacarroll/buildcrew"
+    echo ""
+}
+
+cmd_init() {
+    echo -e "${BOLD}Initializing BuildCrew in current project...${NC}"
+    echo ""
+
+    # Create .claude directory structure
+    mkdir -p .claude/skills .claude/commands .claude/rules
+
+    # Copy skills if not present
+    local skills_copied=0
+    for skill_dir in "$BUILDCREW_HOME/skills"/*; do
+        skill_name=$(basename "$skill_dir")
+        if [ ! -d ".claude/skills/$skill_name" ]; then
+            cp -r "$skill_dir" ".claude/skills/"
+            echo -e "  ${GREEN}✓${NC} Installed skill: $skill_name"
+            skills_copied=$((skills_copied + 1))
+        else
+            echo -e "  ${YELLOW}○${NC} Skill exists: $skill_name"
+        fi
+    done
+
+    # Copy commands if not present
+    for cmd_file in "$BUILDCREW_HOME/commands"/*; do
+        cmd_name=$(basename "$cmd_file")
+        if [ ! -f ".claude/commands/$cmd_name" ]; then
+            cp "$cmd_file" ".claude/commands/"
+            echo -e "  ${GREEN}✓${NC} Installed command: $cmd_name"
+        else
+            echo -e "  ${YELLOW}○${NC} Command exists: $cmd_name"
+        fi
+    done
+
+    # Copy default rules if not present
+    if [ ! -f ".claude/rules/coding-principles.md" ]; then
+        cp "$BUILDCREW_HOME/rules/coding-principles.md" ".claude/rules/"
+        echo -e "  ${GREEN}✓${NC} Installed coding principles"
+    else
+        echo -e "  ${YELLOW}○${NC} Coding principles exist"
+    fi
+
+    # Create BACKLOG.md template if not present
+    if [ ! -f "BACKLOG.md" ]; then
+        cat > BACKLOG.md << 'EOF'
+# Backlog
+
+*Add your tasks here, then run `buildcrew run` to process them.*
+
+## High Priority
+
+- [ ] Your first task here
+
+## Medium Priority
+
+- [ ] Another task
+
+## Low Priority
+
+- [ ] Future task
+
+---
+*Use `/build` in Claude Code to generate a comprehensive backlog from your project plan.*
+EOF
+        echo -e "  ${GREEN}✓${NC} Created BACKLOG.md template"
+    else
+        echo -e "  ${YELLOW}○${NC} BACKLOG.md exists"
+    fi
+
+    # Create or update .claude/settings.json
+    if [ ! -f ".claude/settings.json" ]; then
+        cat > .claude/settings.json << 'EOF'
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm run:*)",
+      "Bash(npm test:*)",
+      "Bash(npm install:*)",
+      "Bash(npx:*)",
+      "Bash(git status:*)",
+      "Bash(git diff:*)",
+      "Bash(git log:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git branch:*)",
+      "Bash(git checkout:*)",
+      "Bash(ls:*)",
+      "Bash(mkdir:*)",
+      "Bash(cat:*)",
+      "Bash(head:*)",
+      "Bash(tail:*)",
+      "Read",
+      "Write",
+      "Edit",
+      "Glob",
+      "Grep",
+      "TodoWrite",
+      "WebFetch"
+    ],
+    "deny": [
+      "Bash(rm -rf:*)",
+      "Bash(git push:*)",
+      "Bash(git push --force:*)",
+      "Bash(sudo:*)"
+    ]
+  }
+}
+EOF
+        echo -e "  ${GREEN}✓${NC} Created .claude/settings.json"
+    else
+        echo -e "  ${YELLOW}○${NC} .claude/settings.json exists"
+    fi
+
+    echo ""
+    echo -e "${GREEN}${BOLD}BuildCrew initialized!${NC}"
+    echo ""
+    echo -e "${BOLD}Next steps:${NC}"
+    echo -e "  1. Start Claude Code and run ${CYAN}/build${NC} to create a project plan"
+    echo -e "  2. Or add tasks to ${CYAN}BACKLOG.md${NC} manually"
+    echo -e "  3. Run ${CYAN}buildcrew run${NC} to process your backlog"
+    echo ""
+}
+
+cmd_run() {
+    # Check for updates (non-blocking)
+    check_for_updates &
+
+    # Verify we're in a project with BuildCrew initialized
+    if [ ! -f "BACKLOG.md" ]; then
+        echo -e "${RED}Error:${NC} No BACKLOG.md found in current directory."
+        echo ""
+        echo "Either:"
+        echo "  1. Run ${CYAN}buildcrew init${NC} to initialize BuildCrew"
+        echo "  2. Create a BACKLOG.md file with tasks"
+        echo "  3. Use ${CYAN}/build${NC} in Claude Code to generate one"
+        exit 1
+    fi
+
+    # Pass through to workflow script
+    exec "$BUILDCREW_HOME/lib/workflow.sh" "$@"
+}
+
+cmd_update() {
+    echo -e "${BOLD}Checking for updates...${NC}"
+    echo ""
+
+    local current=$(get_version)
+    local latest=$(fetch_latest_version)
+
+    if [ -z "$latest" ]; then
+        echo -e "${RED}Error:${NC} Could not fetch latest version. Check your internet connection."
+        exit 1
+    fi
+
+    if [ "$current" = "$latest" ]; then
+        echo -e "${GREEN}✓${NC} BuildCrew is up to date (v$current)"
+        exit 0
+    fi
+
+    echo -e "Update available: ${YELLOW}v$current${NC} → ${GREEN}v$latest${NC}"
+    echo ""
+
+    read -p "Install update? [y/N] " -n 1 -r
+    echo ""
+
+    if [[ $REPLY =~ ^[Yy]$ ]]; then
+        echo ""
+        echo "Downloading v$latest..."
+
+        local tmp_dir=$(mktemp -d)
+        local archive="$tmp_dir/buildcrew.tar.gz"
+
+        curl -fsSL "https://github.com/joshuacarroll/buildcrew/archive/refs/tags/v$latest.tar.gz" -o "$archive"
+
+        echo "Installing..."
+        tar -xzf "$archive" -C "$tmp_dir"
+
+        # Run the installer from the new version
+        "$tmp_dir/buildcrew-$latest/install.sh" --upgrade
+
+        rm -rf "$tmp_dir"
+
+        echo ""
+        echo -e "${GREEN}✓${NC} Updated to v$latest"
+    else
+        echo "Update cancelled."
+    fi
+}
+
+cmd_version() {
+    local version=$(get_version)
+    echo -e "${BOLD}BuildCrew${NC} v$version"
+    echo "https://github.com/joshuacarroll/buildcrew"
+}
+
+cmd_uninstall() {
+    echo -e "${BOLD}Uninstalling BuildCrew...${NC}"
+    echo ""
+    echo "This will remove:"
+    echo "  - ~/.buildcrew/"
+    echo "  - ~/.local/bin/buildcrew symlink"
+    echo ""
+    echo -e "${YELLOW}Note:${NC} Project files (.claude/, BACKLOG.md, etc.) will NOT be removed."
+    echo ""
+
+    read -p "Continue? [y/N] " -n 1 -r
+    echo ""
+
+    if [[ $REPLY =~ ^[Yy]$ ]]; then
+        rm -rf "$HOME/.buildcrew"
+        rm -f "$HOME/.local/bin/buildcrew"
+        rm -f "/usr/local/bin/buildcrew" 2>/dev/null || true
+
+        echo ""
+        echo -e "${GREEN}✓${NC} BuildCrew has been uninstalled."
+        echo ""
+        echo "To reinstall, run:"
+        echo "  curl -fsSL https://raw.githubusercontent.com/joshuacarroll/buildcrew/main/install.sh | bash"
+    else
+        echo "Uninstall cancelled."
+    fi
+}
+
+# Main command dispatch
+case "${1:-}" in
+    init)
+        shift
+        cmd_init "$@"
+        ;;
+    run)
+        shift
+        cmd_run "$@"
+        ;;
+    update)
+        shift
+        cmd_update "$@"
+        ;;
+    version|--version|-v)
+        cmd_version
+        ;;
+    uninstall)
+        cmd_uninstall
+        ;;
+    help|--help|-h|"")
+        print_help
+        ;;
+    *)
+        echo -e "${RED}Error:${NC} Unknown command '$1'"
+        echo ""
+        echo "Run 'buildcrew help' for usage information."
+        exit 1
+        ;;
+esac

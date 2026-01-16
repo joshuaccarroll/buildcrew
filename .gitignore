@@ -1,4 +1,5 @@
-# Josh Workflow - Runtime files
+# BuildCrew - Runtime files
+# Update cache
 .claude/workflow-status.json
 .claude/current-plan.md
 .claude/plan-review.md
