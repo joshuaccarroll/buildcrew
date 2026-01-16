@@ -123,5 +123,5 @@ EOF
 
 @test "mark_plugins_checked: creates marker file" {
     mark_plugins_checked
-    [ -f ".claude/.plugins-checked" ]
+    [ -f ".buildcrew/.plugins-checked" ]
 }

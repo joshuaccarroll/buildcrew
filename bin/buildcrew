@@ -514,14 +514,9 @@ EOF
     echo -e "  • Copy ${CYAN}.buildcrew/rules/project-rules.md.example${NC} to add project rules"
     echo ""
     echo -e "${BOLD}Next steps:${NC}"
-    echo -e "  1. Run ${CYAN}/build${NC} in Claude Code to create a project plan"
-    echo -e "  2. Or add tasks to ${CYAN}BACKLOG.md${NC} manually"
-    echo -e "  3. Run ${CYAN}buildcrew run${NC} to process your backlog"
-    echo -e "  4. Use ${CYAN}/buildcrew <persona>${NC} to invoke a persona ad-hoc"
+    echo -e "  1. Run ${CYAN}buildcrew run${NC} to start"
+    echo -e "  2. Use ${CYAN}/buildcrew <persona>${NC} to invoke a persona ad-hoc"
     echo ""
-
-    # Show plugin recommendations
-    check_plugins
 }
 
 cmd_plugins() {
@@ -546,10 +541,9 @@ cmd_run() {
         exit 1
     fi
 
-    # Show plugin tip on first run
+    # Prompt for plugins on first run
     if ! plugins_already_checked; then
-        show_plugin_tip
-        mark_plugins_checked
+        prompt_plugin_installs
     fi
 
     # Pass through to workflow script
