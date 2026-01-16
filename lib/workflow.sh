@@ -44,37 +44,39 @@ BOLD='\033[1m'
 NC='\033[0m' # No Color
 
 # ─────────────────────────────────────────────────────────────────────────────────
-# Argument parsing
+# Argument parsing (only when executed directly)
 # ─────────────────────────────────────────────────────────────────────────────────
 
 DRY_RUN=false
 SINGLE_TASK=false
 
-while [[ $# -gt 0 ]]; do
-    case $1 in
-        --dry-run)
-            DRY_RUN=true
-            shift
-            ;;
-        --single)
-            SINGLE_TASK=true
-            shift
-            ;;
-        --help|-h)
-            echo "Usage: $0 [OPTIONS]"
-            echo ""
-            echo "Options:"
-            echo "  --dry-run    Show what would be done without executing"
-            echo "  --single     Process only one task then exit"
-            echo "  --help, -h   Show this help message"
-            exit 0
-            ;;
-        *)
-            echo "Unknown option: $1"
-            exit 1
-            ;;
-    esac
-done
+parse_args() {
+    while [[ $# -gt 0 ]]; do
+        case $1 in
+            --dry-run)
+                DRY_RUN=true
+                shift
+                ;;
+            --single)
+                SINGLE_TASK=true
+                shift
+                ;;
+            --help|-h)
+                echo "Usage: $0 [OPTIONS]"
+                echo ""
+                echo "Options:"
+                echo "  --dry-run    Show what would be done without executing"
+                echo "  --single     Process only one task then exit"
+                echo "  --help, -h   Show this help message"
+                exit 0
+                ;;
+            *)
+                echo "Unknown option: $1"
+                exit 1
+                ;;
+        esac
+    done
+}
 
 # ─────────────────────────────────────────────────────────────────────────────────
 # Helper functions
@@ -118,8 +120,8 @@ is_fresh_backlog() {
 
     # No pending tasks at all
     local pending_tasks
-    pending_tasks=$(grep -c '^\- \[ \]' "$BACKLOG_FILE" 2>/dev/null || echo "0")
-    [[ "$pending_tasks" -eq 0 ]] && return 0
+    pending_tasks=$(grep -c '^\- \[ \]' "$BACKLOG_FILE" 2>/dev/null)
+    [[ -z "$pending_tasks" || "$pending_tasks" -eq 0 ]] && return 0
 
     return 1
 }
@@ -156,9 +158,9 @@ mark_task_complete() {
     escaped_task=$(echo "$task" | sed 's/[\/&]/\\&/g; s/\[/\\[/g; s/\]/\\]/g')
 
     if [[ "$(uname)" == "Darwin" ]]; then
-        sed -i '' "s/- \[ \] ${escaped_task}/- [x] ${escaped_task}/" "$BACKLOG_FILE"
+        sed -i '' "s/^- \[ \] ${escaped_task}$/- [x] ${escaped_task}/" "$BACKLOG_FILE"
     else
-        sed -i "s/- \[ \] ${escaped_task}/- [x] ${escaped_task}/" "$BACKLOG_FILE"
+        sed -i "s/^- \[ \] ${escaped_task}$/- [x] ${escaped_task}/" "$BACKLOG_FILE"
     fi
 }
 
@@ -179,17 +181,19 @@ mark_task_blocked() {
 # Count tasks by status
 count_tasks() {
     local status="$1"
+    local count
     case "$status" in
         "pending")
-            grep -c '^\- \[ \]' "$BACKLOG_FILE" 2>/dev/null || echo "0"
+            count=$(grep -c '^\- \[ \]' "$BACKLOG_FILE" 2>/dev/null)
             ;;
         "completed")
-            grep -c '^\- \[x\]' "$BACKLOG_FILE" 2>/dev/null || echo "0"
+            count=$(grep -c '^\- \[x\]' "$BACKLOG_FILE" 2>/dev/null)
             ;;
         "blocked")
-            grep -c '^\- \[!\]' "$BACKLOG_FILE" 2>/dev/null || echo "0"
+            count=$(grep -c '^\- \[!\]' "$BACKLOG_FILE" 2>/dev/null)
             ;;
     esac
+    echo "${count:-0}"
 }
 
 # ─────────────────────────────────────────────────────────────────────────────────
@@ -305,7 +309,10 @@ main() {
 }
 
 # ─────────────────────────────────────────────────────────────────────────────────
-# Run
+# Run (only when executed directly, not sourced)
 # ─────────────────────────────────────────────────────────────────────────────────
 
-main "$@"
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+    parse_args "$@"
+    main "$@"
+fi
