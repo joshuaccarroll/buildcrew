@@ -225,6 +225,8 @@ buildcrew uninstall    # Remove BuildCrew
 
 ## Permissions & Safety
 
+> **⚠️ Review before use:** These permissions enable autonomous operation. Review `.claude/settings.json` after `buildcrew init` and customize for your security requirements. See [Customize Permissions](#customize-permissions) below.
+
 BuildCrew configures Claude Code with comprehensive permissions for **autonomous operation** while blocking genuinely dangerous commands.
 
 ### What's Allowed (No Prompts)
