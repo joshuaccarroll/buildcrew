@@ -108,6 +108,22 @@ print_info() {
     echo -e "${CYAN}ℹ $1${NC}"
 }
 
+# Check if backlog is fresh/unconfigured (template or missing)
+is_fresh_backlog() {
+    # No backlog file
+    [[ ! -f "$BACKLOG_FILE" ]] && return 0
+
+    # Contains template placeholder tasks
+    grep -q "Your first task here" "$BACKLOG_FILE" && return 0
+
+    # No pending tasks at all
+    local pending_tasks
+    pending_tasks=$(grep -c '^\- \[ \]' "$BACKLOG_FILE" 2>/dev/null || echo "0")
+    [[ "$pending_tasks" -eq 0 ]] && return 0
+
+    return 1
+}
+
 # Check prerequisites
 check_prerequisites() {
     if ! command -v claude &> /dev/null; then
@@ -120,11 +136,11 @@ check_prerequisites() {
         exit 1
     fi
 
-    if [[ ! -f "$BACKLOG_FILE" ]]; then
-        print_error "Backlog file not found: $BACKLOG_FILE"
-        echo "Create a BACKLOG.md file with tasks in this format:"
-        echo "  - [ ] Task description here"
-        exit 1
+    # Smart backlog detection - launch build mode if fresh
+    if is_fresh_backlog; then
+        print_info "No configured backlog found. Launching build mode..."
+        echo ""
+        exec claude -p "Run the /build command to help the user define their project and create a backlog"
     fi
 }
 

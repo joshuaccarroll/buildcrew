@@ -58,21 +58,13 @@ cd your-project
 buildcrew init
 ```
 
-### 3. Define your project (in Claude Code)
-
-```
-/build
-```
-
-This launches the Product Manager to help you scope your project and create a backlog.
-
-### 4. Execute the backlog
+### 3. Run
 
 ```bash
 buildcrew run
 ```
 
-BuildCrew processes each task through the full persona pipeline: plan → review → build → test → security → commit.
+That's it. If you don't have a backlog yet, BuildCrew launches the Product Manager to help you define your project. Once you have tasks, it processes each one through the full persona pipeline.
 
 **Ad-hoc usage:** Invoke any persona directly with `/buildcrew <persona-name>` (e.g., `/buildcrew security-engineer` for a security audit).
 
