@@ -17,6 +17,7 @@ BUILDCREW_HOME="$(dirname "$SCRIPT_DIR")"
 # Source library files
 source "$BUILDCREW_HOME/lib/version.sh"
 source "$BUILDCREW_HOME/lib/update.sh"
+source "$BUILDCREW_HOME/lib/plugins.sh"
 
 # Colors
 RED='\033[0;31m'
@@ -47,6 +48,7 @@ print_help() {
     echo -e "${BOLD}COMMANDS:${NC}"
     echo "    init        Initialize BuildCrew in current project"
     echo "    run         Execute workflow on BACKLOG.md"
+    echo "    plugins     Show recommended plugins for your project"
     echo "    update      Check for and install updates"
     echo "    version     Show version information"
     echo "    uninstall   Remove BuildCrew from system"
@@ -184,6 +186,17 @@ EOF
     echo -e "  2. Or add tasks to ${CYAN}BACKLOG.md${NC} manually"
     echo -e "  3. Run ${CYAN}buildcrew run${NC} to process your backlog"
     echo ""
+
+    # Show plugin recommendations
+    echo ""
+    check_plugins
+}
+
+cmd_plugins() {
+    print_logo
+    echo -e "${BOLD}Plugin Recommendations${NC}"
+    echo ""
+    check_plugins
 }
 
 cmd_run() {
@@ -199,6 +212,12 @@ cmd_run() {
         echo "  2. Create a BACKLOG.md file with tasks"
         echo "  3. Use ${CYAN}/build${NC} in Claude Code to generate one"
         exit 1
+    fi
+
+    # Show plugin tip on first run
+    if ! plugins_already_checked; then
+        show_plugin_tip
+        mark_plugins_checked
     fi
 
     # Pass through to workflow script
@@ -295,6 +314,10 @@ case "${1:-}" in
     run)
         shift
         cmd_run "$@"
+        ;;
+    plugins)
+        shift
+        cmd_plugins "$@"
         ;;
     update)
         shift

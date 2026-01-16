@@ -6,6 +6,9 @@
 .claude/code-review.md
 .claude/current-test-plan.md
 .claude/test-report.md
+.claude/security-audit.md
+.claude/verify-report.md
+.claude/.plugins-checked
 .claude/settings.local.json
 
 # OS files

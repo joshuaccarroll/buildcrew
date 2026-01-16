@@ -1,6 +1,6 @@
 # Coding Principles
 
-These principles guide both plan review and code review in the Josh Workflow. The Principal Engineer persona enforces these standards rigorously.
+These principles guide both plan review and code review in BuildCrew. The Principal Engineer persona enforces these standards rigorously.
 
 > "The best code is the code you don't have to write." - Principal Engineer
 

@@ -1,6 +1,6 @@
 # Build a New Project
 
-Start the Josh Workflow Builder to create a new project from scratch.
+Start the BuildCrew Builder to create a new project from scratch.
 
 This command guides you through:
 

@@ -1,10 +1,10 @@
 ---
-name: josh-workflow
-description: Execute a complete development workflow for a backlog task. Use this when asked to execute the josh-workflow or process a backlog item through plan, plan review, build, code review, test, and commit phases.
+name: buildcrew
+description: Execute a complete development workflow for a backlog task. Use this when asked to execute the buildcrew workflow or process a backlog item through plan, plan review, build, code review, test, verify, and commit phases.
 allowed-tools: Read, Write, Edit, Glob, Grep, Bash, Task, Skill
 ---
 
-# Josh Workflow - Autonomous Development Cycle
+# BuildCrew - Autonomous Development Cycle
 
 You are executing an autonomous development workflow. Follow each phase in order, completing all steps before moving to the next phase. This workflow is designed to run without human intervention.
 
@@ -13,18 +13,18 @@ You are executing an autonomous development workflow. Follow each phase in order
 ```
 ┌─────────┐   ┌─────────────┐   ┌─────────┐   ┌─────────────┐
 │ 1.PLAN  │──▶│2.PLAN REVIEW│──▶│ 3.BUILD │──▶│4.CODE REVIEW│
-└─────────┘   │ (Principal) │   └─────────┘   │ (Principal) │
-              └─────────────┘                 └─────────────┘
-                                                    │
-┌──────────┐   ┌──────────┐   ┌───────────────┐     │
-│ 8.SIGNAL │◀──│ 7.COMMIT │◀──│ 6.TEST        │◀────┘
-└──────────┘   └──────────┘   │ (QA Engineer) │
-                              └───────────────┘
-                                    │
-                              ┌─────────────┐
-                              │ 5.REFACTOR  │
-                              │ (if needed) │
-                              └─────────────┘
+└─────────┘   │ (Principal) │   │(Feature │   │ (Principal) │
+              └─────────────┘   │Engineer)│   └─────────────┘
+                                └─────────┘          │
+┌──────────┐   ┌──────────┐   ┌────────────┐   ┌─────────────┐
+│ 9.SIGNAL │◀──│ 8.COMMIT │◀──│ 7.VERIFY   │◀──│ 6.TEST      │
+└──────────┘   └──────────┘   │(BLOCKING)  │   │(QA Engineer)│
+                              │- Tests     │   └─────────────┘
+                              │- Code Rev  │         ▲
+                              │- Security  │   ┌─────────────┐
+                              └────────────┘   │ 5.REFACTOR  │
+                                               │ (if needed) │
+                                               └─────────────┘
 ```
 
 ## Current Task
@@ -162,18 +162,28 @@ Write your review to `.claude/plan-review.md`:
 
 ---
 
-## Phase 3: BUILD
+## Phase 3: BUILD (Feature Engineer)
 
 **Goal**: Implement the changes according to the approved plan.
+
+### Assume the Feature Engineer Persona
+
+Read and internalize `.claude/skills/feature-engineer/SKILL.md`. You are now a **Feature Engineer** focused on:
+
+- **Ship Value to Users** - Features in production matter most
+- **Pragmatic Quality** - Good enough today beats perfect never
+- **Respect the Architecture** - Work with the codebase, not against it
+- **User Delight** - Every interaction is an opportunity
 
 ### Steps:
 
 1. **Follow your plan**: Execute each step in `.claude/current-plan.md`
 2. **Use appropriate skills**:
-   - For UI/frontend work, invoke the `frontend-design` skill
+   - For UI/frontend work, invoke the `frontend-design` skill if available
    - For backend/API work, follow existing patterns in the codebase
 3. **Write code incrementally**: Make small, focused changes
 4. **Keep changes atomic**: Each edit should be self-contained
+5. **Think like a user**: Test your work from the user's perspective
 
 ### Guidelines:
 - Follow existing code patterns and conventions in the project
@@ -182,6 +192,8 @@ Write your review to `.claude/plan-review.md`:
 - Add comments only where logic isn't self-evident
 - Don't over-engineer - implement only what's in the approved plan
 - No premature abstractions - wait until you have 3+ use cases
+- Write helpful error messages that guide users
+- Consider loading states and edge cases users will hit
 
 ---
 
@@ -412,7 +424,122 @@ Write results to `.claude/test-report.md`:
 
 ---
 
-## Phase 7: COMMIT
+## Phase 7: VERIFY (Blocking Gate)
+
+**Goal**: Comprehensive verification that all quality gates pass before committing.
+
+> **THIS PHASE IS BLOCKING** - The task cannot proceed to commit until ALL checks pass.
+
+### Verify Checklist
+
+All items must be checked and pass:
+
+#### 1. Test Suite Verification
+- [ ] All tests pass (zero failures)
+- [ ] Coverage meets project threshold (if configured)
+- [ ] No skipped tests without justification
+
+**If tests fail**: Return to Phase 3 BUILD, fix the issue, then re-run through Phase 6 TEST.
+
+#### 2. Code Review Verification
+- [ ] Code review completed (Phase 4)
+- [ ] Verdict was APPROVED
+- [ ] All critical issues were addressed
+- [ ] All major concerns were addressed
+
+**If not approved**: Return to Phase 5 REFACTOR, address concerns, re-review.
+
+#### 3. Security Audit (Security Engineer)
+
+Invoke the Security Engineer persona for a comprehensive security audit:
+
+1. Read and internalize `.claude/skills/security-engineer/SKILL.md`
+2. Perform the full security audit checklist
+3. Write findings to `.claude/security-audit.md`
+
+**Security checks include:**
+- OWASP Top 10 vulnerability scan
+- Secrets detection (API keys, passwords, tokens)
+- Input validation review
+- Output encoding verification
+- Dependency vulnerability audit
+
+**Blocking criteria:**
+- [ ] No CRITICAL vulnerabilities
+- [ ] No HIGH vulnerabilities (unless explicitly accepted with justification)
+- [ ] No hardcoded secrets
+- [ ] Dependencies audit clean (no critical CVEs)
+
+**If security issues found**: Fix all critical/high issues, re-audit before proceeding.
+
+#### 4. Architecture Validation
+- [ ] Changes align with existing architecture
+- [ ] No circular dependencies introduced
+- [ ] No breaking changes to public APIs (unless intended)
+- [ ] Documentation updated if public interfaces changed
+
+### Verify Report
+
+Write verification status to `.claude/verify-report.md`:
+
+```markdown
+## Verification Report
+
+### Date: [timestamp]
+### Task: [task description]
+
+### Test Suite
+- **Status**: [PASS | FAIL]
+- **Tests Run**: X
+- **Tests Passed**: X
+- **Tests Failed**: X
+- **Coverage**: X%
+
+### Code Review
+- **Status**: [APPROVED | NEEDS_WORK]
+- **Reviewer**: Principal Engineer
+- **Critical Issues**: X (fixed: Y)
+- **Major Concerns**: X (fixed: Y)
+
+### Security Audit
+- **Status**: [PASS | FAIL]
+- **Critical Vulnerabilities**: X
+- **High Vulnerabilities**: X
+- **Secrets Found**: [YES | NO]
+- **Dependency Issues**: X
+
+### Architecture
+- **Status**: [VALID | INVALID]
+- **Notes**: [Any architectural concerns]
+
+---
+
+### FINAL VERDICT: [VERIFIED | BLOCKED]
+
+**If BLOCKED**: [Reason and required actions]
+```
+
+### Verify Gate Logic
+
+```
+if tests_pass AND code_review_approved AND security_clean AND architecture_valid:
+    proceed_to_commit()
+else:
+    identify_failures()
+    return_to_appropriate_phase()
+    # Do NOT proceed to commit
+```
+
+### Maximum Iterations
+
+To prevent infinite loops:
+- Maximum 3 attempts through VERIFY phase
+- If still failing after 3 attempts, mark task as BLOCKED
+- Document what's failing in the status file
+
+---
+
+## Phase 8: COMMIT
 
 **Goal**: Create a meaningful commit with all changes.
 
@@ -443,7 +570,7 @@ Task: [original task description]
 
 ---
 
-## Phase 8: SIGNAL COMPLETION
+## Phase 9: SIGNAL COMPLETION
 
 **Goal**: Signal to the orchestrator that this task is complete.
 
@@ -462,7 +589,9 @@ Create `.claude/workflow-status.json`:
   "reviews_passed": {
     "plan_review": true,
     "code_review": true,
-    "tests": true
+    "tests": true,
+    "security_audit": true,
+    "verify": true
   }
 }
 ```
@@ -487,6 +616,8 @@ Remove temporary files:
 - `.claude/code-review.md`
 - `.claude/current-test-plan.md`
 - `.claude/test-report.md`
+- `.claude/security-audit.md`
+- `.claude/verify-report.md`
 
 ---
 

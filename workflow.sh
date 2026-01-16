@@ -1,6 +1,6 @@
 #!/bin/bash
 # ═══════════════════════════════════════════════════════════════════════════════
-# Josh Workflow - Autonomous Claude Code Development Pipeline
+# BuildCrew - Autonomous Claude Code Development Pipeline
 # ═══════════════════════════════════════════════════════════════════════════════
 #
 # This script orchestrates an autonomous development workflow using Claude Code.
@@ -182,7 +182,7 @@ count_tasks() {
 main() {
     check_prerequisites
 
-    print_header "Josh Workflow - Autonomous Development Pipeline"
+    print_header "BuildCrew - Autonomous Development Pipeline"
 
     local completed=0
     local failed=0
@@ -207,7 +207,7 @@ main() {
         print_task_start "$task"
 
         if [[ "$DRY_RUN" == "true" ]]; then
-            print_info "[DRY RUN] Would execute: claude -p \"Execute the josh-workflow skill for this task: $task\""
+            print_info "[DRY RUN] Would execute: claude -p \"Execute the buildcrew skill for this task: $task\""
             mark_task_complete "$task"
             ((completed++))
         else
@@ -217,7 +217,7 @@ main() {
             # Run Claude with the workflow skill
             print_info "Launching Claude Code..."
 
-            if claude -p "Execute the josh-workflow skill for this task: $task" \
+            if claude -p "Execute the buildcrew skill for this task: $task" \
                 --max-turns "$MAX_TURNS" \
                 --verbose; then
 

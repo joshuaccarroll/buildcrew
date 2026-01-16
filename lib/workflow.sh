@@ -208,7 +208,7 @@ main() {
         print_task_start "$task"
 
         if [[ "$DRY_RUN" == "true" ]]; then
-            print_info "[DRY RUN] Would execute: claude -p \"Execute the josh-workflow skill for this task: $task\""
+            print_info "[DRY RUN] Would execute: claude -p \"Execute the buildcrew skill for this task: $task\""
             mark_task_complete "$task"
             ((completed++))
         else
@@ -218,7 +218,7 @@ main() {
             # Run Claude with the workflow skill
             print_info "Launching Claude Code..."
 
-            if claude -p "Execute the josh-workflow skill for this task: $task" \
+            if claude -p "Execute the buildcrew skill for this task: $task" \
                 --max-turns "$MAX_TURNS" \
                 --verbose; then
 

@@ -1,6 +1,6 @@
 # Backlog
 
-This file contains the task backlog for the Josh Workflow automation.
+This file contains the task backlog for BuildCrew automation.
 
 ## How to Use
 

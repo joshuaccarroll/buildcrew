@@ -90,37 +90,38 @@ buildcrew run --dry-run    # Preview without executing
 
 ## The Workflow Pipeline
 
-BuildCrew processes each task through an 8-phase pipeline with quality gates:
+BuildCrew processes each task through a **9-phase pipeline** with quality gates:
 
 ```
 ┌─────────┐   ┌─────────────┐   ┌─────────┐   ┌─────────────┐
 │ 1.PLAN  │──▶│2.PLAN REVIEW│──▶│ 3.BUILD │──▶│4.CODE REVIEW│
-└─────────┘   │ (Principal) │   └─────────┘   │ (Principal) │
-              └─────────────┘                 └─────────────┘
-                                                    │
-┌──────────┐   ┌──────────┐   ┌───────────────┐     │
-│ 8.SIGNAL │◀──│ 7.COMMIT │◀──│ 6.TEST        │◀────┘
-└──────────┘   └──────────┘   │ (QA Engineer) │
-                              └───────────────┘
-                                    ▲
-                              ┌─────────────┐
-                              │ 5.REFACTOR  │
-                              │ (if needed) │
-                              └─────────────┘
+└─────────┘   │ (Principal) │   │(Feature │   │ (Principal) │
+              └─────────────┘   │Engineer)│   └─────────────┘
+                                └─────────┘          │
+┌──────────┐   ┌──────────┐   ┌────────────┐   ┌─────────────┐
+│ 9.SIGNAL │◀──│ 8.COMMIT │◀──│ 7.VERIFY   │◀──│ 6.TEST      │
+└──────────┘   └──────────┘   │(BLOCKING)  │   │(QA Engineer)│
+                              │- Tests     │   └─────────────┘
+                              │- Code Rev  │         ▲
+                              │- Security  │   ┌─────────────┐
+                              └────────────┘   │ 5.REFACTOR  │
+                                               │ (if needed) │
+                                               └─────────────┘
 ```
 
-### The 8 Phases
+### The 9 Phases
 
 | Phase | Description | Persona |
 |-------|-------------|---------|
 | **1. PLAN** | Analyze task, explore codebase, create implementation plan | - |
 | **2. PLAN REVIEW** | Review plan for architecture, simplicity, testability | Principal Engineer |
-| **3. BUILD** | Implement changes according to approved plan | - |
+| **3. BUILD** | Implement changes with focus on user value | Feature Engineer |
 | **4. CODE REVIEW** | Review code for quality, SOLID principles, security | Principal Engineer |
 | **5. REFACTOR** | Fix issues found in code review (if needed) | - |
 | **6. TEST** | Create test plan, write tests, run test suite | QA Engineer |
-| **7. COMMIT** | Create conventional commit (local only) | - |
-| **8. SIGNAL** | Write completion status for orchestrator | - |
+| **7. VERIFY** | **Blocking gate**: All tests, reviews, and security checks must pass | Security Engineer |
+| **8. COMMIT** | Create conventional commit (local only) | - |
+| **9. SIGNAL** | Write completion status for orchestrator | - |
 
 ---
 
@@ -141,6 +142,14 @@ A Senior Designer with 10+ years experience who:
 - Favors easily-grokable UI over novelty
 - Thinks through user flows before placing elements
 - Creates comprehensive design specs
+
+### Feature Engineer (Workflow Mode)
+
+Builds features with 8+ years at high-velocity startups. Focuses on:
+- **Ship Value to Users** - Features in production matter most
+- **Pragmatic Quality** - Good enough today beats perfect never
+- **Respect the Architecture** - Works with the codebase, not against it
+- **User Delight** - Every interaction is an opportunity
 
 ### Principal Engineer (Workflow Mode)
 
@@ -163,6 +172,19 @@ Handles testing with 12+ years of experience. Ensures:
 - **Tests pass only when correct** - No false positives
 - **Comprehensive coverage** - Happy paths, errors, edge cases
 
+### Security Engineer (Workflow Mode)
+
+Performs security audits with 10+ years in application security. Checks:
+- **OWASP Top 10** - Injection, XSS, broken auth, etc.
+- **Secrets Detection** - API keys, passwords, tokens
+- **Input Validation** - All user inputs validated
+- **Dependency Audit** - No vulnerable packages
+
+Will **BLOCK** deployment if:
+- Critical or high vulnerabilities found
+- Hardcoded secrets detected
+- Missing input validation on user data
+
 ---
 
 ## CLI Commands
@@ -171,6 +193,7 @@ Handles testing with 12+ years of experience. Ensures:
 buildcrew              # Show help
 buildcrew init         # Initialize in current project
 buildcrew run          # Run workflow on BACKLOG.md
+buildcrew plugins      # Show recommended plugins for your project
 buildcrew update       # Check for and install updates
 buildcrew version      # Show version
 buildcrew uninstall    # Remove buildcrew from system
@@ -221,12 +244,14 @@ After `buildcrew init`, your project will have:
 your-project/
 ├── .claude/
 │   ├── skills/                      # AI workflow skills
-│   │   ├── builder/
-│   │   ├── product-manager/
-│   │   ├── ux-designer/
-│   │   ├── josh-workflow/
-│   │   ├── principal-engineer/
-│   │   └── qa-engineer/
+│   │   ├── builder/                 # Greenfield project builder
+│   │   ├── product-manager/         # Product discovery
+│   │   ├── ux-designer/             # Design discovery
+│   │   ├── buildcrew/               # Main workflow orchestration
+│   │   ├── feature-engineer/        # Pragmatic feature building
+│   │   ├── principal-engineer/      # Plan & code review
+│   │   ├── qa-engineer/             # Testing
+│   │   └── security-engineer/       # Security audits
 │   ├── commands/
 │   │   └── build.md                 # /build slash command
 │   ├── rules/
@@ -271,6 +296,59 @@ Edit `.claude/settings.json` to allow additional commands:
   }
 }
 ```
+
+---
+
+## Plugin Recommendations
+
+BuildCrew detects your project type and recommends useful plugins:
+
+```bash
+buildcrew plugins
+```
+
+**Recommended plugins include:**
+
+| Plugin | Type | When Recommended |
+|--------|------|------------------|
+| `frontend-design` | skill | Frontend frameworks detected |
+| `playwright-mcp` | mcp | Frontend/E2E testing |
+| `github-mcp` | mcp | Git repository detected |
+| `typescript-lsp` | lsp | TypeScript project |
+| `python-lsp` | lsp | Python project |
+
+Plugins are recommended:
+- During `buildcrew init`
+- On first `buildcrew run` (one-time tip)
+- Anytime via `buildcrew plugins`
+
+---
+
+## The Verify Stage
+
+The **VERIFY** stage is a **blocking gate** that ensures all quality checks pass before commit:
+
+### What Gets Verified
+
+1. **Test Suite** - All tests must pass
+2. **Code Review** - Must be APPROVED by Principal Engineer
+3. **Security Audit** - No critical/high vulnerabilities
+4. **Architecture** - No breaking changes
+
+### Blocking Behavior
+
+If any check fails:
+- The task returns to the appropriate phase for fixes
+- Maximum 3 attempts before marking task as BLOCKED
+- All fixes must be verified before commit
+
+### Security Audit Details
+
+The Security Engineer checks for:
+- OWASP Top 10 vulnerabilities
+- Hardcoded secrets (API keys, passwords)
+- Input validation gaps
+- Dependency vulnerabilities (`npm audit`, etc.)
 
 ---
 
