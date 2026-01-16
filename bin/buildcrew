@@ -452,7 +452,6 @@ EOF
       "Bash(git clean -fdx:*)",
       "Bash(git clean -fd:*)",
 
-      "Bash(:(){ :|:& };::*)",
       "Bash(mkfs:*)",
       "Bash(dd if=/dev/zero:*)",
       "Bash(dd of=/dev:*)",
