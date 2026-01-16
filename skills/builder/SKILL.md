@@ -208,43 +208,25 @@ Convert the project plan into an executable backlog.
 
 ## Step 6: Handoff
 
-Provide a summary and next steps:
+After creating BACKLOG.md, provide this completion message and then STOP:
 
-```markdown
-## Builder Complete!
-
-### What was created:
-
-**Project Plan**: `PROJECT_[name].md`
-- Vision and problem statement
-- Target users and success metrics
-- [X] phases with [Y] total tasks
-- Technical considerations and risks
-
-**Design Spec**: `DESIGN_[name].md` (if applicable)
-- Visual style guide and color palette
-- Component inventory
-- Screen wireframes and user flows
-- Accessibility checklist
-
-**Backlog**: `BACKLOG.md`
-- [Y] tasks ready for execution
-- Organized by phase
-
-### Next Steps:
-
-1. **Review** the generated files
-2. **Adjust** anything that needs refinement
-3. **Run** the workflow:
-   ```bash
-   ./workflow.sh
-   ```
-
-The workflow will process each task through:
-Plan → Plan Review → Build → Code Review → Test → Commit
-
-Happy building!
 ```
+## ✓ Builder Complete!
+
+### Created:
+- `PROJECT_[name].md` - Project plan with [X] phases
+- `DESIGN_[name].md` - Design specification (if applicable)
+- `BACKLOG.md` - [Y] tasks ready for execution
+
+### Next:
+1. **Exit Claude** (press Ctrl+C or type /exit)
+2. **Run** `buildcrew run` to start the build workflow
+
+The workflow will process each task with fresh context through:
+Plan → Review → Build → Test → Commit
+```
+
+**CRITICAL**: After showing this message, do NOT continue with any other actions. Do NOT start processing tasks. Wait for the user to exit Claude and re-run buildcrew.
 
 ---
 
