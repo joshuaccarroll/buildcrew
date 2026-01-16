@@ -125,3 +125,28 @@ EOF
     mark_plugins_checked
     [ -f ".buildcrew/.plugins-checked" ]
 }
+
+# ─────────────────────────────────────────────────────────────────────────────
+# show_plugin_tip tests
+# ─────────────────────────────────────────────────────────────────────────────
+
+@test "show_plugin_tip: no tip for empty directory (just git/any)" {
+    mkdir .git
+    run show_plugin_tip
+    [[ "$output" != *"buildcrew plugins"* ]]
+    # But should still mark as checked
+    [ -f ".buildcrew/.plugins-checked" ]
+}
+
+@test "show_plugin_tip: shows tip when project files exist" {
+    touch tsconfig.json
+    run show_plugin_tip
+    [[ "$output" == *"buildcrew plugins"* ]]
+    [ -f ".buildcrew/.plugins-checked" ]
+}
+
+@test "show_plugin_tip: marks plugins as checked" {
+    show_plugin_tip
+    run plugins_already_checked
+    [ "$status" -eq 0 ]
+}

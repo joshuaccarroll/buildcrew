@@ -541,9 +541,9 @@ cmd_run() {
         exit 1
     fi
 
-    # Prompt for plugins on first run
+    # Show plugin tip on first run
     if ! plugins_already_checked; then
-        prompt_plugin_installs
+        show_plugin_tip
     fi
 
     # Pass through to workflow script
