@@ -83,6 +83,22 @@ cmd_init() {
         echo -e "  ${YELLOW}○${NC} BuildCrew link exists"
     fi
 
+    # Symlink commands from global installation
+    if [ ! -e ".claude/commands" ]; then
+        ln -s "$BUILDCREW_HOME/commands" ".claude/commands"
+        echo -e "  ${GREEN}✓${NC} Linked commands"
+    else
+        echo -e "  ${YELLOW}○${NC} .claude/commands exists"
+    fi
+
+    # Symlink skills from global installation
+    if [ ! -e ".claude/skills" ]; then
+        ln -s "$BUILDCREW_HOME/skills" ".claude/skills"
+        echo -e "  ${GREEN}✓${NC} Linked skills"
+    else
+        echo -e "  ${YELLOW}○${NC} .claude/skills exists"
+    fi
+
     # Create .buildcrew directory for project-specific overrides
     mkdir -p .buildcrew/rules
 
@@ -503,7 +519,8 @@ EOF
     echo -e "${GREEN}${BOLD}BuildCrew initialized!${NC}"
     echo ""
     echo -e "${BOLD}What was created:${NC}"
-    echo -e "  • ${CYAN}.claude/.buildcrew-link${NC} - Links to global BuildCrew installation"
+    echo -e "  • ${CYAN}.claude/commands${NC} - BuildCrew slash commands (/build, /buildcrew)"
+    echo -e "  • ${CYAN}.claude/skills${NC} - BuildCrew skills (builder, personas)"
     echo -e "  • ${CYAN}.claude/settings.json${NC} - Permissions for Claude Code"
     echo -e "  • ${CYAN}.buildcrew/${NC} - Directory for project-specific customization"
     echo -e "  • ${CYAN}BACKLOG.md${NC} - Your task backlog"
