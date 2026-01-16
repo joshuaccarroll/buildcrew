@@ -142,7 +142,7 @@ check_prerequisites() {
     if is_fresh_backlog; then
         print_info "Empty backlog. Launching build mode..."
         echo ""
-        exec claude -p "Run /build to help define this project and create a backlog."
+        exec claude "Run /build to help define this project and create a backlog."
     fi
 }
 
