@@ -138,11 +138,11 @@ check_prerequisites() {
         exit 1
     fi
 
-    # Fresh backlog - launch Claude normally, let user drive
+    # Fresh backlog - launch build mode to define the project
     if is_fresh_backlog; then
-        print_info "Empty backlog. Add tasks to BACKLOG.md or use /build to define a new project."
+        print_info "Empty backlog. Launching build mode..."
         echo ""
-        exec claude
+        exec claude -p "Run /build to help define this project and create a backlog."
     fi
 }
 
