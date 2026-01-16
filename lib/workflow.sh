@@ -138,11 +138,11 @@ check_prerequisites() {
         exit 1
     fi
 
-    # Smart backlog detection - launch build mode if fresh
+    # Fresh backlog - launch Claude normally, let user drive
     if is_fresh_backlog; then
-        print_info "No configured backlog found. Launching build mode..."
+        print_info "Empty backlog. Add tasks to BACKLOG.md or use /build to define a new project."
         echo ""
-        exec claude -p "Run the /build command to help the user define their project and create a backlog"
+        exec claude
     fi
 }
 
