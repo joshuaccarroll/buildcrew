@@ -238,6 +238,12 @@ buildcrew uninstall    # Remove BuildCrew
 
 ---
 
+## Acknowledgments
+
+BuildCrew was inspired by [The Ralph Loop](https://ghuntley.com/ralph/) by Geoffrey Huntley.
+
+---
+
 ## License
 
 MIT
@@ -249,3 +255,4 @@ MIT
 - **Repository**: [github.com/joshuaccarroll/buildcrew](https://github.com/joshuaccarroll/buildcrew)
 - **Issues**: [GitHub Issues](https://github.com/joshuaccarroll/buildcrew/issues)
 - **Claude Code**: [claude.ai/code](https://claude.ai/code)
+- **The Ralph Loop**: [ghuntley.com/ralph](https://ghuntley.com/ralph/)
