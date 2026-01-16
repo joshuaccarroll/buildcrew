@@ -26,10 +26,11 @@ BuildCrew is an autonomous development pipeline where **expert AI personas revie
 
 Every feature goes through:
 1. A **Product Manager** who challenges scope and finds the real problem
-2. A **Principal Engineer** who reviews plans and code for quality
+2. A **UX Designer** who creates intuitive, accessible interfaces
 3. A **Feature Engineer** who ships pragmatic, user-focused code
-4. A **QA Engineer** who writes tests that actually catch bugs
-5. A **Security Engineer** who blocks vulnerabilities before they ship
+4. A **Principal Engineer** who reviews plans and code for quality
+5. A **QA Engineer** who writes tests that actually catch bugs
+6. A **Security Engineer** who blocks vulnerabilities before they ship
 
 **No single AI agent has the final say.** Each persona has expertise, standards, and veto power.
 
@@ -83,14 +84,6 @@ That's it. Install once, use everywhere.
 - Champions accessibility from the start
 - **Invoked via**: `/build` (optional) or `/buildcrew ux-designer`
 
-### Principal Engineer
-*"The best code is the code you don't have to write."*
-
-- Reviews plans before implementation
-- Reviews code for quality and patterns
-- Blocks over-engineering and code smells
-- **Will reject**: Functions > 20 lines, files > 300 lines, deep nesting, magic numbers
-
 ### Feature Engineer
 *"A feature in production is worth 10 features in planning."*
 
@@ -98,6 +91,14 @@ That's it. Install once, use everywhere.
 - Follows existing codebase patterns
 - Balances velocity with quality
 - **Will avoid**: Scope creep, gold-plating, premature abstraction
+
+### Principal Engineer
+*"The best code is the code you don't have to write."*
+
+- Reviews plans before implementation
+- Reviews code for quality and patterns
+- Blocks over-engineering and code smells
+- **Will reject**: Functions > 20 lines, files > 300 lines, deep nesting, magic numbers
 
 ### QA Engineer
 *"A test that can't fail is worthless."*
@@ -180,14 +181,31 @@ cp .buildcrew/rules/project-rules.md.example .buildcrew/rules/project-rules.md
 ```markdown
 ## Extend: Custom Rules
 
+### Linting & Formatting
+- Run `npm run lint` before committing
+- All TypeScript files must pass strict mode
+- Use Prettier with project config
+
+### Naming Conventions
+- React components: PascalCase (UserProfile.tsx)
+- Utilities: camelCase (formatDate.ts)
+- Constants: SCREAMING_SNAKE_CASE
+- Database tables: snake_case
+
 ### API Design
 - All endpoints return { data, error, meta }
 - Use plural nouns: /users, /products
 - Version all APIs: /v1/users
 
+### Operational Rules
+- API calls must use exponential backoff
+- Batch updates to prevent thundering herd
+- Rate limit external API calls to 10/sec
+
 ### Database
 - No N+1 query patterns
 - Index all foreign keys
+- Use transactions for multi-step operations
 ```
 
 ---

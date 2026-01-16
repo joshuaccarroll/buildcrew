@@ -158,15 +158,32 @@ These rules extend the core BuildCrew principles.
 ## Extend: Custom Rules
 <!-- Use ## Extend: to add to existing rules -->
 
+### Linting & Formatting
+- Run `npm run lint` before committing
+- All TypeScript files must pass strict mode
+- Use Prettier with project config
+
+### Naming Conventions
+- React components: PascalCase (UserProfile.tsx)
+- Utilities: camelCase (formatDate.ts)
+- Constants: SCREAMING_SNAKE_CASE
+- Database tables: snake_case
+
 ### API Design
 - All endpoints must return { data, error, meta }
 - Use plural nouns for resource collections
 - Version all public APIs: /v1/users
 
+### Operational Rules
+- API calls must use exponential backoff
+- Batch updates to prevent thundering herd
+- Rate limit external API calls to 10/sec
+
 ### Database
 - All queries must use parameterized statements
 - No N+1 query patterns
 - Index foreign keys
+- Use transactions for multi-step operations
 
 ### Frontend
 - Components must be under 200 lines
