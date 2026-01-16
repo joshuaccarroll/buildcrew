@@ -238,9 +238,8 @@ main() {
             # Run Claude with the workflow skill
             print_info "Launching Claude Code..."
 
-            if claude -p "Execute the buildcrew skill for this task: $task" \
-                --max-turns "$MAX_TURNS" \
-                --verbose; then
+            if claude "Execute the buildcrew skill for this task: $task" \
+                --max-turns "$MAX_TURNS"; then
 
                 # Check completion status
                 if [[ -f "$STATUS_FILE" ]]; then
