@@ -34,6 +34,13 @@ Every feature goes through:
 
 **No single AI agent has the final say.** Each persona has expertise, standards, and veto power.
 
+| Without BuildCrew | With BuildCrew |
+|-------------------|----------------|
+| AI writes code fast, you review later | Expert personas review in real-time |
+| Security issues slip through | Security blocks deployment |
+| Tests for coverage, not correctness | Tests that catch real bugs |
+| Over-engineered for hypothetical futures | Pragmatic code for today's needs |
+
 ---
 
 ## Quick Start
@@ -181,32 +188,18 @@ cp .buildcrew/rules/project-rules.md.example .buildcrew/rules/project-rules.md
 ```markdown
 ## Extend: Custom Rules
 
-### Linting & Formatting
+### Linting
 - Run `npm run lint` before committing
-- All TypeScript files must pass strict mode
-- Use Prettier with project config
 
 ### Naming Conventions
-- React components: PascalCase (UserProfile.tsx)
-- Utilities: camelCase (formatDate.ts)
-- Constants: SCREAMING_SNAKE_CASE
-- Database tables: snake_case
+- Components: PascalCase, utilities: camelCase
 
-### API Design
-- All endpoints return { data, error, meta }
-- Use plural nouns: /users, /products
-- Version all APIs: /v1/users
-
-### Operational Rules
-- API calls must use exponential backoff
+### Operational
+- Use exponential backoff for API calls
 - Batch updates to prevent thundering herd
-- Rate limit external API calls to 10/sec
-
-### Database
-- No N+1 query patterns
-- Index all foreign keys
-- Use transactions for multi-step operations
 ```
+
+See `.buildcrew/rules/project-rules.md.example` for more examples.
 
 ---
 
@@ -225,54 +218,19 @@ buildcrew uninstall    # Remove BuildCrew
 
 ---
 
-## Ad-hoc Persona Invocation
-
-Use personas outside the workflow for specific tasks:
-
-```
-/buildcrew security-engineer    # Security audit on current code
-/buildcrew product-manager      # Discovery for a new feature
-/buildcrew principal-engineer   # Review a pull request
-/buildcrew qa-engineer          # Create a test plan
-/buildcrew ux-designer          # Design spec for a component
-```
-
----
-
 ## How It Works
 
-### Global Installation
-BuildCrew installs once to `~/.buildcrew/` with all personas, rules, and workflows.
-
-### Project Linking
-Running `buildcrew init` creates a lightweight link:
-```
-your-project/
-├── .claude/
-│   ├── .buildcrew-link    # Points to ~/.buildcrew
-│   └── settings.json      # Permissions
-├── .buildcrew/            # Your customizations
-│   ├── rules/             # Project-specific rules
-│   └── workflow.md        # Custom workflow (optional)
-└── BACKLOG.md             # Your task list
-```
-
-### Rule Hierarchy
-Rules merge in order (later overrides earlier):
-1. `~/.buildcrew/rules/core-principles.md`
-2. `~/.buildcrew/rules/{persona}-rules.md`
-3. `.buildcrew/rules/project-rules.md`
-4. `.buildcrew/rules/{persona}-rules.md`
+1. **Install once** to `~/.buildcrew/` with all personas, rules, and workflows
+2. **Link any project** with `buildcrew init` (creates `.buildcrew/` for your customizations)
+3. **Rules merge** in order: global defaults → persona rules → your project rules
 
 ---
 
-## Safety Features
+## Safety
 
-- **Allowlist permissions** - Only pre-approved commands run without prompts
-- **No auto-push** - Commits stay local until you push
+- **No auto-push** - Commits stay local until you review and push
 - **Blocking gates** - Security issues must be fixed before commit
-- **Attempt limits** - Tasks that can't complete are marked blocked, not retried forever
-- **Context isolation** - Each task runs in a fresh Claude session
+- **Allowlist permissions** - Only pre-approved commands run without prompts
 
 ---
 
@@ -280,41 +238,6 @@ Rules merge in order (later overrides earlier):
 
 - **Claude Code CLI** installed and authenticated
 - **jq** for JSON parsing (`brew install jq`)
-
----
-
-## Installation Options
-
-### Quick Install (Recommended)
-```bash
-curl -fsSL https://raw.githubusercontent.com/joshuaccarroll/buildcrew/main/install.sh | bash
-```
-
-### Homebrew
-```bash
-brew tap joshuaccarroll/tap
-brew install buildcrew
-```
-
-### Manual
-```bash
-git clone https://github.com/joshuaccarroll/buildcrew.git
-cd buildcrew && ./install.sh
-```
-
----
-
-## Why BuildCrew?
-
-| Without BuildCrew | With BuildCrew |
-|-------------------|----------------|
-| AI writes code fast, you review later | Expert personas review in real-time |
-| Security issues slip through | Security blocks deployment |
-| Tests for coverage, not correctness | Tests that catch real bugs |
-| Over-engineered for hypothetical futures | Pragmatic code for today's needs |
-| Features that miss the point | Problems solved at the root |
-
-**BuildCrew is your AI development team with built-in code review, security audit, and quality gates.**
 
 ---
 
