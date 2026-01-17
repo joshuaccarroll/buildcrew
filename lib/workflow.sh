@@ -28,6 +28,7 @@ set -euo pipefail
 
 BACKLOG_FILE="BACKLOG.md"
 STATUS_FILE=".claude/workflow-status.json"
+STOP_FILE=".buildcrew/.stop-workflow"
 MAX_TURNS=100
 PAUSE_BETWEEN_TASKS=3
 
@@ -108,6 +109,23 @@ print_error() {
 
 print_info() {
     echo -e "${CYAN}ℹ $1${NC}"
+}
+
+# Check if stop signal exists
+check_stop_signal() {
+    [[ -f "$STOP_FILE" ]]
+}
+
+# Clear stop signal (called at start of workflow)
+clear_stop_signal() {
+    rm -f "$STOP_FILE"
+}
+
+# Handle stop signal
+handle_stop() {
+    print_warning "Stop signal received. Stopping workflow after current task."
+    rm -f "$STOP_FILE"
+    return 0
 }
 
 # Check if backlog is fresh/unconfigured (template or missing)
@@ -203,7 +221,11 @@ count_tasks() {
 main() {
     check_prerequisites
 
+    # Clear any previous stop signal
+    clear_stop_signal
+
     print_header "BuildCrew - Autonomous Development Pipeline"
+    print_info "To stop after the current task: buildcrew stop"
 
     local completed=0
     local failed=0
@@ -217,6 +239,12 @@ main() {
     echo "  Blocked:   $(count_tasks blocked)"
 
     while true; do
+        # Check for stop signal
+        if check_stop_signal; then
+            handle_stop
+            break
+        fi
+
         # Get next task
         local task
         task=$(get_next_task)

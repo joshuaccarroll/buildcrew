@@ -48,6 +48,7 @@ print_help() {
     echo -e "${BOLD}COMMANDS:${NC}"
     echo "    init        Initialize BuildCrew in current project"
     echo "    run         Execute workflow on BACKLOG.md"
+    echo "    stop        Stop workflow after current task completes"
     echo "    plugins     Show recommended plugins for your project"
     echo "    update      Check for and install updates"
     echo "    version     Show version information"
@@ -542,6 +543,12 @@ cmd_plugins() {
     check_plugins
 }
 
+cmd_stop() {
+    mkdir -p .buildcrew
+    touch .buildcrew/.stop-workflow
+    echo -e "${GREEN}✓${NC} Stop signal sent. Workflow will stop after the current task completes."
+}
+
 cmd_run() {
     # Check for updates (non-blocking)
     check_for_updates &
@@ -661,6 +668,9 @@ case "${1:-}" in
     run)
         shift
         cmd_run "$@"
+        ;;
+    stop)
+        cmd_stop
         ;;
     plugins)
         shift
