@@ -266,37 +266,52 @@ main() {
             # Run Claude with the workflow skill
             print_info "Launching Claude Code..."
 
-            if claude "Execute the buildcrew skill for this task: $task" \
-                --max-turns "$MAX_TURNS"; then
-
-                # Check completion status
-                if [[ -f "$STATUS_FILE" ]]; then
-                    local status
-                    status=$(jq -r '.status // "unknown"' "$STATUS_FILE" 2>/dev/null || echo "unknown")
-
-                    if [[ "$status" == "complete" ]]; then
-                        local summary
-                        summary=$(jq -r '.summary // "No summary provided"' "$STATUS_FILE" 2>/dev/null)
-                        mark_task_complete "$task"
-                        print_success "Completed: $task"
-                        print_info "Summary: $summary"
-                        ((completed++))
-                    else
-                        local reason
-                        reason=$(jq -r '.reason // "Unknown reason"' "$STATUS_FILE" 2>/dev/null)
-                        mark_task_blocked "$task" "$reason"
-                        print_warning "Blocked: $task"
-                        print_warning "Reason: $reason"
-                        ((failed++))
+            # Start a background monitor that watches for status file
+            # When status file appears, send SIGINT to Claude to exit gracefully
+            (
+                while true; do
+                    if [[ -f "$STATUS_FILE" ]]; then
+                        sleep 2  # Give Claude a moment to finish
+                        # Find and interrupt the claude process
+                        pkill -INT -f "claude.*Execute the buildcrew skill" 2>/dev/null || true
+                        break
                     fi
+                    sleep 1
+                done
+            ) &
+            MONITOR_PID=$!
+
+            # Run Claude (monitor will terminate it when status file appears)
+            claude "Execute the buildcrew skill for this task: $task" \
+                --max-turns "$MAX_TURNS" || true
+
+            # Clean up monitor
+            kill $MONITOR_PID 2>/dev/null || true
+            wait $MONITOR_PID 2>/dev/null || true
+
+            # Check completion status
+            if [[ -f "$STATUS_FILE" ]]; then
+                local status
+                status=$(jq -r '.status // "unknown"' "$STATUS_FILE" 2>/dev/null || echo "unknown")
+
+                if [[ "$status" == "complete" ]]; then
+                    local summary
+                    summary=$(jq -r '.summary // "No summary provided"' "$STATUS_FILE" 2>/dev/null)
+                    mark_task_complete "$task"
+                    print_success "Completed: $task"
+                    print_info "Summary: $summary"
+                    ((completed++))
                 else
-                    print_warning "No status file found - assuming task needs attention"
-                    mark_task_blocked "$task" "No status file"
+                    local reason
+                    reason=$(jq -r '.reason // "Unknown reason"' "$STATUS_FILE" 2>/dev/null)
+                    mark_task_blocked "$task" "$reason"
+                    print_warning "Blocked: $task"
+                    print_warning "Reason: $reason"
                     ((failed++))
                 fi
             else
-                print_error "Claude exited with an error"
-                mark_task_blocked "$task" "Claude error"
+                print_warning "No status file found - assuming task needs attention"
+                mark_task_blocked "$task" "No status file"
                 ((failed++))
             fi
         fi
