@@ -619,6 +619,15 @@ Remove temporary files:
 - `.claude/security-audit.md`
 - `.claude/verify-report.md`
 
+### Exit Claude
+
+**CRITICAL**: After writing the status file, you MUST exit Claude to allow the workflow loop to continue to the next task.
+
+1. Say "Task complete. Exiting to continue workflow."
+2. Run the `/exit` command
+
+This allows the orchestrating bash script to detect completion and automatically move to the next backlog item.
+
 ---
 
 ## Important Reminders
