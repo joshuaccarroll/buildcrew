@@ -30,7 +30,7 @@ BACKLOG_FILE="BACKLOG.md"
 STATUS_FILE=".claude/workflow-status.json"
 STOP_FILE=".buildcrew/.stop-workflow"
 MAX_TURNS=100
-PAUSE_BETWEEN_TASKS=3
+PAUSE_BETWEEN_TASKS=5
 
 # ─────────────────────────────────────────────────────────────────────────────────
 # Colors for terminal output
@@ -307,10 +307,18 @@ main() {
             break
         fi
 
-        # Brief pause between tasks
+        # Pause between tasks with stop signal check
         if [[ -n "$(get_next_task)" ]]; then
-            print_info "Continuing to next task in ${PAUSE_BETWEEN_TASKS}s..."
-            sleep "$PAUSE_BETWEEN_TASKS"
+            echo ""
+            print_info "Next task in ${PAUSE_BETWEEN_TASKS}s... (run 'buildcrew stop' to exit)"
+            for ((i=PAUSE_BETWEEN_TASKS; i>0; i--)); do
+                if check_stop_signal; then
+                    handle_stop
+                    # Break out of both loops
+                    break 2
+                fi
+                sleep 1
+            done
         fi
     done
 
