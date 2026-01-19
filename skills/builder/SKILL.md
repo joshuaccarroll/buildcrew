@@ -57,6 +57,23 @@ You are orchestrating the **Builder** flow for creating a new project from scrat
 
 ---
 
+## Step 0: Existing Project Detection
+
+**Before starting, check for an existing project:**
+
+1. Search for any `PROJECT_*.md` file in the current directory
+2. If found:
+   - Extract project name from filename (e.g., `PROJECT_my-app.md` → `my-app`)
+   - Read the file to understand current phases and scope
+   - Tell the user: "I found your existing project: **[name]**"
+   - Ask: "What would you like to add? (new phase, additional tasks to existing phase, etc.)"
+   - Skip Step 1 (project setup) and Step 2 (product discovery)
+   - Go directly to Step 5 (Backlog Generation) in **append mode**
+3. If no PROJECT_*.md found:
+   - Proceed to Step 1 as normal
+
+---
+
 ## Step 1: Project Setup
 
 Start by getting the project name:
@@ -166,11 +183,22 @@ If not available, inform the user:
 
 Convert the project plan into an executable backlog.
 
+**Mode: Create or Append**
+
+If this is a **new project** (no existing BACKLOG.md with completed tasks):
+- Generate fresh BACKLOG.md with all phases
+
+If this is **adding scope** (existing project with completed tasks):
+- Read existing BACKLOG.md
+- Preserve completed `[x]` and blocked `[!]` tasks
+- Append new tasks under appropriate phase headers
+- If adding a new phase, add it after existing phases
+
 **Process:**
 1. Read `PROJECT_[name].md`
 2. Extract all tasks from all phases
 3. Maintain phase order (Phase 1 tasks first)
-4. Generate `BACKLOG.md` in the format:
+4. Generate or update `BACKLOG.md` in the format:
 
 ```markdown
 # Backlog

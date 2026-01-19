@@ -50,6 +50,59 @@ EOF
     [ "$status" -eq 1 ]
 }
 
+@test "is_fresh_backlog: returns 1 when PROJECT file exists with no pending tasks" {
+    echo "- [x] Completed task" > BACKLOG.md
+    echo "# Project" > PROJECT_test.md
+    run is_fresh_backlog
+    [ "$status" -eq 1 ]
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# has_project_file tests
+# ─────────────────────────────────────────────────────────────────────────────
+
+@test "has_project_file: returns 0 when PROJECT file exists" {
+    echo "# Project" > PROJECT_test.md
+    run has_project_file
+    [ "$status" -eq 0 ]
+}
+
+@test "has_project_file: returns 1 when no PROJECT file" {
+    run has_project_file
+    [ "$status" -eq 1 ]
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# is_completed_phase tests
+# ─────────────────────────────────────────────────────────────────────────────
+
+@test "is_completed_phase: returns 0 when project exists with no pending" {
+    echo "- [x] Completed task" > BACKLOG.md
+    echo "# Project" > PROJECT_test.md
+    run is_completed_phase
+    [ "$status" -eq 0 ]
+}
+
+@test "is_completed_phase: returns 1 when pending tasks exist" {
+    echo "- [ ] Pending task" > BACKLOG.md
+    echo "# Project" > PROJECT_test.md
+    run is_completed_phase
+    [ "$status" -eq 1 ]
+}
+
+@test "is_completed_phase: returns 1 when no project file" {
+    echo "- [x] Completed task" > BACKLOG.md
+    run is_completed_phase
+    [ "$status" -eq 1 ]
+}
+
+@test "is_completed_phase: returns 0 when project exists with empty backlog" {
+    echo "# Empty backlog" > BACKLOG.md
+    echo "# Project" > PROJECT_test.md
+    run is_completed_phase
+    [ "$status" -eq 0 ]
+}
+
 # ─────────────────────────────────────────────────────────────────────────────
 # get_next_task tests
 # ─────────────────────────────────────────────────────────────────────────────

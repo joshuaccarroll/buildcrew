@@ -128,6 +128,11 @@ handle_stop() {
     return 0
 }
 
+# Check if an established project exists
+has_project_file() {
+    compgen -G "PROJECT_*.md" > /dev/null 2>&1
+}
+
 # Check if backlog is fresh/unconfigured (template or missing)
 is_fresh_backlog() {
     # No backlog file
@@ -139,9 +144,22 @@ is_fresh_backlog() {
     # No pending tasks at all
     local pending_tasks
     pending_tasks=$(grep -c '^\- \[ \]' "$BACKLOG_FILE" 2>/dev/null)
-    [[ -z "$pending_tasks" || "$pending_tasks" -eq 0 ]] && return 0
+    if [[ -z "$pending_tasks" || "$pending_tasks" -eq 0 ]]; then
+        # Only fresh if no PROJECT file exists
+        has_project_file && return 1
+        return 0
+    fi
 
     return 1
+}
+
+# Check if project is in "completed phase" state (established but no pending work)
+is_completed_phase() {
+    has_project_file || return 1
+
+    local pending_tasks
+    pending_tasks=$(grep -c '^\- \[ \]' "$BACKLOG_FILE" 2>/dev/null)
+    [[ -z "$pending_tasks" || "$pending_tasks" -eq 0 ]]
 }
 
 # Check prerequisites
@@ -161,6 +179,13 @@ check_prerequisites() {
         print_info "Empty backlog. Launching build mode..."
         echo ""
         exec claude "Run /build to help define this project and create a backlog."
+    fi
+
+    # Completed phase - existing project, no pending tasks
+    if is_completed_phase; then
+        print_info "All tasks complete! Launching build mode to add scope..."
+        echo ""
+        exec claude "Run /build to add new tasks to this project."
     fi
 }
 
