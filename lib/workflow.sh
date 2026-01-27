@@ -316,24 +316,47 @@ main() {
 
             # Check completion status
             if [[ -f "$STATUS_FILE" ]]; then
-                local status
-                status=$(jq -r '.status // "unknown"' "$STATUS_FILE" 2>/dev/null || echo "unknown")
-
-                if [[ "$status" == "complete" ]]; then
-                    local summary
-                    summary=$(jq -r '.summary // "No summary provided"' "$STATUS_FILE" 2>/dev/null)
-                    mark_task_complete "$task"
-                    print_success "Completed: $task"
-                    print_info "Summary: $summary"
-                    ((completed++))
-                else
-                    local reason
-                    reason=$(jq -r '.reason // "Unknown reason"' "$STATUS_FILE" 2>/dev/null)
-                    mark_task_blocked "$task" "$reason"
-                    print_warning "Blocked: $task"
-                    print_warning "Reason: $reason"
+                # Validate JSON before parsing
+                if ! jq -e . "$STATUS_FILE" >/dev/null 2>&1; then
+                    print_error "Status file contains invalid JSON"
+                    print_info "File contents: $(cat "$STATUS_FILE" 2>/dev/null | head -c 200)"
+                    mark_task_blocked "$task" "Invalid status file JSON"
                     ((failed++))
+                    continue
                 fi
+
+                local status
+                status=$(jq -r '.status // ""' "$STATUS_FILE")
+
+                # Validate status field
+                case "$status" in
+                    complete)
+                        local summary
+                        summary=$(jq -r '.summary // "No summary provided"' "$STATUS_FILE")
+                        mark_task_complete "$task"
+                        print_success "Completed: $task"
+                        print_info "Summary: $summary"
+                        ((completed++))
+                        ;;
+                    blocked)
+                        local reason
+                        reason=$(jq -r '.reason // "Unknown reason"' "$STATUS_FILE")
+                        mark_task_blocked "$task" "$reason"
+                        print_warning "Blocked: $task"
+                        print_warning "Reason: $reason"
+                        ((failed++))
+                        ;;
+                    "")
+                        print_error "Status file missing 'status' field"
+                        mark_task_blocked "$task" "Missing status in response"
+                        ((failed++))
+                        ;;
+                    *)
+                        print_error "Unexpected status value: $status"
+                        mark_task_blocked "$task" "Unknown status: $status"
+                        ((failed++))
+                        ;;
+                esac
             else
                 print_warning "No status file found - assuming task needs attention"
                 mark_task_blocked "$task" "No status file"
