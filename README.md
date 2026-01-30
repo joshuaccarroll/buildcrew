@@ -199,6 +199,19 @@ cp .buildcrew/rules/project-rules.md.example .buildcrew/rules/project-rules.md
 
 See `.buildcrew/rules/project-rules.md.example` for more examples.
 
+### Project Context (Optional)
+
+Give BuildCrew context about your users, principles, and domain:
+
+```bash
+# Copy the examples you want and edit
+cp .buildcrew/context/users.md.example .buildcrew/context/users.md
+cp .buildcrew/context/principles.md.example .buildcrew/context/principles.md
+cp .buildcrew/context/domain.md.example .buildcrew/context/domain.md
+```
+
+These files are optional. When present, the Product Manager and plan reviewers use them to make better decisions about scope, tradeoffs, and priorities.
+
 ---
 
 ## CLI Commands

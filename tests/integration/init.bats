@@ -78,6 +78,26 @@ teardown() {
     grep -q '"custom"' ".claude/settings.json"
 }
 
+@test "init: creates .buildcrew/context directory" {
+    run "$BUILDCREW_HOME/bin/buildcrew" init
+    [ -d ".buildcrew/context" ]
+}
+
+@test "init: creates context/users.md.example" {
+    run "$BUILDCREW_HOME/bin/buildcrew" init
+    [ -f ".buildcrew/context/users.md.example" ]
+}
+
+@test "init: creates context/principles.md.example" {
+    run "$BUILDCREW_HOME/bin/buildcrew" init
+    [ -f ".buildcrew/context/principles.md.example" ]
+}
+
+@test "init: creates context/domain.md.example" {
+    run "$BUILDCREW_HOME/bin/buildcrew" init
+    [ -f ".buildcrew/context/domain.md.example" ]
+}
+
 @test "init: shows success message" {
     run "$BUILDCREW_HOME/bin/buildcrew" init
     [ "$status" -eq 0 ]

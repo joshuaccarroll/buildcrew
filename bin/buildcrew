@@ -216,6 +216,93 @@ EOF
         echo -e "  ${YELLOW}○${NC} Rules example exists"
     fi
 
+    # Create context directory and example files
+    mkdir -p .buildcrew/context
+
+    if [ ! -f ".buildcrew/context/users.md.example" ]; then
+        cat > .buildcrew/context/users.md.example << 'EOF'
+# User Context
+
+Copy this file to `users.md` to provide user context to BuildCrew.
+This helps the Product Manager and plan reviewers understand who you're building for.
+
+---
+
+## Primary User
+
+- **Who**: [e.g., Frontend developers on small teams]
+- **Needs**: [e.g., Ship features fast without sacrificing quality]
+- **Workflow**: [e.g., Uses VS Code, runs CI locally, deploys via GitHub Actions]
+- **Success looks like**: [e.g., Feature works on first deploy, no rollbacks]
+
+## Secondary User
+
+- **Who**: [e.g., Team leads reviewing PRs]
+- **Needs**: [e.g., Understand changes quickly, trust the test suite]
+- **Workflow**: [e.g., Reviews PRs on GitHub, checks CI status]
+- **Success looks like**: [e.g., PR description is clear, tests cover edge cases]
+
+## Non-Users / Out of Scope
+
+- [e.g., End users of the product — they interact through the UI, not the codebase]
+EOF
+        echo -e "  ${GREEN}✓${NC} Created .buildcrew/context/users.md.example"
+    else
+        echo -e "  ${YELLOW}○${NC} Users context example exists"
+    fi
+
+    if [ ! -f ".buildcrew/context/principles.md.example" ]; then
+        cat > .buildcrew/context/principles.md.example << 'EOF'
+# Project Principles
+
+Copy this file to `principles.md` to guide BuildCrew's decisions.
+When tradeoffs arise, these principles determine which direction to take.
+
+---
+
+## Principles
+
+- **Ship over polish**: Working software in users' hands beats perfect code in a branch. Cut scope before delaying delivery.
+- **Simplicity over power**: Choose the boring solution. A simple approach that works is better than a clever one that might.
+- **Explicit over implicit**: Name things clearly, avoid magic, make dependencies obvious. Future-you is a stranger.
+- **Fix the root cause**: Don't patch symptoms. If something keeps breaking, redesign it.
+EOF
+        echo -e "  ${GREEN}✓${NC} Created .buildcrew/context/principles.md.example"
+    else
+        echo -e "  ${YELLOW}○${NC} Principles context example exists"
+    fi
+
+    if [ ! -f ".buildcrew/context/domain.md.example" ]; then
+        cat > .buildcrew/context/domain.md.example << 'EOF'
+# Domain Knowledge
+
+Copy this file to `domain.md` to give BuildCrew context about your problem domain.
+This helps personas make informed decisions without asking repetitive questions.
+
+---
+
+## Terminology
+
+| Term | Definition |
+|------|-----------|
+| [Term] | [What it means in your project] |
+
+## Business Rules
+
+- [e.g., Users must verify email before accessing paid features]
+- [e.g., All prices are stored in cents to avoid floating-point issues]
+
+## Key Constraints
+
+- [e.g., Must support IE11 for enterprise clients]
+- [e.g., API responses must be < 200ms at p95]
+- [e.g., HIPAA compliance required — no PII in logs]
+EOF
+        echo -e "  ${GREEN}✓${NC} Created .buildcrew/context/domain.md.example"
+    else
+        echo -e "  ${YELLOW}○${NC} Domain context example exists"
+    fi
+
     # Create BACKLOG.md template if not present
     if [ ! -f "BACKLOG.md" ]; then
         cat > BACKLOG.md << 'EOF'
