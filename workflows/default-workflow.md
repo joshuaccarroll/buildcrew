@@ -19,19 +19,22 @@ Steps:
 
 ---
 
-### Phase 2: PLAN_REVIEW
-**agent**: principal-engineer
-**description**: Review plan for architecture, simplicity, testability
-**input**: .claude/current-plan.md
+### Phase 2: PLAN_REVIEW (3-Pass)
+**agents**: principal-engineer, product-manager
+**description**: 3-pass review: technical (PE), user impact (PM), convergence (PE)
+**input**: .claude/current-plan.md, .buildcrew/context/* (if present)
 **output**: .claude/plan-review.md
-**gate**: verdict == "APPROVED"
+**gate**: overall verdict == "APPROVED"
 
-The Principal Engineer reviews the plan and provides:
-- Verdict: APPROVED, NEEDS_REVISION, or REJECTED
-- Strengths and concerns
-- Required changes (if any)
+Three sequential review passes:
+- **Pass 1 — Technical Review (Principal Engineer)**: Scope, architecture, simplicity, testability
+- **Pass 2 — User Impact Review (Product Manager)**: User flow walkthrough, acceptance criteria, edge cases
+- **Pass 3 — Convergence Review (Principal Engineer)**: Final check with PM feedback incorporated
 
-If NEEDS_REVISION: Return to Phase 1 with feedback
+Per-pass verdicts: PASS or NEEDS_REVISION
+Pass 3 verdict: APPROVED, NEEDS_REVISION, or REJECTED
+
+If NEEDS_REVISION: Revise plan and re-enter review cycle (max 3 cycles)
 If REJECTED: Mark task as blocked
 
 ---
@@ -53,7 +56,7 @@ The Feature Engineer:
 **agent**: principal-engineer
 **description**: Review implemented code for quality, patterns, and cleanup
 **output**: .claude/code-review.md
-**gate**: verdict == "APPROVED"
+**gate**: no unresolved Critical or Major findings
 
 The Principal Engineer reviews:
 - Correctness
@@ -63,18 +66,26 @@ The Principal Engineer reviews:
 - Testability
 - Cleanup (unused imports, orphaned files, dead code)
 
-If NEEDS_REVISION: Continue to Phase 5 (REFACTOR)
-If APPROVED: Skip to Phase 6 (TEST)
+Findings are classified by severity:
+- **Critical / Major** → BLOCKING (trigger refactor or rebuild)
+- **Minor** → ADVISORY (logged, don't trigger refactor)
+
+Verdicts: APPROVED, NEEDS_REFACTOR, or NEEDS_REBUILD
+- If NEEDS_REFACTOR: Continue to Phase 5 (REFACTOR)
+- If NEEDS_REBUILD: Return to Phase 3 (BUILD) with rejection context
+- If APPROVED (including advisory-only findings): Skip to Phase 6 (TEST)
 
 ---
 
-### Phase 5: REFACTOR
+### Phase 5: REFACTOR / REBUILD
 **agent**: none
-**condition**: code_review.verdict == "NEEDS_REVISION"
-**description**: Address issues from code review
+**condition**: code_review.verdict == "NEEDS_REFACTOR" or "NEEDS_REBUILD"
+**description**: Address issues from code review, or rebuild if repair isn't converging
 
-Fix issues identified in code review, then return to Phase 4.
-Maximum 3 refactor cycles before marking task as blocked.
+**NEEDS_REFACTOR**: Fix blocking issues, return to Phase 4. Max 3 refactor cycles.
+Auto-escalation: if iteration 2 shows no improvement in blocking issue count → NEEDS_REBUILD.
+
+**NEEDS_REBUILD**: Discard implementation, preserve approved plan, restart Phase 3 with rejection context. Max 1 rebuild attempt — if rebuilt code also fails → task BLOCKED.
 
 ---
 
@@ -99,7 +110,7 @@ The QA Engineer:
 
 **BLOCKING GATE** - All checks must pass:
 - [ ] All tests pass
-- [ ] Code review approved
+- [ ] No unresolved Critical or Major code review findings (advisory/Minor findings permitted)
 - [ ] No critical/high security vulnerabilities
 - [ ] No hardcoded secrets
 

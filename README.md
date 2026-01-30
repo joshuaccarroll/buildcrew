@@ -78,6 +78,7 @@ That's it. If you don't have a backlog yet, BuildCrew launches the Product Manag
 - Challenges scope and finds the real problem
 - Pushes back on over-complication
 - Creates phased implementation plans
+- Reviews plans from the user's perspective (Phase 2, Pass 2)
 - **Invoked via**: `/build` or `/buildcrew product-manager`
 
 ### UX Designer
@@ -130,11 +131,11 @@ That's it. If you don't have a backlog yet, BuildCrew launches the Product Manag
 ├──────────────────────────────────────────────────────────────────┤
 │                                                                   │
 │   PLAN ──► PLAN REVIEW ──► BUILD ──► CODE REVIEW ──► TEST        │
-│              (Principal)      (Feature)   (Principal)    (QA)     │
-│                                                                   │
+│             (3-Pass:        (Feature)   (Principal)    (QA)       │
+│              PE→PM→PE)                                            │
 │                           ┌─────────────┐                         │
-│   COMMIT ◄── SECURITY ◄──┤   VERIFY    │◄── REFACTOR (if needed) │
-│              (blocks!)    │  (blocking) │                         │
+│   COMMIT ◄── SECURITY ◄──┤   VERIFY    │◄── REFACTOR / REBUILD   │
+│              (blocks!)    │  (blocking) │    (REBUILD → BUILD)    │
 │                           └─────────────┘                         │
 │                                                                   │
 └──────────────────────────────────────────────────────────────────┘

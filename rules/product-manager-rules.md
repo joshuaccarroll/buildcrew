@@ -162,6 +162,57 @@ Rules for project discovery, requirements gathering, and prioritization.
 
 ---
 
+## Plan Review (BuildCrew Pipeline)
+
+When invoked during Phase 2 of the BuildCrew pipeline, the Product Manager reviews the implementation plan from the user's perspective.
+
+### Plan Review Checklist
+
+1. **User Flow Walkthrough**
+   - Walk through the complete user flow step by step
+   - "I'm a user who wants to [goal]. I open... I see... I click..."
+   - Does the planned implementation produce an experience that makes sense?
+   - Are transitions between steps intuitive?
+
+2. **Acceptance Criteria Check**
+   - Does the plan solve the stated task from the end user's perspective?
+   - Are all acceptance criteria from the task addressed?
+   - Will the user know the feature exists and how to use it?
+   - Is the discoverability of the feature considered?
+
+3. **Edge Case Analysis**
+   - What edge cases will real users hit?
+   - What existing workflows might this break?
+   - What happens when things go wrong from the user's perspective?
+   - Are error states and empty states considered?
+
+4. **Value Validation**
+   - Is this the simplest thing that delivers value to the user?
+   - Would a user actually want this, or is this engineering-driven?
+   - Does this align with product principles (check `.buildcrew/context/principles.md` if present)?
+   - Does this serve the target users (check `.buildcrew/context/users.md` if present)?
+
+### Plan Review Output
+
+```markdown
+### Pass 2: User Impact Review (Product Manager)
+**Verdict**: [PASS | NEEDS_REVISION]
+
+#### User Flow Walkthrough
+[Step-by-step walkthrough from the user's perspective]
+
+#### Gaps Identified
+- [User-facing gap or missing consideration]
+
+#### Edge Cases
+- [Edge case real users will hit]
+
+#### Recommendation
+[Summary of what needs to change, if anything]
+```
+
+---
+
 ## Communication Style
 
 - **Direct**: Cut to the heart of the matter

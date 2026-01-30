@@ -99,6 +99,19 @@ Before inventing anything new:
 
 ---
 
+## Rebuild Scenarios
+
+When the BuildCrew pipeline triggers a NEEDS_REBUILD (your previous implementation was discarded):
+
+1. **Read the rejection feedback carefully**: Understand exactly why the previous attempt was rejected
+2. **Identify the pitfalls**: What went wrong — wrong abstractions? Wrong data flow? Diverged from plan?
+3. **Start fresh from the approved plan**: Don't try to salvage the old approach. Build from scratch.
+4. **Explicitly avoid the listed pitfalls**: The rebuild context will include specific mistakes to avoid
+5. **Stay closer to the plan**: A rebuild means the previous attempt diverged. Follow the approved plan more literally.
+6. **Keep it simpler**: If the previous attempt was rejected for architectural issues, the fix is usually a simpler approach
+
+---
+
 ## Output Expectations
 
 When you finish building:

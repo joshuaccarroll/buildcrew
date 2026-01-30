@@ -105,42 +105,46 @@ Rules for architecture review, plan review, and code review.
 
 ## Review Output Format
 
-### Plan Review
+### Plan Review (3-Pass System)
+
+The Principal Engineer participates in Pass 1 (Technical Review) and Pass 3 (Convergence Review) of the 3-pass plan review. A Product Manager handles Pass 2 (User Impact Review).
+
+**Pass 1 — Technical Review:**
 ```markdown
-## Principal Engineer Plan Review
+### Pass 1: Technical Review (Principal Engineer)
+**Verdict**: [PASS | NEEDS_REVISION]
+- [Key findings: scope, architecture, simplicity, testability, red flags]
+- [Required changes if NEEDS_REVISION]
+```
 
-### Verdict: [APPROVED | NEEDS REVISION | REJECTED]
-
-### Strengths
-- [What's good about this plan]
-
-### Concerns
-- [Issues that must be addressed]
-
-### Required Changes (if any)
-1. [Specific change needed]
-
-### Recommendations (optional)
-- [Suggestions for improvement]
+**Pass 3 — Convergence Review:**
+```markdown
+### Pass 3: Convergence Review (Principal Engineer)
+**Verdict**: [APPROVED | NEEDS_REVISION | REJECTED]
+- [Final assessment after PM feedback incorporated]
+- [Are we solving the right problem the right way?]
 ```
 
 ### Code Review
 ```markdown
 ## Principal Engineer Code Review
 
-### Verdict: [APPROVED | NEEDS REVISION | REJECTED]
+### Verdict: [APPROVED | NEEDS_REFACTOR | NEEDS_REBUILD]
 
 ### Summary
 [1-2 sentence overall assessment]
 
-### Critical Issues (must fix)
+### Critical Issues (must fix) — BLOCKING
 - **[Issue Type]** in `file.ts:line`: [Description]
 
-### Major Concerns (should fix)
+### Major Concerns (should fix) — BLOCKING
 - **[Issue Type]** in `file.ts:line`: [Description]
 
-### Minor Suggestions (nice to have)
+### Minor Suggestions (nice to have) — ADVISORY
 - [Suggestion]
+
+### Advisory Findings
+[Minor suggestions logged for future code health work. Do NOT trigger refactor cycles.]
 
 ### What's Done Well
 - [Positive observations]
@@ -150,8 +154,45 @@ Rules for architecture review, plan review, and code review.
 
 ## Severity Levels
 
-| Level | Impact | Action |
-|-------|--------|--------|
-| **Critical** | Security, correctness | Must fix before proceeding |
-| **Major** | Design, maintainability | Should fix before proceeding |
-| **Minor** | Style, conventions | Fix if quick, otherwise note |
+| Level | Impact | Action | Gate Effect |
+|-------|--------|--------|-------------|
+| **Critical** | Security, correctness, data loss | Must fix before proceeding | **BLOCKING** — triggers NEEDS_REFACTOR or NEEDS_REBUILD |
+| **Major** | Design, maintainability, wrong abstraction | Should fix before proceeding | **BLOCKING** — triggers NEEDS_REFACTOR or NEEDS_REBUILD |
+| **Minor** | Style, naming, conventions, formatting | Logged as advisory | **ADVISORY** — does NOT trigger refactor cycles |
+
+### Severity Examples
+
+**Critical** (always blocking):
+- Security vulnerability (injection, XSS, auth bypass)
+- Data corruption or loss risk
+- Broken functionality (feature doesn't work as specified)
+- Race condition or concurrency bug
+
+**Major** (blocking):
+- Wrong abstraction or data flow design
+- Missing error handling for likely failure cases
+- Poor separation of concerns
+- Significant maintainability issue
+- Missing validation at system boundaries
+
+**Minor** (advisory only):
+- Naming could be more descriptive
+- Function slightly over 20 lines but readable
+- Style inconsistency with codebase conventions
+- Comment could be clearer
+- Minor code duplication (< 5 lines)
+
+---
+
+## NEEDS_REBUILD Criteria
+
+Issue **NEEDS_REBUILD** (not NEEDS_REFACTOR) when:
+- More than ~60% of the implementation would need to change
+- Issues are architectural: wrong abstractions, wrong data flow, wrong approach
+- The implementation diverged significantly from the approved plan
+- Fixing the issues would effectively mean rewriting most of the code
+
+Issue **NEEDS_REFACTOR** when:
+- Issues are localized to specific functions or files
+- The overall approach and architecture are sound
+- Fixes are targeted and won't cascade through the codebase

@@ -13,18 +13,21 @@ You are executing an autonomous development workflow. Follow each phase in order
 ```
 ┌─────────┐   ┌─────────────┐   ┌─────────┐   ┌─────────────┐
 │ 1.PLAN  │──▶│2.PLAN REVIEW│──▶│ 3.BUILD │──▶│4.CODE REVIEW│
-└─────────┘   │ (Principal) │   │(Feature │   │ (Principal) │
-              └─────────────┘   │Engineer)│   └─────────────┘
-                                └─────────┘          │
-┌──────────┐   ┌──────────┐   ┌────────────┐   ┌─────────────┐
-│ 9.SIGNAL │◀──│ 8.COMMIT │◀──│ 7.VERIFY   │◀──│ 6.TEST      │
-└──────────┘   └──────────┘   │(BLOCKING)  │   │(QA Engineer)│
-                              │- Tests     │   └─────────────┘
-                              │- Code Rev  │         ▲
-                              │- Security  │   ┌─────────────┐
-                              └────────────┘   │ 5.REFACTOR  │
-                                               │ (if needed) │
-                                               └─────────────┘
+└─────────┘   │ (3-Pass:    │   │(Feature │   │ (Principal) │
+              │  PE→PM→PE)  │   │Engineer)│   └──────┬──────┘
+              └─────────────┘   └────▲────┘          │
+                                     │        ┌──────▼──────┐
+┌──────────┐   ┌──────────┐         │        │ 5.REFACTOR  │
+│ 9.SIGNAL │◀──│ 8.COMMIT │         │        │ or REBUILD  │
+└──────────┘   └──────────┘         │        └──────┬──────┘
+                    ▲                │               │
+              ┌─────┴──────┐        └───────────────┘
+              │ 7.VERIFY   │        (REBUILD loops to BUILD)
+              │(BLOCKING)  │
+              │- Tests     │   ┌─────────────┐
+              │- Code Rev  │◀──│ 6.TEST      │
+              │- Security  │   │(QA Engineer)│
+              └────────────┘   └─────────────┘
 ```
 
 ## Current Task
@@ -39,16 +42,22 @@ The task you are working on was provided in the prompt. Parse it and understand 
 
 ### Steps:
 
-1. **Analyze the task**: Break down what needs to be done
-2. **Explore the codebase**: Use Glob and Grep to find relevant files
+1. **Load project context** (if available): Check for `.buildcrew/context/` files
+   - `users.md` — Who uses this product, what they care about, key user personas
+   - `principles.md` — Product principles ("speed over features," "accessibility first," etc.)
+   - `domain.md` — Domain-specific knowledge, terminology, business rules
+   - These files are optional — proceed without them if not present
+2. **Analyze the task**: Break down what needs to be done
+3. **Explore the codebase**: Use Glob and Grep to find relevant files
    - Look for similar implementations to follow existing patterns
    - Identify files that will need modification
    - Check for existing tests you can model yours after
-3. **Create implementation plan**: Write a step-by-step plan to `.claude/current-plan.md`
+4. **Create implementation plan**: Write a step-by-step plan to `.claude/current-plan.md`
    - List all files to create or modify
    - Describe each change needed
    - Note any dependencies or order requirements
-4. **Identify risks**: Note anything unclear or potentially problematic
+   - Reference relevant project context (users, principles, domain) when applicable
+5. **Identify risks**: Note anything unclear or potentially problematic
 
 ### Plan Template
 
@@ -86,20 +95,22 @@ Write your plan to `.claude/current-plan.md` using this structure:
 
 ---
 
-## Phase 2: PLAN REVIEW (Principal Engineer)
+## Phase 2: PLAN REVIEW (3-Pass Review)
 
-**Goal**: Review the plan through the lens of a Principal Engineer before any code is written.
+**Goal**: Review the plan through multiple lenses before any code is written. This phase uses 3 sequential review passes to catch technical issues, user-facing gaps, and ensure convergence.
 
-### Assume the Principal Engineer Persona
+### Load Project Context (if available)
 
-Read and internalize `.claude/skills/principal-engineer/SKILL.md`. You are now a **Principal Engineer** with 15+ years of experience. You hold these values:
+Check for `.buildcrew/context/` files and use them to inform the review:
+- `users.md` — Who uses this product, key user personas
+- `principles.md` — Product principles and values
+- `domain.md` — Domain-specific knowledge, terminology, business rules
 
-- **Simplicity above all** - Is this the simplest approach?
-- **Readability is paramount** - Will this be maintainable?
-- **Modularity enables evolution** - Are concerns properly separated?
-- **Testability is non-negotiable** - Can this be tested effectively?
+---
 
-### Review the Plan
+### Pass 1: Technical Review (Principal Engineer)
+
+**Assume the Principal Engineer Persona.** Read and internalize `.claude/skills/principal-engineer/SKILL.md`.
 
 Evaluate `.claude/current-plan.md` against:
 
@@ -129,36 +140,98 @@ Evaluate `.claude/current-plan.md` against:
    - Missing error handling?
    - Security considerations?
 
+**Pass 1 Verdict**: PASS / NEEDS_REVISION
+
+If NEEDS_REVISION: Update `.claude/current-plan.md` with required changes before proceeding to Pass 2.
+
+---
+
+### Pass 2: User Impact Review (Product Manager)
+
+**Assume the Product Manager Persona.** Read and internalize `.claude/skills/product-manager/SKILL.md` and `$BUILDCREW_HOME/rules/product-manager-rules.md`.
+
+Walk through the plan from the end user's perspective:
+
+1. **User Flow Walkthrough**
+   - "I'm a user who wants to [goal]. I open... I see... I click..."
+   - Walk through the complete user flow step by step
+   - Does the plan produce an experience that makes sense to the user?
+
+2. **Acceptance Criteria Check**
+   - Does this plan actually solve the stated task from the end user's perspective?
+   - Are all acceptance criteria addressed?
+   - Will the user know the feature exists and how to use it?
+
+3. **Edge Case Analysis**
+   - What edge cases will real users hit?
+   - What existing workflows might this break?
+   - What happens when things go wrong from the user's perspective?
+
+4. **Value Validation**
+   - Is this the simplest thing that delivers value?
+   - Would a user actually want this, or is this engineering-driven?
+   - Does this align with project principles (if `.buildcrew/context/principles.md` exists)?
+
+**Pass 2 Verdict**: PASS / NEEDS_REVISION
+
+If NEEDS_REVISION: Update `.claude/current-plan.md` to address user-facing gaps before proceeding to Pass 3.
+
+---
+
+### Pass 3: Convergence Review (Principal Engineer)
+
+**Assume the Principal Engineer Persona again.**
+
+Review the plan with all prior feedback incorporated:
+
+1. Are we solving the right problem the right way?
+2. Has PM feedback been properly addressed without introducing technical issues?
+3. Is the plan as good as it can get — simple, correct, user-focused, and testable?
+4. Final sanity check: anything missing or unnecessary?
+
+**Pass 3 Verdict**: APPROVED / NEEDS_REVISION / REJECTED
+
+---
+
 ### Plan Review Output
 
-Write your review to `.claude/plan-review.md`:
+Write the combined review to `.claude/plan-review.md`:
 
 ```markdown
-## Principal Engineer Plan Review
+## Plan Review (3-Pass)
 
-### Verdict: [APPROVED | NEEDS REVISION]
+### Pass 1: Technical Review (Principal Engineer)
+**Verdict**: [PASS | NEEDS_REVISION]
+- [Key findings and any changes made]
 
-### Assessment
-[2-3 sentence summary of the plan quality]
+### Pass 2: User Impact Review (Product Manager)
+**Verdict**: [PASS | NEEDS_REVISION]
+- [Key findings from user flow walkthrough]
+- [Acceptance criteria gaps identified]
+- [Edge cases flagged]
+
+### Pass 3: Convergence Review (Principal Engineer)
+**Verdict**: [APPROVED | NEEDS_REVISION | REJECTED]
+- [Final assessment]
+
+### Overall Verdict: [APPROVED | NEEDS_REVISION | REJECTED]
 
 ### Strengths
 - [What's good about this plan]
 
-### Concerns (if NEEDS REVISION)
-- [Issue]: [Specific fix required]
-
-### Required Changes (if any)
+### Required Changes (if NEEDS_REVISION)
 1. [Specific change to make to the plan]
-2. [Specific change to make to the plan]
 
 ### Approved to Proceed: [YES | NO - revise plan first]
 ```
 
-### If Plan Needs Revision
+### Revision Cycle
 
+If any pass returns NEEDS_REVISION:
 1. Update `.claude/current-plan.md` with the required changes
-2. Re-review until the plan is APPROVED
-3. Only proceed to BUILD when verdict is APPROVED
+2. Re-enter the 3-pass review cycle
+3. **Maximum 3 full revision cycles** — if the plan hasn't converged after 3 cycles, mark the task as BLOCKED
+4. Only proceed to BUILD when the overall verdict is APPROVED
 
 ---
 
@@ -246,50 +319,97 @@ Write your review to `.claude/code-review.md`:
 ```markdown
 ## Principal Engineer Code Review
 
-### Verdict: [APPROVED | NEEDS REFACTOR]
+### Verdict: [APPROVED | NEEDS_REFACTOR | NEEDS_REBUILD]
 
 ### Summary
 [1-2 sentence overall assessment]
 
-### Critical Issues (must fix)
+### Critical Issues (must fix) — BLOCKING
 - **[Issue Type]** in `file.ts:line`: [Description]
   - Fix: [Specific remedy]
 
-### Major Concerns (should fix)
+### Major Concerns (should fix) — BLOCKING
 - **[Issue Type]** in `file.ts:line`: [Description]
   - Suggestion: [How to improve]
 
-### Minor Suggestions (nice to have)
+### Minor Suggestions (nice to have) — ADVISORY
 - [Suggestion]
+
+### Advisory Findings
+[Minor suggestions are logged here for future code health work. They do NOT trigger refactor cycles.]
 
 ### What's Done Well
 - [Positive observations]
 
-### Proceed to Testing: [YES | NO - refactor first]
+### Proceed to Testing: [YES | NO - refactor first | NO - rebuild required]
 ```
+
+### Verdict Definitions
+
+- **APPROVED**: Code is ready for testing. Minor/advisory findings are logged but don't block.
+- **NEEDS_REFACTOR** (repair): Issues are localized, approach is sound. Fix specific things and re-review.
+- **NEEDS_REBUILD** (regenerate): Implementation diverged from plan, issues are structural, or fixing means rewriting most of the code. Discard and rebuild from the approved plan.
+
+### NEEDS_REBUILD Heuristics
+
+Issue NEEDS_REBUILD when:
+- More than ~60% of code would need to change
+- Issues are architectural (wrong abstractions, wrong data flow, wrong approach)
+- The implementation diverged significantly from the approved plan
+- Fixing the issues would effectively mean rewriting the code
+
+Issue NEEDS_REFACTOR when:
+- Issues are localized (naming, error handling, edge cases, specific functions)
+- The overall approach and architecture are sound
+- Fixes are targeted and won't cascade
 
 ---
 
-## Phase 5: REFACTOR
+## Phase 5: REFACTOR / REBUILD
 
-**Goal**: Fix any issues found during code review.
+**Goal**: Fix issues found during code review, or rebuild if repair isn't converging.
 
-### When to Run This Phase
+### Path A: NEEDS_REFACTOR (Repair)
 
-- Run if Code Review verdict was "NEEDS REFACTOR"
-- Skip if verdict was "APPROVED"
-
-### Steps:
+Run if Code Review verdict was "NEEDS_REFACTOR":
 
 1. **Address Critical Issues First**: These must be fixed
 2. **Address Major Concerns**: These should be fixed
-3. **Consider Minor Suggestions**: Fix if quick and clear benefit
+3. **Minor Suggestions are advisory**: Logged but don't require action
 4. **Make targeted changes**: Fix only the violations, don't expand scope
 5. **Verify fixes**: Re-check each fix against the principle it violated
 
-### After Refactoring
+After refactoring, return to **Phase 4: CODE REVIEW** and re-review.
 
-Return to **Phase 4: CODE REVIEW** and re-review the changes until the verdict is APPROVED.
+#### Auto-Escalation to NEEDS_REBUILD
+
+Track the refactor cycle:
+
+```
+Code Review → NEEDS_REFACTOR → Refactor → Code Review (iteration 2)
+  If blocking issue count decreased → continue refactor (max 1 more iteration)
+  If blocking issue count NOT decreased → auto-escalate to NEEDS_REBUILD
+```
+
+Maximum 3 refactor iterations. If iteration 2 shows no improvement in blocking issue count, auto-escalate to NEEDS_REBUILD instead of burning a 3rd iteration on repair that isn't converging.
+
+### Path B: NEEDS_REBUILD (Regenerate)
+
+Run if Code Review verdict was "NEEDS_REBUILD" or auto-escalated from refactor:
+
+1. **Discard current implementation**: The code from this attempt is abandoned
+2. **Preserve the approved plan**: The plan from Phase 2 remains the source of truth
+3. **Restart Phase 3 (BUILD)** with additional context:
+   - Include the rejection reason from the code review
+   - List specific pitfalls to avoid: "Previous attempt failed because [reason]. Avoid [pitfalls]."
+4. **Maximum 1 rebuild attempt**: If the rebuilt code also fails code review → task is BLOCKED
+
+```
+Phase 4 → NEEDS_REBUILD → Phase 3 (BUILD, attempt 2, with rejection context)
+  → Phase 4 (Code Review, attempt 2)
+    → If APPROVED → continue to Phase 6
+    → If NOT APPROVED → task BLOCKED
+```
 
 ---
 
@@ -443,11 +563,13 @@ All items must be checked and pass:
 
 #### 2. Code Review Verification
 - [ ] Code review completed (Phase 4)
-- [ ] Verdict was APPROVED
-- [ ] All critical issues were addressed
-- [ ] All major concerns were addressed
+- [ ] No unresolved Critical issues (BLOCKING)
+- [ ] No unresolved Major concerns (BLOCKING)
+- [ ] Advisory findings (Minor Suggestions) are permitted — they do NOT block verification
 
-**If not approved**: Return to Phase 5 REFACTOR, address concerns, re-review.
+**Note**: The gate checks for absence of unresolved blocking findings, not just an "APPROVED" verdict string. Advisory findings are acceptable.
+
+**If blocking findings remain**: Return to Phase 5 REFACTOR, address Critical and Major issues, re-review.
 
 #### 3. Security Audit (Security Engineer)
 
@@ -496,7 +618,7 @@ Write verification status to `.claude/verify-report.md`:
 - **Coverage**: X%
 
 ### Code Review
-- **Status**: [APPROVED | NEEDS_WORK]
+- **Status**: [APPROVED | NEEDS_REFACTOR | NEEDS_REBUILD]
 - **Reviewer**: Principal Engineer
 - **Critical Issues**: X (fixed: Y)
 - **Major Concerns**: X (fixed: Y)
@@ -522,7 +644,11 @@ Write verification status to `.claude/verify-report.md`:
 ### Verify Gate Logic
 
 ```
-if tests_pass AND code_review_approved AND security_clean AND architecture_valid:
+# Code review gate: no unresolved BLOCKING findings (Critical or Major)
+# Advisory findings (Minor) are permitted and logged
+code_review_clean = no_unresolved_critical AND no_unresolved_major
+
+if tests_pass AND code_review_clean AND security_clean AND architecture_valid:
     proceed_to_commit()
 else:
     identify_failures()
