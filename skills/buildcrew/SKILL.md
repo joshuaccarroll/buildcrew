@@ -36,6 +36,27 @@ The task you are working on was provided in the prompt. Parse it and understand 
 
 ---
 
+## Self-Revision Protocol
+
+After writing any creative or analytical document artifact, apply this revision loop before proceeding:
+
+1. **Write** the document fully
+2. **Re-read** the entire document from the top, as if seeing it for the first time
+3. **Evaluate** against these criteria:
+   - **Clarity**: Could someone unfamiliar with this task understand it?
+   - **Completeness**: Are there gaps, missing steps, or unstated assumptions?
+   - **Accuracy**: Do all claims match what you actually found in the codebase?
+   - **Actionability**: Is every item specific enough to act on without guesswork?
+4. **Revise** if you identified concrete improvements. Update the file in place.
+5. **Repeat** steps 2-4 until no meaningful improvements remain, or you have completed **5 revision passes**.
+
+Track revision passes at the bottom of the document:
+`<!-- Self-revision: N passes, final pass clean -->`
+
+**Skip for**: Structured reports that capture factual outcomes (test-report.md, verify-report.md, plan-review.md) — these report data, not analysis.
+
+---
+
 ## Phase 1: PLAN
 
 **Goal**: Understand the task and create a detailed implementation plan.
@@ -92,6 +113,16 @@ Write your plan to `.claude/current-plan.md` using this structure:
 ## Risks/Notes
 - [Any concerns or open questions]
 ```
+
+After writing the plan, apply the **Self-Revision Protocol** to `.claude/current-plan.md`.
+
+### Documentation
+
+After the plan is finalized, create or update the project `README.md`:
+- If no README.md exists, create one with: project name, description, setup instructions (if known), and a "Current Status" section describing what's been built so far and what this task will add.
+- If README.md exists, update it to reflect the planned changes — add new sections, update feature descriptions, revise setup steps as needed.
+- The README should always answer: **What is this? How do I set it up? What does it do right now?**
+- Apply the **Self-Revision Protocol** to README.md.
 
 ---
 
@@ -268,6 +299,14 @@ Read and internalize `.claude/skills/feature-engineer/SKILL.md`. You are now a *
 - Write helpful error messages that guide users
 - Consider loading states and edge cases users will hit
 
+### Documentation Maintenance
+
+After implementing changes, update `README.md` to reflect the actual implementation:
+- Update setup/installation instructions if dependencies or config changed
+- Add or revise feature descriptions based on what was actually built
+- Update usage examples if API or CLI interfaces changed
+- Keep the "Current Status" section accurate
+
 ---
 
 ## Phase 4: CODE REVIEW (Principal Engineer)
@@ -344,6 +383,8 @@ Write your review to `.claude/code-review.md`:
 ### Proceed to Testing: [YES | NO - refactor first | NO - rebuild required]
 ```
 
+After writing the code review, apply the **Self-Revision Protocol** to `.claude/code-review.md`.
+
 ### Verdict Definitions
 
 - **APPROVED**: Code is ready for testing. Minor/advisory findings are logged but don't block.
@@ -411,6 +452,8 @@ Phase 4 → NEEDS_REBUILD → Phase 3 (BUILD, attempt 2, with rejection context)
     → If NOT APPROVED → task BLOCKED
 ```
 
+After completing any refactor or rebuild, if user-facing behavior or setup steps changed, update `README.md` accordingly.
+
 ---
 
 ## Phase 6: TEST (Senior QA Engineer)
@@ -455,6 +498,8 @@ Before running tests, create a test plan in `.claude/current-test-plan.md`:
 - [ ] Edge cases covered
 - [ ] Coverage meets project standards
 ```
+
+After writing the test plan, apply the **Self-Revision Protocol** to `.claude/current-test-plan.md`.
 
 ### Step 2: Detect Test Framework
 
@@ -578,6 +623,7 @@ Invoke the Security Engineer persona for a comprehensive security audit:
 1. Read and internalize `.claude/skills/security-engineer/SKILL.md`
 2. Perform the full security audit checklist
 3. Write findings to `.claude/security-audit.md`
+4. Apply the **Self-Revision Protocol** to `.claude/security-audit.md`
 
 **Security checks include:**
 - OWASP Top 10 vulnerability scan

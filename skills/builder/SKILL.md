@@ -57,6 +57,25 @@ You are orchestrating the **Builder** flow for creating a new project from scrat
 
 ---
 
+## Self-Revision Protocol
+
+After writing any document artifact, apply this revision loop before presenting it to the user or proceeding:
+
+1. **Write** the document fully
+2. **Re-read** the entire document from the top, as if seeing it for the first time
+3. **Evaluate** against these criteria:
+   - **Clarity**: Could someone unfamiliar with this project understand it?
+   - **Completeness**: Are there gaps, missing sections, or unstated assumptions?
+   - **Accuracy**: Does this faithfully reflect what the user communicated?
+   - **Actionability**: Is every task specific enough to execute autonomously?
+4. **Revise** if you identified concrete improvements. Update the file in place.
+5. **Repeat** steps 2-4 until no meaningful improvements remain, or you have completed **5 revision passes**.
+
+Track revision passes at the bottom of the document:
+`<!-- Self-revision: N passes, final pass clean -->`
+
+---
+
 ## Step 0: Existing Project Detection
 
 **Before starting, check for an existing project:**
@@ -112,6 +131,8 @@ Now invoke the **Product Manager persona**.
    - Phased implementation plan with discrete tasks
    - Technical considerations
    - Risks & mitigations
+
+5. Apply the **Self-Revision Protocol** to `PROJECT_[name].md` before proceeding.
 
 **Important:**
 - Ask ONE topic at a time
@@ -177,6 +198,8 @@ If not available, inform the user:
    - Responsive considerations
    - Accessibility checklist
 
+6. Apply the **Self-Revision Protocol** to `DESIGN_[name].md` before proceeding.
+
 ---
 
 ## Step 5: Backlog Generation
@@ -232,6 +255,23 @@ If this is **adding scope** (existing project with completed tasks):
 *Use frontend-design skill for UI implementation*
 ```
 
+After generating or updating `BACKLOG.md`, apply the **Self-Revision Protocol** — focus especially on whether each task is specific enough for autonomous execution by the buildcrew workflow.
+
+### Generate or Update README
+
+After finalizing BACKLOG.md, create or update `README.md` for the project:
+
+1. Read `PROJECT_[name].md` for vision, description, and technical details
+2. Read `DESIGN_[name].md` (if it exists) for UI/UX context
+3. If no `README.md` exists, create one with:
+   - Project name and description (from vision statement)
+   - What the project will do (feature summary from phases)
+   - Tech stack (if determined during discovery)
+   - Getting started placeholder (to be filled during build)
+   - Current status: "Project planned, build not yet started"
+4. If `README.md` already exists (adding scope to an existing project), update it to reflect the new phases and tasks being added
+5. Apply the **Self-Revision Protocol** to README.md
+
 ---
 
 ## Step 6: Handoff
@@ -245,6 +285,7 @@ After creating BACKLOG.md, provide this completion message and then STOP:
 - `PROJECT_[name].md` - Project plan with [X] phases
 - `DESIGN_[name].md` - Design specification (if applicable)
 - `BACKLOG.md` - [Y] tasks ready for execution
+- `README.md` - Initial project documentation
 
 ### Next:
 1. **Exit Claude** (press Ctrl+C or type /exit)
