@@ -197,28 +197,14 @@ get_next_task() {
 # Mark a task as completed in the backlog
 mark_task_complete() {
     local task="$1"
-    local escaped_task
-    escaped_task=$(echo "$task" | sed 's/[\/&]/\\&/g; s/\[/\\[/g; s/\]/\\]/g')
-
-    if [[ "$(uname)" == "Darwin" ]]; then
-        sed -i '' "s/^- \[ \] ${escaped_task}$/- [x] ${escaped_task}/" "$BACKLOG_FILE"
-    else
-        sed -i "s/^- \[ \] ${escaped_task}$/- [x] ${escaped_task}/" "$BACKLOG_FILE"
-    fi
+    TASK="$task" perl -i -pe 's/^- \[ \] \Q$ENV{TASK}\E$/- [x] $ENV{TASK}/' "$BACKLOG_FILE"
 }
 
 # Mark a task as blocked in the backlog
 mark_task_blocked() {
     local task="$1"
     local reason="$2"
-    local escaped_task
-    escaped_task=$(echo "$task" | sed 's/[\/&]/\\&/g; s/\[/\\[/g; s/\]/\\]/g')
-
-    if [[ "$(uname)" == "Darwin" ]]; then
-        sed -i '' "s/- \[ \] ${escaped_task}/- [!] ${escaped_task} (blocked: ${reason})/" "$BACKLOG_FILE"
-    else
-        sed -i "s/- \[ \] ${escaped_task}/- [!] ${escaped_task} (blocked: ${reason})/" "$BACKLOG_FILE"
-    fi
+    TASK="$task" REASON="$reason" perl -i -pe 's/^- \[ \] \Q$ENV{TASK}\E.*/- [!] $ENV{TASK} (blocked: $ENV{REASON})/' "$BACKLOG_FILE"
 }
 
 # Count tasks by status

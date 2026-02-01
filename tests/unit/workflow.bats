@@ -166,6 +166,18 @@ EOF
     grep -q "\[x\] Fix bug in /api/users endpoint" BACKLOG.md
 }
 
+@test "mark_task_complete: handles regex metacharacters" {
+    echo '- [ ] Create `tests/e2e/seed.ts` — a utility (v1.0+) module.' > BACKLOG.md
+    mark_task_complete 'Create `tests/e2e/seed.ts` — a utility (v1.0+) module.'
+    grep -q '\[x\]' BACKLOG.md
+}
+
+@test "mark_task_blocked: handles regex metacharacters" {
+    echo '- [ ] Create `tests/e2e/seed.ts` — a utility (v1.0+) module.' > BACKLOG.md
+    mark_task_blocked 'Create `tests/e2e/seed.ts` — a utility (v1.0+) module.' "needs review"
+    grep -q '\[!\]' BACKLOG.md
+}
+
 # ─────────────────────────────────────────────────────────────────────────────
 # mark_task_blocked tests
 # ─────────────────────────────────────────────────────────────────────────────
