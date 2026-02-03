@@ -2,6 +2,10 @@
 # BuildCrew - Autonomous AI Development Workflow
 # https://github.com/joshuaccarroll/buildcrew
 
+# Wrap entire script in a block so bash parses it fully before executing.
+# This prevents syntax errors when cmd_update overwrites this file mid-run.
+{
+
 set -e
 
 # Determine script location (follow symlinks)
@@ -788,3 +792,6 @@ case "${1:-}" in
         exit 1
         ;;
 esac
+
+exit $?
+}
