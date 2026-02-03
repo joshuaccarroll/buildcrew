@@ -5,7 +5,16 @@
 # ═══════════════════════════════════════════════════════════════════════════════
 #
 # This script orchestrates an autonomous development workflow using Claude Code.
-# It reads tasks from BACKLOG.md and processes each one through:
+# It reads tasks from BACKLOG.md and processes each one through phase groups:
+#
+# Phase-isolated mode (5 separate Claude invocations):
+#   1. Research + Plan
+#   2. Plan Review (3-pass)
+#   3. Build
+#   4. Code Review + Refactor + Test
+#   5. Verify + Security Audit + Commit + Signal
+#
+# Legacy mode (single Claude invocation with all phases):
 #   Plan → Plan Review → Build → Code Review → Test → Commit
 #
 # Usage:
@@ -18,6 +27,9 @@
 #   - jq installed for JSON parsing
 #   - BACKLOG.md file in the project root
 #
+# Assumption: The working tree is clean at the start of each task.
+# BuildCrew commits after each task, so this holds for multi-task runs.
+#
 # ═══════════════════════════════════════════════════════════════════════════════
 
 set -euo pipefail
@@ -28,9 +40,23 @@ set -euo pipefail
 
 BACKLOG_FILE="BACKLOG.md"
 STATUS_FILE=".claude/workflow-status.json"
+PHASE_RESULT_FILE=".claude/phase-result.json"
 STOP_FILE=".buildcrew/.stop-workflow"
 MAX_TURNS=100
 PAUSE_BETWEEN_TASKS=5
+
+# Max turns per phase group (used in isolated mode)
+# Uses a function instead of declare -A for bash 3.2 (macOS) compatibility
+get_phase_max_turns() {
+    case "$1" in
+        research) echo 40 ;;
+        review)   echo 40 ;;
+        build)    echo 50 ;;
+        test)     echo 60 ;;
+        verify)   echo 30 ;;
+        *)        echo 30 ;;
+    esac
+}
 
 # ─────────────────────────────────────────────────────────────────────────────────
 # Colors for terminal output
@@ -226,6 +252,301 @@ count_tasks() {
 }
 
 # ─────────────────────────────────────────────────────────────────────────────────
+# Detect whether phase-isolated mode is available
+# ─────────────────────────────────────────────────────────────────────────────────
+
+# Detection checks TWO things:
+# 1. The legacy SKILL.md has the phase-isolation marker (confirming buildcrew is updated)
+# 2. The phase-specific skill directories exist (confirming the split files are available)
+is_phase_isolation_available() {
+    local skill_file
+    skill_file=$(find .claude/skills/buildcrew -name "SKILL.md" 2>/dev/null | head -1)
+
+    if [[ -n "$skill_file" ]] && grep -q 'phase-isolation' "$skill_file" \
+        && [[ -d .claude/skills/buildcrew-research ]] \
+        && [[ -d .claude/skills/buildcrew-review ]] \
+        && [[ -d .claude/skills/buildcrew-build ]] \
+        && [[ -d .claude/skills/buildcrew-test ]] \
+        && [[ -d .claude/skills/buildcrew-verify ]]; then
+        return 0
+    fi
+    return 1
+}
+
+# ─────────────────────────────────────────────────────────────────────────────────
+# Phase-Isolated Mode: run_phase_group
+# ─────────────────────────────────────────────────────────────────────────────────
+
+run_phase_group() {
+    local phase="$1"
+    local task="$2"
+    local extra_context="${3:-}"
+    local max_turns
+    max_turns=$(get_phase_max_turns "$phase")
+
+    rm -f "$PHASE_RESULT_FILE"
+
+    print_info "Phase: $phase (max $max_turns turns)"
+
+    local prompt="Execute the buildcrew-$phase skill for this task: $task"
+    if [[ -n "$extra_context" ]]; then
+        prompt="$prompt. Context: $extra_context"
+    fi
+
+    # Start file watcher that sends SIGINT when phase-result.json appears
+    (
+        while true; do
+            if [[ -f "$PHASE_RESULT_FILE" ]]; then
+                sleep 2
+                pkill -INT -f "claude.*buildcrew-$phase" 2>/dev/null || true
+                break
+            fi
+            sleep 1
+        done
+    ) &
+    local monitor_pid=$!
+
+    claude "$prompt" --max-turns "$max_turns" || true
+
+    kill $monitor_pid 2>/dev/null || true
+    wait $monitor_pid 2>/dev/null || true
+
+    # Validate result (with one retry on failure)
+    if [[ ! -f "$PHASE_RESULT_FILE" ]] || ! jq -e . "$PHASE_RESULT_FILE" >/dev/null 2>&1; then
+        print_warning "Phase $phase produced no valid result. Retrying..."
+        rm -f "$PHASE_RESULT_FILE"
+
+        # Re-launch monitor for retry
+        (
+            while true; do
+                if [[ -f "$PHASE_RESULT_FILE" ]]; then
+                    sleep 2
+                    pkill -INT -f "claude.*buildcrew-$phase" 2>/dev/null || true
+                    break
+                fi
+                sleep 1
+            done
+        ) &
+        local retry_monitor_pid=$!
+
+        claude "$prompt" --max-turns "$max_turns" || true
+
+        kill $retry_monitor_pid 2>/dev/null || true
+        wait $retry_monitor_pid 2>/dev/null || true
+
+        if [[ ! -f "$PHASE_RESULT_FILE" ]] || ! jq -e . "$PHASE_RESULT_FILE" >/dev/null 2>&1; then
+            print_error "Phase $phase failed after retry"
+            return 1
+        fi
+    fi
+
+    local verdict
+    verdict=$(jq -r '.verdict // "unknown"' "$PHASE_RESULT_FILE")
+    print_success "Phase $phase complete — verdict: $verdict"
+}
+
+# ─────────────────────────────────────────────────────────────────────────────────
+# Phase-Isolated Mode: process_task_isolated
+# ─────────────────────────────────────────────────────────────────────────────────
+
+process_task_isolated() {
+    local task="$1"
+
+    print_info "Running in phase-isolated mode (5 invocations)"
+
+    # Clean up artifacts from any previous task
+    rm -f .claude/research.md .claude/current-plan.md .claude/plan-review.md \
+          .claude/code-review.md .claude/test-report.md .claude/security-audit.md \
+          .claude/verify-report.md .claude/current-test-plan.md \
+          "$PHASE_RESULT_FILE" "$STATUS_FILE"
+
+    # --- Group 1: Research + Plan ---
+    run_phase_group "research" "$task" || return 1
+
+    # --- Group 2: Plan Review (max 3 external cycles) ---
+    local plan_review_cycle=0
+    while true; do
+        ((plan_review_cycle++))
+        run_phase_group "review" "$task" "Plan review cycle $plan_review_cycle of 3" || return 1
+
+        local verdict
+        verdict=$(jq -r '.verdict' "$PHASE_RESULT_FILE")
+        case "$verdict" in
+            approved) break ;;
+            rejected) mark_task_blocked "$task" "Plan rejected"; return 1 ;;
+            needs_revision)
+                if (( plan_review_cycle >= 3 )); then
+                    mark_task_blocked "$task" "Plan review failed to converge after 3 cycles"
+                    return 1
+                fi
+                ;;
+            *) mark_task_blocked "$task" "Unexpected plan review verdict: $verdict"; return 1 ;;
+        esac
+    done
+
+    # --- Group 3 + 4: Build → Review/Test (with rebuild loop) ---
+    local build_attempt=0
+    while true; do
+        ((build_attempt++))
+        if (( build_attempt > 2 )); then
+            mark_task_blocked "$task" "Build failed after 2 attempts"
+            return 1
+        fi
+
+        local build_context=""
+        if (( build_attempt > 1 )); then
+            local prev_reason
+            prev_reason=$(jq -r '.details // "unknown"' "$PHASE_RESULT_FILE")
+            build_context="This is build attempt $build_attempt. Previous attempt failed: $prev_reason. Avoid the same mistakes."
+        fi
+
+        run_phase_group "build" "$task" "$build_context" || return 1
+        run_phase_group "test" "$task" || return 1
+
+        local verdict
+        verdict=$(jq -r '.verdict' "$PHASE_RESULT_FILE")
+        case "$verdict" in
+            approved) break ;;
+            needs_rebuild) continue ;;
+            test_failure)
+                mark_task_blocked "$task" "Tests failing after review"
+                return 1
+                ;;
+            *) mark_task_blocked "$task" "Unexpected review verdict: $verdict"; return 1 ;;
+        esac
+    done
+
+    # --- Group 5: Verify + Commit ---
+    local verify_attempt=0
+    while true; do
+        ((verify_attempt++))
+        if (( verify_attempt > 3 )); then
+            mark_task_blocked "$task" "Verification failed after 3 attempts"
+            return 1
+        fi
+
+        run_phase_group "verify" "$task" || return 1
+
+        local verdict
+        verdict=$(jq -r '.verdict' "$PHASE_RESULT_FILE")
+        case "$verdict" in
+            complete) break ;;
+            blocked)
+                local failing
+                failing=$(jq -r '.failing_check // "unknown"' "$PHASE_RESULT_FILE")
+                case "$failing" in
+                    tests|security)
+                        run_phase_group "build" "$task" "Verify failed: $failing. Fix and rebuild." || return 1
+                        run_phase_group "test" "$task" || return 1
+                        ;;
+                    code_review)
+                        run_phase_group "test" "$task" || return 1
+                        ;;
+                    *)
+                        mark_task_blocked "$task" "Verification blocked: $failing"
+                        return 1
+                        ;;
+                esac
+                ;;
+            *) mark_task_blocked "$task" "Unexpected verify verdict: $verdict"; return 1 ;;
+        esac
+    done
+
+    # Task succeeded
+    mark_task_complete "$task"
+    local summary
+    summary=$(jq -r '.summary // "Completed"' "$STATUS_FILE" 2>/dev/null || echo "Completed")
+    print_success "Completed: $task"
+    print_info "Summary: $summary"
+}
+
+# ─────────────────────────────────────────────────────────────────────────────────
+# Legacy Mode: process_task_legacy (single Claude invocation, all phases)
+# ─────────────────────────────────────────────────────────────────────────────────
+
+process_task_legacy() {
+    local task="$1"
+
+    print_info "Running in legacy mode (single invocation)"
+
+    # Clear previous status file
+    rm -f "$STATUS_FILE"
+
+    # Run Claude with the workflow skill
+    print_info "Launching Claude Code..."
+
+    # Start a background monitor that watches for status file
+    # When status file appears, send SIGINT to Claude to exit gracefully
+    (
+        while true; do
+            if [[ -f "$STATUS_FILE" ]]; then
+                sleep 2  # Give Claude a moment to finish
+                # Find and interrupt the claude process
+                pkill -INT -f "claude.*Execute the buildcrew skill" 2>/dev/null || true
+                break
+            fi
+            sleep 1
+        done
+    ) &
+    MONITOR_PID=$!
+
+    # Run Claude (monitor will terminate it when status file appears)
+    claude "Execute the buildcrew skill for this task: $task" \
+        --max-turns "$MAX_TURNS" || true
+
+    # Clean up monitor
+    kill $MONITOR_PID 2>/dev/null || true
+    wait $MONITOR_PID 2>/dev/null || true
+
+    # Check completion status
+    if [[ -f "$STATUS_FILE" ]]; then
+        # Validate JSON before parsing
+        if ! jq -e . "$STATUS_FILE" >/dev/null 2>&1; then
+            print_error "Status file contains invalid JSON"
+            print_info "File contents: $(cat "$STATUS_FILE" 2>/dev/null | head -c 200)"
+            mark_task_blocked "$task" "Invalid status file JSON"
+            return 1
+        fi
+
+        local status
+        status=$(jq -r '.status // ""' "$STATUS_FILE")
+
+        # Validate status field
+        case "$status" in
+            complete)
+                local summary
+                summary=$(jq -r '.summary // "No summary provided"' "$STATUS_FILE")
+                mark_task_complete "$task"
+                print_success "Completed: $task"
+                print_info "Summary: $summary"
+                ;;
+            blocked)
+                local reason
+                reason=$(jq -r '.reason // "Unknown reason"' "$STATUS_FILE")
+                mark_task_blocked "$task" "$reason"
+                print_warning "Blocked: $task"
+                print_warning "Reason: $reason"
+                return 1
+                ;;
+            "")
+                print_error "Status file missing 'status' field"
+                mark_task_blocked "$task" "Missing status in response"
+                return 1
+                ;;
+            *)
+                print_error "Unexpected status value: $status"
+                mark_task_blocked "$task" "Unknown status: $status"
+                return 1
+                ;;
+        esac
+    else
+        print_warning "No status file found - assuming task needs attention"
+        mark_task_blocked "$task" "No status file"
+        return 1
+    fi
+}
+
+# ─────────────────────────────────────────────────────────────────────────────────
 # Main workflow
 # ─────────────────────────────────────────────────────────────────────────────────
 
@@ -237,6 +558,15 @@ main() {
 
     print_header "BuildCrew - Autonomous Development Pipeline"
     print_info "To stop after the current task: buildcrew stop"
+
+    # Detect mode
+    local use_isolation=false
+    if is_phase_isolation_available; then
+        use_isolation=true
+        print_info "Mode: Phase-isolated (5 invocations per task)"
+    else
+        print_info "Mode: Legacy (single invocation per task)"
+    fi
 
     local completed=0
     local failed=0
@@ -267,86 +597,26 @@ main() {
         print_task_start "$task"
 
         if [[ "$DRY_RUN" == "true" ]]; then
-            print_info "[DRY RUN] Would execute: claude -p \"Execute the buildcrew skill for this task: $task\""
+            if [[ "$use_isolation" == "true" ]]; then
+                print_info "[DRY RUN] Would execute 5 phase groups for: $task"
+            else
+                print_info "[DRY RUN] Would execute: claude -p \"Execute the buildcrew skill for this task: $task\""
+            fi
             mark_task_complete "$task"
             ((completed++))
         else
-            # Clear previous status file
-            rm -f "$STATUS_FILE"
-
-            # Run Claude with the workflow skill
-            print_info "Launching Claude Code..."
-
-            # Start a background monitor that watches for status file
-            # When status file appears, send SIGINT to Claude to exit gracefully
-            (
-                while true; do
-                    if [[ -f "$STATUS_FILE" ]]; then
-                        sleep 2  # Give Claude a moment to finish
-                        # Find and interrupt the claude process
-                        pkill -INT -f "claude.*Execute the buildcrew skill" 2>/dev/null || true
-                        break
-                    fi
-                    sleep 1
-                done
-            ) &
-            MONITOR_PID=$!
-
-            # Run Claude (monitor will terminate it when status file appears)
-            claude "Execute the buildcrew skill for this task: $task" \
-                --max-turns "$MAX_TURNS" || true
-
-            # Clean up monitor
-            kill $MONITOR_PID 2>/dev/null || true
-            wait $MONITOR_PID 2>/dev/null || true
-
-            # Check completion status
-            if [[ -f "$STATUS_FILE" ]]; then
-                # Validate JSON before parsing
-                if ! jq -e . "$STATUS_FILE" >/dev/null 2>&1; then
-                    print_error "Status file contains invalid JSON"
-                    print_info "File contents: $(cat "$STATUS_FILE" 2>/dev/null | head -c 200)"
-                    mark_task_blocked "$task" "Invalid status file JSON"
+            if [[ "$use_isolation" == "true" ]]; then
+                if process_task_isolated "$task"; then
+                    ((completed++))
+                else
                     ((failed++))
-                    continue
                 fi
-
-                local status
-                status=$(jq -r '.status // ""' "$STATUS_FILE")
-
-                # Validate status field
-                case "$status" in
-                    complete)
-                        local summary
-                        summary=$(jq -r '.summary // "No summary provided"' "$STATUS_FILE")
-                        mark_task_complete "$task"
-                        print_success "Completed: $task"
-                        print_info "Summary: $summary"
-                        ((completed++))
-                        ;;
-                    blocked)
-                        local reason
-                        reason=$(jq -r '.reason // "Unknown reason"' "$STATUS_FILE")
-                        mark_task_blocked "$task" "$reason"
-                        print_warning "Blocked: $task"
-                        print_warning "Reason: $reason"
-                        ((failed++))
-                        ;;
-                    "")
-                        print_error "Status file missing 'status' field"
-                        mark_task_blocked "$task" "Missing status in response"
-                        ((failed++))
-                        ;;
-                    *)
-                        print_error "Unexpected status value: $status"
-                        mark_task_blocked "$task" "Unknown status: $status"
-                        ((failed++))
-                        ;;
-                esac
             else
-                print_warning "No status file found - assuming task needs attention"
-                mark_task_blocked "$task" "No status file"
-                ((failed++))
+                if process_task_legacy "$task"; then
+                    ((completed++))
+                else
+                    ((failed++))
+                fi
             fi
         fi
 

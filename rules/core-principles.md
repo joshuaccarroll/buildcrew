@@ -120,3 +120,18 @@ Use judgment:
 - Performance-critical code may need optimization that looks "ugly"
 - Legacy code constraints may limit ideal solutions
 - Pragmatism over perfection - but never compromise on security
+
+---
+
+## Self-Revision Protocol
+
+After writing any creative or analytical document artifact, apply this revision loop:
+
+1. **Write** the document fully
+2. **Re-read** from the top, as if seeing it for the first time
+3. **Evaluate**: Clarity, Completeness, Accuracy, Actionability
+4. **Revise** if concrete improvements found
+5. **Repeat** until clean or 5 passes
+
+Track: `<!-- Self-revision: N passes, final pass clean -->`
+Skip for: Structured reports (test-report.md, verify-report.md, plan-review.md).

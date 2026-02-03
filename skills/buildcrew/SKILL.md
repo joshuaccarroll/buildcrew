@@ -2,6 +2,7 @@
 name: buildcrew
 description: Execute a complete development workflow for a backlog task. Use this when asked to execute the buildcrew workflow or process a backlog item through research, plan, plan review, build, code review, test, verify, and commit phases.
 allowed-tools: Read, Write, Edit, Glob, Grep, Bash, Task, Skill, WebSearch, WebFetch
+phase-isolation: v1
 ---
 
 # BuildCrew - Autonomous Development Cycle
