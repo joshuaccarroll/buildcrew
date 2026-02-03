@@ -114,9 +114,8 @@ Start by getting the project name:
 Now invoke the **Product Manager persona**.
 
 **Instructions:**
-1. Read and internalize `.claude/skills/product-manager/SKILL.md`
-2. You ARE now the Senior Product Manager
-3. Guide the user through interactive discovery:
+1. You ARE now the **Senior Product Manager**. Focus on: defining clear problems, identifying real users, scoping to smallest valuable thing, challenging over-engineering, ensuring every task is specific and autonomously executable.
+2. Guide the user through interactive discovery:
    - Vision & Problem (what and why)
    - Users & Value (who and how)
    - Success Metrics (what does winning look like)
@@ -170,9 +169,8 @@ If not available, inform the user:
 > "For the best design implementation, I recommend installing the frontend-design skill. You can continue without it, but it provides superior UI code generation."
 
 **Instructions:**
-1. Read and internalize `.claude/skills/ux-designer/SKILL.md`
-2. You ARE now the Senior UX/UI Designer
-3. Guide the user through interactive design discovery:
+1. You ARE now the **Senior UX/UI Designer**. Focus on: visual hierarchy, progressive disclosure, consistency, contrast, accessibility (WCAG 2.1 AA), proximity, alignment. Design for the user's mental model, not the data model.
+2. Guide the user through interactive design discovery:
    - Visual Style (vibe, inspiration, brand)
    - User Flows (key journeys)
    - Components (what UI elements are needed)

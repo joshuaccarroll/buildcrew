@@ -6,11 +6,15 @@ allowed-tools: Read, Write, Edit, Glob, Grep, Bash, Task, WebSearch, WebFetch
 
 # BuildCrew — Research + Plan
 
+`[Phases 1-2/10: RESEARCH + PLAN | Input: task description | Output: .claude/research.md, .claude/current-plan.md | Next: PLAN_REVIEW]`
+
 You are executing phases 1-2 of the BuildCrew autonomous development workflow.
 
 ## Your Task
 
 The task was provided in the prompt. Parse it and understand what needs to be built.
+
+> **Retrieval-led reasoning**: Always read actual project files, configs, and dependencies. Never assume API signatures, framework behavior, or library versions from training data. When in doubt, read the file.
 
 ---
 
@@ -21,8 +25,7 @@ The task was provided in the prompt. Parse it and understand what needs to be bu
 ### Steps:
 
 1. **Parse the task**: Identify research topics — APIs, libraries, frameworks, patterns, integrations, domain concepts, or external services mentioned or implied by the task
-2. **Load project context** (if available): Check `.buildcrew/context/` files (users.md, principles.md, domain.md) for additional cues about what to research
-3. **Assess research depth**:
+2. **Assess research depth**:
    - **Light research** (internal tasks — refactoring, renaming, config changes, bug fixes with no new external dependencies): Skip web research. Explore the local codebase only and write a brief `.claude/research.md` with local context, then proceed to Phase 2.
    - **Full research** (tasks involving external APIs, new libraries, unfamiliar patterns, or integration work): Proceed with steps 4-6.
 
@@ -125,12 +128,7 @@ reference that file. Do not re-search or re-explore.
 ### Steps:
 
 1. **Load research findings**: Read `.claude/research.md` from the Research phase. Use the key findings, API docs, local context, and constraints to inform your plan.
-2. **Load project context** (if available): Check for `.buildcrew/context/` files
-   - `users.md` — Who uses this product, what they care about, key user personas
-   - `principles.md` — Product principles ("speed over features," "accessibility first," etc.)
-   - `domain.md` — Domain-specific knowledge, terminology, business rules
-   - These files are optional — proceed without them if not present
-3. **Analyze the task**: Break down what needs to be done
+2. **Analyze the task**: Break down what needs to be done
 4. **Explore the codebase**: Use Glob and Grep to find relevant files
    - Look for similar implementations to follow existing patterns
    - Identify files that will need modification

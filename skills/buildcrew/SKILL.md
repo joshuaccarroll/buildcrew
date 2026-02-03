@@ -65,8 +65,7 @@ Track revision passes at the bottom of the document:
 ### Steps:
 
 1. **Parse the task**: Identify research topics — APIs, libraries, frameworks, patterns, integrations, domain concepts, or external services mentioned or implied by the task
-2. **Load project context** (if available): Check `.buildcrew/context/` files (users.md, principles.md, domain.md) for additional cues about what to research
-3. **Assess research depth**:
+2. **Assess research depth**:
    - **Light research** (internal tasks — refactoring, renaming, config changes, bug fixes with no new external dependencies): Skip web research. Explore the local codebase only and write a brief `.claude/research.md` with local context, then proceed to Phase 2.
    - **Full research** (tasks involving external APIs, new libraries, unfamiliar patterns, or integration work): Proceed with steps 4-6.
 4. **Search the web**: Use WebSearch to look for:
@@ -156,12 +155,7 @@ After writing the research document, apply the **Self-Revision Protocol** to `.c
 ### Steps:
 
 1. **Load research findings**: Read `.claude/research.md` from the Research phase. Use the key findings, API docs, local context, and constraints to inform your plan.
-2. **Load project context** (if available): Check for `.buildcrew/context/` files
-   - `users.md` — Who uses this product, what they care about, key user personas
-   - `principles.md` — Product principles ("speed over features," "accessibility first," etc.)
-   - `domain.md` — Domain-specific knowledge, terminology, business rules
-   - These files are optional — proceed without them if not present
-3. **Analyze the task**: Break down what needs to be done
+2. **Analyze the task**: Break down what needs to be done
 4. **Explore the codebase**: Use Glob and Grep to find relevant files
    - Look for similar implementations to follow existing patterns
    - Identify files that will need modification
@@ -227,18 +221,9 @@ After the plan is finalized, create or update the project `README.md`:
 
 **Goal**: Review the plan through multiple lenses before any code is written. This phase uses 3 sequential review passes to catch technical issues, user-facing gaps, and ensure convergence.
 
-### Load Project Context (if available)
-
-Check for `.buildcrew/context/` files and use them to inform the review:
-- `users.md` — Who uses this product, key user personas
-- `principles.md` — Product principles and values
-- `domain.md` — Domain-specific knowledge, terminology, business rules
-
----
-
 ### Pass 1: Technical Review (Principal Engineer)
 
-**Assume the Principal Engineer Persona.** Read and internalize `.claude/skills/principal-engineer/SKILL.md`.
+**Assume the Principal Engineer Persona.**
 
 Evaluate `.claude/current-plan.md` against:
 
@@ -276,7 +261,7 @@ If NEEDS_REVISION: Update `.claude/current-plan.md` with required changes before
 
 ### Pass 2: User Impact Review (Product Manager)
 
-**Assume the Product Manager Persona.** Read and internalize `.claude/skills/product-manager/SKILL.md` and `$BUILDCREW_HOME/rules/product-manager-rules.md`.
+**Assume the Product Manager Persona.**
 
 Walk through the plan from the end user's perspective:
 
@@ -369,7 +354,7 @@ If any pass returns NEEDS_REVISION:
 
 ### Assume the Feature Engineer Persona
 
-Read and internalize `.claude/skills/feature-engineer/SKILL.md`. You are now a **Feature Engineer** focused on:
+You are now a **Feature Engineer** focused on:
 
 - **Ship Value to Users** - Features in production matter most
 - **Pragmatic Quality** - Good enough today beats perfect never
@@ -412,7 +397,7 @@ After implementing changes, update `README.md` to reflect the actual implementat
 
 ### Assume the Principal Engineer Persona
 
-Read and internalize `.claude/skills/principal-engineer/SKILL.md`. You are the **Principal Engineer** again.
+You are the **Principal Engineer** again.
 
 ### Review All Changed Code
 
@@ -559,7 +544,7 @@ After completing any refactor or rebuild, if user-facing behavior or setup steps
 
 ### Assume the QA Engineer Persona
 
-Read and internalize `.claude/skills/qa-engineer/SKILL.md`. You are now a **Senior QA Engineer** with 12+ years of experience. Your philosophy:
+You are now a **Senior QA Engineer** with 12+ years of experience. Your philosophy:
 
 - **Tests should fail meaningfully** - Every test must have a clear failure condition
 - **Tests should pass only when correct** - No false positives
@@ -717,7 +702,7 @@ All items must be checked and pass:
 
 Invoke the Security Engineer persona for a comprehensive security audit:
 
-1. Read and internalize `.claude/skills/security-engineer/SKILL.md`
+1. Invoke the Security Engineer persona
 2. Perform the full security audit checklist
 3. Write findings to `.claude/security-audit.md`
 4. Apply the **Self-Revision Protocol** to `.claude/security-audit.md`

@@ -301,6 +301,23 @@ run_phase_group() {
         prompt="$prompt. Context: $extra_context"
     fi
 
+    # Inject project context files if they exist
+    local project_context=""
+    for ctx_file in .buildcrew/context/users.md .buildcrew/context/principles.md .buildcrew/context/domain.md; do
+        if [[ -f "$ctx_file" ]]; then
+            project_context+="$(cat "$ctx_file")"$'\n\n'
+        fi
+    done
+    if [[ -n "$project_context" ]]; then
+        # Guard against oversized context (10KB limit)
+        local ctx_size=${#project_context}
+        if (( ctx_size > 10240 )); then
+            print_warning "Project context exceeds 10KB ($ctx_size bytes), truncating"
+            project_context="${project_context:0:10240}"$'\n\n[truncated]'
+        fi
+        prompt="$prompt"$'\n\nProject Context:\n'"$project_context"
+    fi
+
     # Start file watcher that sends SIGINT when phase-result.json appears
     (
         while true; do
@@ -498,8 +515,25 @@ process_task_legacy() {
     ) &
     MONITOR_PID=$!
 
+    # Build prompt with optional project context
+    local prompt="Execute the buildcrew skill for this task: $task"
+    local project_context=""
+    for ctx_file in .buildcrew/context/users.md .buildcrew/context/principles.md .buildcrew/context/domain.md; do
+        if [[ -f "$ctx_file" ]]; then
+            project_context+="$(cat "$ctx_file")"$'\n\n'
+        fi
+    done
+    if [[ -n "$project_context" ]]; then
+        local ctx_size=${#project_context}
+        if (( ctx_size > 10240 )); then
+            print_warning "Project context exceeds 10KB ($ctx_size bytes), truncating"
+            project_context="${project_context:0:10240}"$'\n\n[truncated]'
+        fi
+        prompt="$prompt"$'\n\nProject Context:\n'"$project_context"
+    fi
+
     # Run Claude (monitor will terminate it when status file appears)
-    claude "Execute the buildcrew skill for this task: $task" \
+    claude "$prompt" \
         --max-turns "$MAX_TURNS" || true
 
     # Clean up monitor

@@ -6,6 +6,8 @@ allowed-tools: Read, Write, Edit, Glob, Grep, Bash, Task
 
 # BuildCrew — Plan Review
 
+`[Phase 3/10: PLAN_REVIEW | Input: .claude/current-plan.md | Output: .claude/plan-review.md (approved/revised plan) | Next: BUILD]`
+
 You are executing phase 3 of the BuildCrew autonomous development workflow.
 
 ## Your Task
@@ -18,18 +20,9 @@ The task was provided in the prompt. The implementation plan is in `.claude/curr
 
 **Goal**: Review the plan through multiple lenses before any code is written. This phase uses 3 sequential review passes to catch technical issues, user-facing gaps, and ensure convergence.
 
-### Load Project Context (if available)
-
-Check for `.buildcrew/context/` files and use them to inform the review:
-- `users.md` — Who uses this product, key user personas
-- `principles.md` — Product principles and values
-- `domain.md` — Domain-specific knowledge, terminology, business rules
-
----
-
 ### Pass 1: Technical Review (Principal Engineer)
 
-**Assume the Principal Engineer Persona.** Read and internalize `.claude/skills/principal-engineer/SKILL.md`.
+**Assume the Principal Engineer Persona.**
 
 Evaluate `.claude/current-plan.md` against:
 
@@ -67,7 +60,7 @@ If NEEDS_REVISION: Update `.claude/current-plan.md` with required changes before
 
 ### Pass 2: User Impact Review (Product Manager)
 
-**Assume the Product Manager Persona.** Read and internalize `.claude/skills/product-manager/SKILL.md` and product-manager rules.
+**Assume the Product Manager Persona.**
 
 Walk through the plan from the end user's perspective:
 

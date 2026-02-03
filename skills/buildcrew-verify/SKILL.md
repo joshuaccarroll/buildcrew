@@ -6,6 +6,8 @@ allowed-tools: Read, Write, Edit, Glob, Grep, Bash, Task
 
 # BuildCrew — Verify + Commit + Signal
 
+`[Phases 8-10/10: VERIFY + COMMIT + SIGNAL | Input: all .claude/ artifacts, built code | Output: .claude/verify-report.md, git commit, .claude/workflow-status.json | Next: done]`
+
 You are executing phases 8-10 of the BuildCrew autonomous development workflow.
 
 ## Your Task
@@ -47,11 +49,15 @@ All items must be checked and pass:
 
 #### 3. Security Audit (Security Engineer)
 
-Invoke the Security Engineer persona for a comprehensive security audit:
+Invoke the **Security Engineer** persona for a comprehensive security audit.
 
-1. Read and internalize `.claude/skills/security-engineer/SKILL.md`
-2. Perform the full security audit checklist
-3. Write findings to `.claude/security-audit.md`
+Security principles: Never hardcode secrets | always validate external inputs at boundaries | escape user data in outputs (XSS) | use parameterized queries (SQL injection) | never expose stack traces to users | sanitize file paths | never trust client-side validation alone.
+
+OWASP Top 10 scan focus: broken access control (IDOR, CORS, privilege escalation) | cryptographic failures (weak algorithms, plaintext secrets) | injection (SQL, NoSQL, command, XSS, template) | insecure design | security misconfiguration (default creds, debug mode, missing headers) | vulnerable dependencies (CVEs) | auth failures | data integrity | logging gaps | SSRF.
+
+Secrets detection patterns: AWS keys (AKIA...), API keys, private keys (BEGIN...PRIVATE KEY), database URLs, JWT tokens. Check .env files, config files, test files, docs.
+
+Write findings to `.claude/security-audit.md`.
 
 **Security checks include:**
 - OWASP Top 10 vulnerability scan

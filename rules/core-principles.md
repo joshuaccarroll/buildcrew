@@ -40,6 +40,15 @@ Untested code is legacy code.
 - Tests document behavior
 - Test coverage reflects confidence
 
+### 5. Retrieval-Led Reasoning Over Training-Led Reasoning
+Always read actual project files, configs, and dependencies.
+
+- Never assume API signatures, framework behavior, or library versions from training data
+- When in doubt, read the file
+- Check package.json/requirements.txt/go.mod for actual versions before using any API
+- Read existing implementations before writing new ones
+- Verify framework conventions by reading the project's actual code, not recalling patterns
+
 ---
 
 ## Universal Principles
