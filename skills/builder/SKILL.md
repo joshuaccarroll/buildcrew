@@ -221,7 +221,7 @@ If this is **adding scope** (existing project with completed tasks):
 1. Read `PROJECT_[name].md`
 2. Extract all tasks from all phases
 3. Maintain phase order (Phase 1 tasks first)
-4. Generate or update `BACKLOG.md` in the format:
+4. Generate or update `BACKLOG.md` in the format below. Be extremely concise. Sacrifice grammar for the sake of concision.
 
 ```markdown
 # Backlog

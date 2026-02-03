@@ -80,7 +80,7 @@ Track revision passes at the bottom of the document:
    - Current dependencies and their versions (package.json, requirements.txt, go.mod, etc.)
    - Configuration files and environment setup
    - Any existing documentation or ADRs
-7. **Write research findings**: Save to `.claude/research.md` using the template below
+7. **Write research findings**: Save to `.claude/research.md` using the template below. Be extremely concise. Sacrifice grammar for the sake of concision.
 8. **Flag critical discoveries**: If research reveals something that fundamentally changes the task (e.g., an API is deprecated, a library has been abandoned, there's a much simpler approach), call this out prominently in the Key Findings section. The PLAN phase will decide how to handle it.
 
 ### Research Document Template
@@ -165,7 +165,7 @@ After writing the research document, apply the **Self-Revision Protocol** to `.c
    - Look for similar implementations to follow existing patterns
    - Identify files that will need modification
    - Check for existing tests you can model yours after
-5. **Create implementation plan**: Write a step-by-step plan to `.claude/current-plan.md`
+5. **Create implementation plan**: Write a step-by-step plan to `.claude/current-plan.md`. Be extremely concise. Sacrifice grammar for the sake of concision.
    - List all files to create or modify
    - Describe each change needed
    - Note any dependencies or order requirements
