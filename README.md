@@ -221,7 +221,7 @@ cp .buildcrew/context/principles.md.example .buildcrew/context/principles.md
 cp .buildcrew/context/domain.md.example .buildcrew/context/domain.md
 ```
 
-These files are optional. When present, the Product Manager and plan reviewers use them to make better decisions about scope, tradeoffs, and priorities.
+These files are optional. When present, the orchestrator automatically injects their contents into every phase's prompt, so all personas benefit from your project context.
 
 ---
 
