@@ -37,7 +37,7 @@ check_for_updates() {
         if [ $age -lt $CACHE_TTL ]; then
             # Use cached result
             local cached_version=$(cat "$CACHE_FILE")
-            if [ -n "$cached_version" ] && [ "$cached_version" != "$current_version" ]; then
+            if [ -n "$cached_version" ] && version_lt "$current_version" "$cached_version"; then
                 print_update_notice "$current_version" "$cached_version"
             fi
             return
