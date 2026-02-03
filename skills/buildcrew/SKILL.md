@@ -1,7 +1,7 @@
 ---
 name: buildcrew
-description: Execute a complete development workflow for a backlog task. Use this when asked to execute the buildcrew workflow or process a backlog item through plan, plan review, build, code review, test, verify, and commit phases.
-allowed-tools: Read, Write, Edit, Glob, Grep, Bash, Task, Skill
+description: Execute a complete development workflow for a backlog task. Use this when asked to execute the buildcrew workflow or process a backlog item through research, plan, plan review, build, code review, test, verify, and commit phases.
+allowed-tools: Read, Write, Edit, Glob, Grep, Bash, Task, Skill, WebSearch, WebFetch
 ---
 
 # BuildCrew - Autonomous Development Cycle
@@ -11,21 +11,21 @@ You are executing an autonomous development workflow. Follow each phase in order
 ## Workflow Overview
 
 ```
-┌─────────┐   ┌─────────────┐   ┌─────────┐   ┌─────────────┐
-│ 1.PLAN  │──▶│2.PLAN REVIEW│──▶│ 3.BUILD │──▶│4.CODE REVIEW│
-└─────────┘   │ (3-Pass:    │   │(Feature │   │ (Principal) │
-              │  PE→PM→PE)  │   │Engineer)│   └──────┬──────┘
-              └─────────────┘   └────▲────┘          │
-                                     │        ┌──────▼──────┐
-┌──────────┐   ┌──────────┐         │        │ 5.REFACTOR  │
-│ 9.SIGNAL │◀──│ 8.COMMIT │         │        │ or REBUILD  │
-└──────────┘   └──────────┘         │        └──────┬──────┘
-                    ▲                │               │
-              ┌─────┴──────┐        └───────────────┘
-              │ 7.VERIFY   │        (REBUILD loops to BUILD)
+┌───────────┐   ┌─────────┐   ┌─────────────┐   ┌─────────┐   ┌─────────────┐
+│1.RESEARCH │──▶│ 2.PLAN  │──▶│3.PLAN REVIEW│──▶│ 4.BUILD │──▶│5.CODE REVIEW│
+└───────────┘   └─────────┘   │ (3-Pass:    │   │(Feature │   │ (Principal) │
+                               │  PE→PM→PE)  │   │Engineer)│   └──────┬──────┘
+                               └─────────────┘   └────▲────┘          │
+                                                      │        ┌──────▼──────┐
+┌──────────┐   ┌──────────┐                          │        │ 6.REFACTOR  │
+│10.SIGNAL │◀──│ 9.COMMIT │                          │        │ or REBUILD  │
+└──────────┘   └──────────┘                          │        └──────┬──────┘
+                    ▲                                 │               │
+              ┌─────┴──────┐                         └───────────────┘
+              │ 8.VERIFY   │                         (REBUILD loops to BUILD)
               │(BLOCKING)  │
               │- Tests     │   ┌─────────────┐
-              │- Code Rev  │◀──│ 6.TEST      │
+              │- Code Rev  │◀──│ 7.TEST      │
               │- Security  │   │(QA Engineer)│
               └────────────┘   └─────────────┘
 ```
@@ -57,28 +57,121 @@ Track revision passes at the bottom of the document:
 
 ---
 
-## Phase 1: PLAN
+## Phase 1: RESEARCH
+
+**Goal**: Gather external and local context relevant to the task before planning.
+
+### Steps:
+
+1. **Parse the task**: Identify research topics — APIs, libraries, frameworks, patterns, integrations, domain concepts, or external services mentioned or implied by the task
+2. **Load project context** (if available): Check `.buildcrew/context/` files (users.md, principles.md, domain.md) for additional cues about what to research
+3. **Assess research depth**:
+   - **Light research** (internal tasks — refactoring, renaming, config changes, bug fixes with no new external dependencies): Skip web research. Explore the local codebase only and write a brief `.claude/research.md` with local context, then proceed to Phase 2.
+   - **Full research** (tasks involving external APIs, new libraries, unfamiliar patterns, or integration work): Proceed with steps 4-6.
+4. **Search the web**: Use WebSearch to look for:
+   - Official API documentation and getting-started guides
+   - Library comparisons and recommendations
+   - Best practices and common patterns
+   - Known gotchas, breaking changes, deprecation notices
+   - Community solutions to similar problems
+5. **Fetch key pages**: Use WebFetch to retrieve and summarize the 3-5 most relevant URLs found during search. Focus on official docs and high-quality sources. If WebFetch fails on a URL, note the URL and move on — do not block research on fetch failures.
+6. **Explore local codebase**: Use Glob, Grep, and Read to find:
+   - Existing implementations of similar patterns
+   - Current dependencies and their versions (package.json, requirements.txt, go.mod, etc.)
+   - Configuration files and environment setup
+   - Any existing documentation or ADRs
+7. **Write research findings**: Save to `.claude/research.md` using the template below
+8. **Flag critical discoveries**: If research reveals something that fundamentally changes the task (e.g., an API is deprecated, a library has been abandoned, there's a much simpler approach), call this out prominently in the Key Findings section. The PLAN phase will decide how to handle it.
+
+### Research Document Template
+
+For tasks requiring full research:
+
+```markdown
+# Research: [Task Title]
+
+## Research Topics
+- [Topic 1 inferred from task]
+- [Topic 2 inferred from task]
+
+## Key Findings
+- [Most important discovery]
+- [Second most important discovery]
+
+## API & Library Documentation
+### [API/Library Name]
+- **Docs**: [URL]
+- **Key points**: [Relevant details]
+- **Example usage**: [Code snippet if applicable]
+
+## Alternative Approaches
+| Approach | Pros | Cons | Recommendation |
+|----------|------|------|----------------|
+| [Approach 1] | ... | ... | ... |
+
+## Local Codebase Context
+- [Relevant existing patterns found]
+- [Current stack/dependency info]
+- [Constraints from existing architecture]
+
+## Constraints & Gotchas
+- [Known issues, breaking changes, deprecations]
+
+## Sources
+- [URL 1]
+- [URL 2]
+```
+
+For internal-only tasks (light research):
+
+```markdown
+# Research: [Task Title]
+
+## Research Topics
+- No external APIs, libraries, or patterns to research
+
+## Local Codebase Context
+- [Relevant existing patterns found]
+- [Current stack/dependency info]
+
+## Key Findings
+- This task is internal to the codebase; no external research required.
+```
+
+### Error Handling
+
+- If WebSearch is unavailable or returns no results, proceed with local-only research. Note the limitation in the research document.
+- If WebFetch fails on specific URLs, log the URLs as "could not fetch" in the Sources section and continue.
+- The research phase should never block the workflow — always produce a `.claude/research.md`, even if it only contains local context.
+
+After writing the research document, apply the **Self-Revision Protocol** to `.claude/research.md`.
+
+---
+
+## Phase 2: PLAN
 
 **Goal**: Understand the task and create a detailed implementation plan.
 
 ### Steps:
 
-1. **Load project context** (if available): Check for `.buildcrew/context/` files
+1. **Load research findings**: Read `.claude/research.md` from the Research phase. Use the key findings, API docs, local context, and constraints to inform your plan.
+2. **Load project context** (if available): Check for `.buildcrew/context/` files
    - `users.md` — Who uses this product, what they care about, key user personas
    - `principles.md` — Product principles ("speed over features," "accessibility first," etc.)
    - `domain.md` — Domain-specific knowledge, terminology, business rules
    - These files are optional — proceed without them if not present
-2. **Analyze the task**: Break down what needs to be done
-3. **Explore the codebase**: Use Glob and Grep to find relevant files
+3. **Analyze the task**: Break down what needs to be done
+4. **Explore the codebase**: Use Glob and Grep to find relevant files
    - Look for similar implementations to follow existing patterns
    - Identify files that will need modification
    - Check for existing tests you can model yours after
-4. **Create implementation plan**: Write a step-by-step plan to `.claude/current-plan.md`
+5. **Create implementation plan**: Write a step-by-step plan to `.claude/current-plan.md`
    - List all files to create or modify
    - Describe each change needed
    - Note any dependencies or order requirements
    - Reference relevant project context (users, principles, domain) when applicable
-5. **Identify risks**: Note anything unclear or potentially problematic
+   - Include a "Research Context" section summarizing key findings from `.claude/research.md`
+6. **Identify risks**: Note anything unclear or potentially problematic
 
 ### Plan Template
 
@@ -89,6 +182,9 @@ Write your plan to `.claude/current-plan.md` using this structure:
 
 ## Summary
 [1-2 sentence description of what will be built]
+
+## Research Context
+[Key findings from .claude/research.md that inform this plan]
 
 ## Files to Modify
 - `path/to/file.ts` - [what changes]
@@ -126,7 +222,7 @@ After the plan is finalized, create or update the project `README.md`:
 
 ---
 
-## Phase 2: PLAN REVIEW (3-Pass Review)
+## Phase 3: PLAN REVIEW (3-Pass Review)
 
 **Goal**: Review the plan through multiple lenses before any code is written. This phase uses 3 sequential review passes to catch technical issues, user-facing gaps, and ensure convergence.
 
@@ -266,7 +362,7 @@ If any pass returns NEEDS_REVISION:
 
 ---
 
-## Phase 3: BUILD (Feature Engineer)
+## Phase 4: BUILD (Feature Engineer)
 
 **Goal**: Implement the changes according to the approved plan.
 
@@ -309,7 +405,7 @@ After implementing changes, update `README.md` to reflect the actual implementat
 
 ---
 
-## Phase 4: CODE REVIEW (Principal Engineer)
+## Phase 5: CODE REVIEW (Principal Engineer)
 
 **Goal**: Review the implemented code through the lens of a Principal Engineer.
 
@@ -406,7 +502,7 @@ Issue NEEDS_REFACTOR when:
 
 ---
 
-## Phase 5: REFACTOR / REBUILD
+## Phase 6: REFACTOR / REBUILD
 
 **Goal**: Fix issues found during code review, or rebuild if repair isn't converging.
 
@@ -420,7 +516,7 @@ Run if Code Review verdict was "NEEDS_REFACTOR":
 4. **Make targeted changes**: Fix only the violations, don't expand scope
 5. **Verify fixes**: Re-check each fix against the principle it violated
 
-After refactoring, return to **Phase 4: CODE REVIEW** and re-review.
+After refactoring, return to **Phase 5: CODE REVIEW** and re-review.
 
 #### Auto-Escalation to NEEDS_REBUILD
 
@@ -439,16 +535,16 @@ Maximum 3 refactor iterations. If iteration 2 shows no improvement in blocking i
 Run if Code Review verdict was "NEEDS_REBUILD" or auto-escalated from refactor:
 
 1. **Discard current implementation**: The code from this attempt is abandoned
-2. **Preserve the approved plan**: The plan from Phase 2 remains the source of truth
-3. **Restart Phase 3 (BUILD)** with additional context:
+2. **Preserve the approved plan**: The plan from Phase 3 remains the source of truth
+3. **Restart Phase 4 (BUILD)** with additional context:
    - Include the rejection reason from the code review
    - List specific pitfalls to avoid: "Previous attempt failed because [reason]. Avoid [pitfalls]."
 4. **Maximum 1 rebuild attempt**: If the rebuilt code also fails code review → task is BLOCKED
 
 ```
-Phase 4 → NEEDS_REBUILD → Phase 3 (BUILD, attempt 2, with rejection context)
-  → Phase 4 (Code Review, attempt 2)
-    → If APPROVED → continue to Phase 6
+Phase 5 → NEEDS_REBUILD → Phase 4 (BUILD, attempt 2, with rejection context)
+  → Phase 5 (Code Review, attempt 2)
+    → If APPROVED → continue to Phase 7
     → If NOT APPROVED → task BLOCKED
 ```
 
@@ -456,7 +552,7 @@ After completing any refactor or rebuild, if user-facing behavior or setup steps
 
 ---
 
-## Phase 6: TEST (Senior QA Engineer)
+## Phase 7: TEST (Senior QA Engineer)
 
 **Goal**: Verify the implementation through comprehensive testing.
 
@@ -589,7 +685,7 @@ Write results to `.claude/test-report.md`:
 
 ---
 
-## Phase 7: VERIFY (Blocking Gate)
+## Phase 8: VERIFY (Blocking Gate)
 
 **Goal**: Comprehensive verification that all quality gates pass before committing.
 
@@ -604,17 +700,17 @@ All items must be checked and pass:
 - [ ] Coverage meets project threshold (if configured)
 - [ ] No skipped tests without justification
 
-**If tests fail**: Return to Phase 3 BUILD, fix the issue, then re-run through Phase 6 TEST.
+**If tests fail**: Return to Phase 4 BUILD, fix the issue, then re-run through Phase 7 TEST.
 
 #### 2. Code Review Verification
-- [ ] Code review completed (Phase 4)
+- [ ] Code review completed (Phase 5)
 - [ ] No unresolved Critical issues (BLOCKING)
 - [ ] No unresolved Major concerns (BLOCKING)
 - [ ] Advisory findings (Minor Suggestions) are permitted — they do NOT block verification
 
 **Note**: The gate checks for absence of unresolved blocking findings, not just an "APPROVED" verdict string. Advisory findings are acceptable.
 
-**If blocking findings remain**: Return to Phase 5 REFACTOR, address Critical and Major issues, re-review.
+**If blocking findings remain**: Return to Phase 6 REFACTOR, address Critical and Major issues, re-review.
 
 #### 3. Security Audit (Security Engineer)
 
@@ -711,7 +807,7 @@ To prevent infinite loops:
 
 ---
 
-## Phase 8: COMMIT
+## Phase 9: COMMIT
 
 **Goal**: Create a meaningful commit with all changes.
 
@@ -742,7 +838,7 @@ Task: [original task description]
 
 ---
 
-## Phase 9: SIGNAL COMPLETION
+## Phase 10: SIGNAL COMPLETION
 
 **Goal**: Signal to the orchestrator that this task is complete.
 
@@ -783,6 +879,7 @@ Create `.claude/workflow-status.json`:
 ### Clean Up (Optional)
 
 Remove temporary files:
+- `.claude/research.md`
 - `.claude/current-plan.md`
 - `.claude/plan-review.md`
 - `.claude/code-review.md`

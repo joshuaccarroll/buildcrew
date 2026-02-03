@@ -164,7 +164,7 @@ Rules for project discovery, requirements gathering, and prioritization.
 
 ## Plan Review (BuildCrew Pipeline)
 
-When invoked during Phase 2 of the BuildCrew pipeline, the Product Manager reviews the implementation plan from the user's perspective.
+When invoked during Phase 3 of the BuildCrew pipeline, the Product Manager reviews the implementation plan from the user's perspective.
 
 ### Plan Review Checklist
 

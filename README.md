@@ -78,7 +78,7 @@ That's it. If you don't have a backlog yet, BuildCrew launches the Product Manag
 - Challenges scope and finds the real problem
 - Pushes back on over-complication
 - Creates phased implementation plans
-- Reviews plans from the user's perspective (Phase 2, Pass 2)
+- Reviews plans from the user's perspective (Phase 3, Pass 2)
 - **Invoked via**: `/build` or `/buildcrew product-manager`
 
 ### UX Designer

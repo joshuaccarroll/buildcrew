@@ -1,25 +1,42 @@
 # BuildCrew Default Workflow
 
-This is the default 9-phase workflow for BuildCrew. Projects can customize this by creating `.buildcrew/workflow.md`.
+This is the default 10-phase workflow for BuildCrew. Projects can customize this by creating `.buildcrew/workflow.md`.
 
 ---
 
 ## Phases
 
-### Phase 1: PLAN
+### Phase 1: RESEARCH
 **agent**: none
-**description**: Analyze task, explore codebase, create implementation plan
-**output**: .claude/current-plan.md
+**description**: Gather external and local context relevant to the task before planning
+**output**: .claude/research.md
 
 Steps:
-1. Read and understand the task from BACKLOG.md
-2. Explore the codebase to understand existing patterns
-3. Create a detailed implementation plan
-4. Write plan to .claude/current-plan.md
+1. Parse the task to identify research topics (APIs, libraries, patterns, integrations)
+2. Assess research depth (light for internal tasks, full for external dependencies)
+3. Search the web for relevant documentation and best practices (if full research)
+4. Fetch and summarize key pages (3-5 max)
+5. Explore local codebase for existing patterns and dependencies
+6. Write consolidated findings to .claude/research.md
 
 ---
 
-### Phase 2: PLAN_REVIEW (3-Pass)
+### Phase 2: PLAN
+**agent**: none
+**description**: Analyze task, explore codebase, create implementation plan
+**input**: .claude/research.md
+**output**: .claude/current-plan.md
+
+Steps:
+1. Load research findings from .claude/research.md
+2. Read and understand the task from BACKLOG.md
+3. Explore the codebase to understand existing patterns
+4. Create a detailed implementation plan incorporating research context
+5. Write plan to .claude/current-plan.md
+
+---
+
+### Phase 3: PLAN_REVIEW (3-Pass)
 **agents**: principal-engineer, product-manager
 **description**: 3-pass review: technical (PE), user impact (PM), convergence (PE)
 **input**: .claude/current-plan.md, .buildcrew/context/* (if present)
@@ -39,7 +56,7 @@ If REJECTED: Mark task as blocked
 
 ---
 
-### Phase 3: BUILD
+### Phase 4: BUILD
 **agent**: feature-engineer
 **description**: Implement the plan with focus on user value
 **input**: .claude/current-plan.md
@@ -52,7 +69,7 @@ The Feature Engineer:
 
 ---
 
-### Phase 4: CODE_REVIEW
+### Phase 5: CODE_REVIEW
 **agent**: principal-engineer
 **description**: Review implemented code for quality, patterns, and cleanup
 **output**: .claude/code-review.md
@@ -71,25 +88,25 @@ Findings are classified by severity:
 - **Minor** → ADVISORY (logged, don't trigger refactor)
 
 Verdicts: APPROVED, NEEDS_REFACTOR, or NEEDS_REBUILD
-- If NEEDS_REFACTOR: Continue to Phase 5 (REFACTOR)
-- If NEEDS_REBUILD: Return to Phase 3 (BUILD) with rejection context
-- If APPROVED (including advisory-only findings): Skip to Phase 6 (TEST)
+- If NEEDS_REFACTOR: Continue to Phase 6 (REFACTOR)
+- If NEEDS_REBUILD: Return to Phase 4 (BUILD) with rejection context
+- If APPROVED (including advisory-only findings): Skip to Phase 7 (TEST)
 
 ---
 
-### Phase 5: REFACTOR / REBUILD
+### Phase 6: REFACTOR / REBUILD
 **agent**: none
 **condition**: code_review.verdict == "NEEDS_REFACTOR" or "NEEDS_REBUILD"
 **description**: Address issues from code review, or rebuild if repair isn't converging
 
-**NEEDS_REFACTOR**: Fix blocking issues, return to Phase 4. Max 3 refactor cycles.
+**NEEDS_REFACTOR**: Fix blocking issues, return to Phase 5. Max 3 refactor cycles.
 Auto-escalation: if iteration 2 shows no improvement in blocking issue count → NEEDS_REBUILD.
 
-**NEEDS_REBUILD**: Discard implementation, preserve approved plan, restart Phase 3 with rejection context. Max 1 rebuild attempt — if rebuilt code also fails → task BLOCKED.
+**NEEDS_REBUILD**: Discard implementation, preserve approved plan, restart Phase 4 with rejection context. Max 1 rebuild attempt — if rebuilt code also fails → task BLOCKED.
 
 ---
 
-### Phase 6: TEST
+### Phase 7: TEST
 **agent**: qa-engineer
 **description**: Create test plan, write tests, run test suite
 **output**: .claude/test-report.md
@@ -102,7 +119,7 @@ The QA Engineer:
 
 ---
 
-### Phase 7: VERIFY
+### Phase 8: VERIFY
 **agent**: security-engineer
 **description**: Security audit and final verification
 **output**: .claude/security-audit.md
@@ -114,11 +131,11 @@ The QA Engineer:
 - [ ] No critical/high security vulnerabilities
 - [ ] No hardcoded secrets
 
-If any check fails: Return to Phase 3 (BUILD) with findings
+If any check fails: Return to Phase 4 (BUILD) with findings
 
 ---
 
-### Phase 8: COMMIT
+### Phase 9: COMMIT
 **agent**: none
 **description**: Create git commit for the changes
 
@@ -129,7 +146,7 @@ Create a conventional commit:
 
 ---
 
-### Phase 9: SIGNAL
+### Phase 10: SIGNAL
 **agent**: none
 **description**: Write completion status for orchestrator
 **output**: .claude/workflow-status.json
