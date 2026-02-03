@@ -137,6 +137,14 @@ print_info() {
     echo -e "${CYAN}ℹ $1${NC}"
 }
 
+print_human_review() {
+    echo -e "\n${YELLOW}${BOLD}⚠═══════════════════════════════════════════════════════════════⚠${NC}"
+    echo -e "${YELLOW}${BOLD}   HUMAN REVIEW REQUIRED${NC}"
+    echo -e "${YELLOW}   \"The hard work of thinking can't be outsourced to AI,${NC}"
+    echo -e "${YELLOW}    only amplified by it.\" —Jake Nations${NC}"
+    echo -e "${YELLOW}${BOLD}⚠═══════════════════════════════════════════════════════════════⚠${NC}\n"
+}
+
 # Check if stop signal exists
 check_stop_signal() {
     [[ -f "$STOP_FILE" ]]
@@ -372,7 +380,7 @@ process_task_isolated() {
         local verdict
         verdict=$(jq -r '.verdict' "$PHASE_RESULT_FILE")
         case "$verdict" in
-            approved) break ;;
+            approved) print_human_review; break ;;
             rejected) mark_task_blocked "$task" "Plan rejected"; return 1 ;;
             needs_revision)
                 if (( plan_review_cycle >= 3 )); then

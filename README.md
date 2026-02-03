@@ -126,25 +126,36 @@ That's it. If you don't have a backlog yet, BuildCrew launches the Product Manag
 ## The Workflow
 
 ```
-┌──────────────────────────────────────────────────────────────────┐
-│                         BuildCrew Pipeline                        │
-├──────────────────────────────────────────────────────────────────┤
-│                                                                   │
-│   PLAN ──► PLAN REVIEW ──► BUILD ──► CODE REVIEW ──► TEST        │
-│             (3-Pass:        (Feature)   (Principal)    (QA)       │
-│              PE→PM→PE)                                            │
-│                           ┌─────────────┐                         │
-│   COMMIT ◄── SECURITY ◄──┤   VERIFY    │◄── REFACTOR / REBUILD   │
-│              (blocks!)    │  (blocking) │    (REBUILD → BUILD)    │
-│                           └─────────────┘                         │
-│                                                                   │
-└──────────────────────────────────────────────────────────────────┘
+┌───────────────────────────────────────────────────────────────────┐
+│                         BuildCrew Pipeline                         │
+├───────────────────────────────────────────────────────────────────┤
+│                                                                    │
+│   RESEARCH ──► PLAN ──► PLAN REVIEW ──► BUILD ──► CODE REVIEW     │
+│                          (3-Pass:        (Feature)   (Principal)   │
+│                           PE→PM→PE)                                │
+│                                                                    │
+│   COMMIT ◄── VERIFY ◄── TEST ◄── REFACTOR / REBUILD               │
+│              (Security    (QA)     (REBUILD → BUILD)               │
+│               blocks!)                                             │
+│                                                                    │
+└───────────────────────────────────────────────────────────────────┘
 ```
+
+Each task runs through **5 isolated Claude invocations** (phase-isolated mode), keeping context focused per phase:
+
+| Invocation | Phases |
+|------------|--------|
+| 1 | Research + Plan |
+| 2 | Plan Review (3-pass) |
+| 3 | Build |
+| 4 | Code Review + Refactor + Test |
+| 5 | Verify (incl. Security Audit) + Commit |
 
 **Key features:**
 - **Quality gates** at every phase
 - **Automatic iteration** when reviews find issues
 - **Blocking security** - no commit until vulnerabilities are fixed
+- **Human review prompt** - a visible warning displays after plan review approval, before the build begins
 - **Customizable** - modify phases or remove them entirely
 
 ---
@@ -222,8 +233,10 @@ buildcrew init         # Link project to BuildCrew
 buildcrew run          # Run workflow on BACKLOG.md
 buildcrew run --single # Process one task and stop
 buildcrew run --dry-run # Preview without executing
+buildcrew stop         # Stop after current task completes
 buildcrew plugins      # Show recommended plugins
 buildcrew update       # Update BuildCrew
+buildcrew version      # Show installed version
 buildcrew uninstall    # Remove BuildCrew
 ```
 
@@ -288,6 +301,7 @@ The local file merges with the global settings. Deny rules always win.
 ### Safety Features
 
 - **No auto-push** - Commits stay local until you review and push
+- **Human review prompt** - a prominent warning displays after plan review, before the build phase begins
 - **Blocking gates** - Security issues must be fixed before commit
 - **Deny-list protection** - System directories protected even when `rm` is allowed
 
