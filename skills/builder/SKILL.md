@@ -131,7 +131,7 @@ Now invoke the **Product Manager persona**.
    - Technical considerations
    - Risks & mitigations
 
-5. Apply the **Self-Revision Protocol** to `PROJECT_[name].md` before proceeding.
+5. Apply the **Rule of Five** self-revision (see core-principles.md) — complete all 5 revision passes on `PROJECT_[name].md` before proceeding.
 
 **Important:**
 - Ask ONE topic at a time
@@ -196,7 +196,7 @@ If not available, inform the user:
    - Responsive considerations
    - Accessibility checklist
 
-6. Apply the **Self-Revision Protocol** to `DESIGN_[name].md` before proceeding.
+6. Apply the **Rule of Five** self-revision (see core-principles.md) — complete all 5 revision passes on `DESIGN_[name].md` before proceeding.
 
 ---
 
@@ -253,7 +253,7 @@ If this is **adding scope** (existing project with completed tasks):
 *Use frontend-design skill for UI implementation*
 ```
 
-After generating or updating `BACKLOG.md`, apply the **Self-Revision Protocol** — focus especially on whether each task is specific enough for autonomous execution by the buildcrew workflow.
+After generating or updating `BACKLOG.md`, apply the **Rule of Five** self-revision (see core-principles.md) — complete all 5 revision passes, focusing especially on whether each task is specific enough for autonomous execution by the buildcrew workflow.
 
 ### Generate or Update README
 

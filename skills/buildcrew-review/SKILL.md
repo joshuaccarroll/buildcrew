@@ -141,9 +141,10 @@ Write the combined review to `.claude/plan-review.md`:
 
 If any pass returns NEEDS_REVISION:
 1. Update `.claude/current-plan.md` with the required changes
-2. Re-enter the 3-pass review cycle
-3. **Maximum 3 full revision cycles** — if the plan hasn't converged after 3 cycles, mark the task as BLOCKED
-4. Only proceed when the overall verdict is APPROVED
+2. When revising `.claude/current-plan.md`, apply the **Rule of Five** self-revision to the updated plan
+3. Re-enter the 3-pass review cycle
+4. **Maximum 3 full revision cycles** — if the plan hasn't converged after 3 cycles, mark the task as BLOCKED
+5. Only proceed when the overall verdict is APPROVED
 
 ---
 

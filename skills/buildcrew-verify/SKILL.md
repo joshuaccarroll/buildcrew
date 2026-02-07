@@ -144,6 +144,7 @@ Task: [original task description]
 ```
 
 3. **Create commit**: Do NOT push (local only)
+4. **Do not create, switch, or delete git branches**. The orchestrator manages branching. Commit to the current branch.
 
 ### Commit Types:
 - `feat`: New feature

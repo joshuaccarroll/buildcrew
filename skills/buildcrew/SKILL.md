@@ -49,10 +49,16 @@ After writing any creative or analytical document artifact, apply this revision 
    - **Accuracy**: Do all claims match what you actually found in the codebase?
    - **Actionability**: Is every item specific enough to act on without guesswork?
 4. **Revise** if you identified concrete improvements. Update the file in place.
-5. **Repeat** steps 2-4 until no meaningful improvements remain, or you have completed **5 revision passes**.
+5. **Repeat** steps 2-4
+
+**Rule of Five** — For plans (.claude/current-plan.md, .claude/current-test-plan.md):
+Always complete all 5 revision passes. Do not stop early.
+
+For other documents (research.md, code-review.md, security-audit.md):
+Repeat until clean or 5 passes.
 
 Track revision passes at the bottom of the document:
-`<!-- Self-revision: N passes, final pass clean -->`
+`<!-- Self-revision: N/5 passes -->`
 
 **Skip for**: Structured reports that capture factual outcomes (test-report.md, verify-report.md, plan-review.md) — these report data, not analysis.
 
@@ -205,7 +211,7 @@ Write your plan to `.claude/current-plan.md` using this structure:
 - [Any concerns or open questions]
 ```
 
-After writing the plan, apply the **Self-Revision Protocol** to `.claude/current-plan.md`.
+After writing the plan, apply the **Rule of Five** self-revision — complete all 5 revision passes on `.claude/current-plan.md`.
 
 ### Documentation
 
@@ -581,7 +587,7 @@ Before running tests, create a test plan in `.claude/current-test-plan.md`:
 - [ ] Coverage meets project standards
 ```
 
-After writing the test plan, apply the **Self-Revision Protocol** to `.claude/current-test-plan.md`.
+After writing the test plan, apply the **Rule of Five** self-revision — complete all 5 revision passes on `.claude/current-test-plan.md`.
 
 ### Step 2: Detect Test Framework
 

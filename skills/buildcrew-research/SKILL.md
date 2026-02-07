@@ -178,7 +178,7 @@ Write your plan to `.claude/current-plan.md` using this structure:
 - [Any concerns or open questions]
 ```
 
-After writing the plan, apply the **Self-Revision Protocol** (see core-principles.md) to `.claude/current-plan.md`.
+After writing the plan, apply the **Rule of Five** self-revision (see core-principles.md) — complete all 5 revision passes on `.claude/current-plan.md`.
 
 ### Documentation
 

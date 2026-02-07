@@ -1,9 +1,15 @@
 #!/usr/bin/env bats
-# Unit tests for error handling in lib/workflow.sh
+# Contract tests for jq JSON parsing patterns used by the workflow.
+# These verify that jq correctly parses the status file formats that
+# workflow.sh relies on (valid/invalid JSON, missing fields, etc.),
+# NOT the workflow error handling logic itself.
 
 load '../setup.bash'
 
 setup() {
+    if ! command -v jq &>/dev/null; then
+        skip "jq not installed"
+    fi
     setup_test_dir
     source_lib "workflow.sh"
     create_mock_claude

@@ -50,7 +50,7 @@ PAUSE_BETWEEN_TASKS=5
 get_phase_max_turns() {
     case "$1" in
         research) echo 40 ;;
-        review)   echo 40 ;;
+        review)   echo 50 ;;
         build)    echo 50 ;;
         test)     echo 60 ;;
         verify)   echo 30 ;;
@@ -76,6 +76,12 @@ NC='\033[0m' # No Color
 
 DRY_RUN=false
 SINGLE_TASK=false
+HUMAN_REVIEW=false
+GIT_BRANCH=false
+ORIGINAL_BRANCH=""
+HAS_REMOTE=false
+GH_AVAILABLE=false
+USE_TEAMS=false
 
 parse_args() {
     while [[ $# -gt 0 ]]; do
@@ -88,12 +94,27 @@ parse_args() {
                 SINGLE_TASK=true
                 shift
                 ;;
+            --review)
+                HUMAN_REVIEW=true
+                shift
+                ;;
+            --branch)
+                GIT_BRANCH=true
+                shift
+                ;;
+            --teams)
+                USE_TEAMS=true
+                shift
+                ;;
             --help|-h)
                 echo "Usage: $0 [OPTIONS]"
                 echo ""
                 echo "Options:"
                 echo "  --dry-run    Show what would be done without executing"
                 echo "  --single     Process only one task then exit"
+                echo "  --review     Pause for human review after plan and plan review (phase-isolated mode only)"
+                echo "  --branch     Create a feature branch per task with optional PR (phase-isolated mode only)"
+                echo "  --teams      Use agent teams mode (experimental, requires CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1)"
                 echo "  --help, -h   Show this help message"
                 exit 0
                 ;;
@@ -137,12 +158,147 @@ print_info() {
     echo -e "${CYAN}ℹ $1${NC}"
 }
 
-print_human_review() {
+print_human_review_banner() {
     echo -e "\n${YELLOW}${BOLD}⚠═══════════════════════════════════════════════════════════════⚠${NC}"
     echo -e "${YELLOW}${BOLD}   HUMAN REVIEW REQUIRED${NC}"
     echo -e "${YELLOW}   \"The hard work of thinking can't be outsourced to AI,${NC}"
     echo -e "${YELLOW}    only amplified by it.\" —Jake Nations${NC}"
     echo -e "${YELLOW}${BOLD}⚠═══════════════════════════════════════════════════════════════⚠${NC}\n"
+}
+
+# Pause for human review when --review is set
+# Returns: 0 = continue, 1 = skip task, 2 = quit pipeline
+handle_human_review() {
+    local task="$1"
+    local description="$2"
+    local artifact="$3"
+
+    [[ "$HUMAN_REVIEW" == "true" ]] || return 0
+
+    # Fall back to autonomous if not interactive
+    if [[ ! -t 0 ]]; then
+        print_warning "Non-interactive terminal — skipping human review pause"
+        return 0
+    fi
+
+    print_human_review_banner
+    echo -e "${CYAN}  $description${NC}"
+    echo -e "${CYAN}  Review: $artifact${NC}"
+    echo -e "${CYAN}  (Edit the file in your editor if needed before continuing)${NC}"
+    echo ""
+    echo -e "  ${BOLD}[Enter]${NC} Continue  |  ${BOLD}[s]${NC} Skip task  |  ${BOLD}[q]${NC} Quit pipeline"
+    echo ""
+    read -r review_response
+    case "$review_response" in
+        s|S) return 1 ;;
+        q|Q) return 2 ;;
+        *) return 0 ;;
+    esac
+}
+
+# ─────────────────────────────────────────────────────────────────────────────────
+# Git branching helpers (used with --branch)
+# ─────────────────────────────────────────────────────────────────────────────────
+
+save_original_branch() {
+    ORIGINAL_BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null)
+    if [[ -z "$ORIGINAL_BRANCH" ]]; then
+        print_error "Could not determine current git branch"
+        return 1
+    fi
+}
+
+ensure_clean_worktree() {
+    if [[ -n "$(git status --porcelain 2>/dev/null)" ]]; then
+        print_error "Working tree is not clean. Commit or stash changes before using --branch."
+        return 1
+    fi
+}
+
+task_to_branch_name() {
+    local task="$1"
+    local slug
+    # Lowercase, replace non-alphanumeric with hyphens, collapse multiple hyphens, trim
+    slug=$(echo "$task" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]/-/g' | sed 's/--*/-/g' | sed 's/^-//' | sed 's/-$//')
+    # Truncate to 60 chars
+    slug="${slug:0:60}"
+    echo "buildcrew/$slug"
+}
+
+create_task_branch() {
+    local task="$1"
+    local branch_name
+    branch_name=$(task_to_branch_name "$task")
+
+    if ! ensure_clean_worktree; then
+        return 1
+    fi
+
+    # Delete existing branch from a previous failed run
+    if git rev-parse --verify "$branch_name" >/dev/null 2>&1; then
+        print_warning "Branch $branch_name exists from a previous run, recreating from $ORIGINAL_BRANCH"
+        git branch -D "$branch_name" 2>/dev/null || true
+    fi
+
+    if ! git checkout -b "$branch_name" 2>/dev/null; then
+        print_error "Failed to create branch: $branch_name"
+        return 1
+    fi
+
+    print_success "Created branch: $branch_name"
+}
+
+create_task_pr() {
+    local task="$1"
+    local branch_name
+    branch_name=$(task_to_branch_name "$task")
+
+    [[ "$HAS_REMOTE" == "true" ]] || return 0
+
+    local pr_body_file
+    pr_body_file=$(mktemp)
+
+    # Build PR body safely in a temp file
+    {
+        echo "## Task"
+        echo "$task"
+        echo ""
+        echo "## Plan Summary"
+        head -20 .claude/current-plan.md 2>/dev/null || echo "No plan available"
+        echo ""
+        echo "## Verification"
+        head -15 .claude/verify-report.md 2>/dev/null || echo "No verification report"
+        echo ""
+        echo "---"
+        echo "*Generated by [BuildCrew](https://github.com/joshuaccarroll/buildcrew)*"
+    } > "$pr_body_file"
+
+    # Push branch
+    if ! git push -u origin "$branch_name" 2>/dev/null; then
+        print_warning "Failed to push branch. Create PR manually."
+        rm -f "$pr_body_file"
+        return 0
+    fi
+
+    if [[ "$GH_AVAILABLE" == "true" ]]; then
+        gh pr create --title "$(echo "$task" | cut -c1-70)" \
+            --body-file "$pr_body_file" \
+            --base "$ORIGINAL_BRANCH" 2>/dev/null || {
+            print_warning "PR creation failed. Branch pushed; create PR manually."
+        }
+    else
+        print_info "Branch pushed. Create PR manually (gh CLI not available)."
+    fi
+    rm -f "$pr_body_file"
+}
+
+return_to_original_branch() {
+    if [[ -n "$ORIGINAL_BRANCH" ]]; then
+        if [[ -n "$(git status --porcelain 2>/dev/null)" ]]; then
+            git stash --include-untracked -m "buildcrew: WIP from incomplete task" 2>/dev/null || true
+        fi
+        git checkout "$ORIGINAL_BRANCH" 2>/dev/null || true
+    fi
 }
 
 # Check if stop signal exists
@@ -388,6 +544,18 @@ process_task_isolated() {
     # --- Group 1: Research + Plan ---
     run_phase_group "research" "$task" || return 1
 
+    # Human review pause: after research+plan, before AI review starts
+    local hr_exit=0
+    handle_human_review "$task" "Implementation plan ready" ".claude/current-plan.md" || hr_exit=$?
+    if [[ $hr_exit -eq 1 ]]; then
+        mark_task_blocked "$task" "Skipped during human review"
+        return 1
+    elif [[ $hr_exit -eq 2 ]]; then
+        touch "$STOP_FILE"
+        mark_task_blocked "$task" "Pipeline stopped by human review"
+        return 1
+    fi
+
     # --- Group 2: Plan Review (max 3 external cycles) ---
     local plan_review_cycle=0
     while true; do
@@ -397,7 +565,18 @@ process_task_isolated() {
         local verdict
         verdict=$(jq -r '.verdict' "$PHASE_RESULT_FILE")
         case "$verdict" in
-            approved) print_human_review; break ;;
+            approved)
+                local hr_exit=0
+                handle_human_review "$task" "Plan approved — review before build" ".claude/plan-review.md" || hr_exit=$?
+                if [[ $hr_exit -eq 1 ]]; then
+                    mark_task_blocked "$task" "Skipped during human review"
+                    return 1
+                elif [[ $hr_exit -eq 2 ]]; then
+                    touch "$STOP_FILE"
+                    mark_task_blocked "$task" "Pipeline stopped by human review"
+                    return 1
+                fi
+                break ;;
             rejected) mark_task_blocked "$task" "Plan rejected"; return 1 ;;
             needs_revision)
                 if (( plan_review_cycle >= 3 )); then
@@ -601,13 +780,67 @@ main() {
     print_header "BuildCrew - Autonomous Development Pipeline"
     print_info "To stop after the current task: buildcrew stop"
 
-    # Detect mode
+    # Detect mode (teams > phase-isolated > legacy)
     local use_isolation=false
-    if is_phase_isolation_available; then
+    local use_teams=false
+    if [[ "$USE_TEAMS" == "true" ]]; then
+        # Source teams module
+        local script_dir
+        script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+        source "$script_dir/teams.sh"
+
+        if ! check_teams_prerequisites; then
+            exit 1
+        fi
+        use_teams=true
+        print_info "Mode: Agent Teams (experimental)"
+        print_warning "Agent teams is experimental. Token usage will be higher than phase-isolated mode."
+        if [[ "$HUMAN_REVIEW" == "true" ]]; then
+            print_warning "--review is not yet supported with --teams (team lead manages workflow internally). Ignoring."
+            HUMAN_REVIEW=false
+        fi
+    elif is_phase_isolation_available; then
         use_isolation=true
         print_info "Mode: Phase-isolated (5 invocations per task)"
     else
         print_info "Mode: Legacy (single invocation per task)"
+        if [[ "$HUMAN_REVIEW" == "true" ]]; then
+            print_warning "--review requires phase-isolated mode (no phase boundaries in legacy mode). Ignoring."
+            HUMAN_REVIEW=false
+        fi
+        if [[ "$GIT_BRANCH" == "true" ]]; then
+            print_warning "--branch requires phase-isolated mode (no phase boundaries in legacy mode). Ignoring."
+            GIT_BRANCH=false
+        fi
+        if [[ "$USE_TEAMS" == "true" ]]; then
+            print_warning "--teams requires phase-isolated mode. Ignoring."
+            USE_TEAMS=false
+        fi
+    fi
+
+    # Git branch setup
+    if [[ "$GIT_BRANCH" == "true" ]]; then
+        if ! save_original_branch; then
+            print_error "Cannot use --branch: not a git repository or cannot determine branch"
+            exit 1
+        fi
+        if ! ensure_clean_worktree; then
+            exit 1
+        fi
+        print_info "Branch mode: each task gets a feature branch from '$ORIGINAL_BRANCH'"
+
+        # Check for remote
+        if git remote get-url origin >/dev/null 2>&1; then
+            HAS_REMOTE=true
+            # Check for gh CLI
+            if command -v gh &>/dev/null && gh auth status &>/dev/null 2>&1; then
+                GH_AVAILABLE=true
+            else
+                print_warning "gh CLI not available or not authenticated — branches will be pushed but PRs must be created manually"
+            fi
+        else
+            print_warning "No remote configured — branches will be created locally but cannot be pushed or PRed"
+        fi
     fi
 
     local completed=0
@@ -639,7 +872,12 @@ main() {
         print_task_start "$task"
 
         if [[ "$DRY_RUN" == "true" ]]; then
-            if [[ "$use_isolation" == "true" ]]; then
+            if [[ "$GIT_BRANCH" == "true" ]]; then
+                print_info "[DRY RUN] Would create branch: $(task_to_branch_name "$task")"
+            fi
+            if [[ "$use_teams" == "true" ]]; then
+                print_info "[DRY RUN] Would launch agent teams for: $task"
+            elif [[ "$use_isolation" == "true" ]]; then
                 print_info "[DRY RUN] Would execute 5 phase groups for: $task"
             else
                 print_info "[DRY RUN] Would execute: claude -p \"Execute the buildcrew skill for this task: $task\""
@@ -647,18 +885,57 @@ main() {
             mark_task_complete "$task"
             ((completed++))
         else
-            if [[ "$use_isolation" == "true" ]]; then
-                if process_task_isolated "$task"; then
-                    ((completed++))
-                else
+            # Create feature branch if --branch is set
+            if [[ "$GIT_BRANCH" == "true" ]]; then
+                if ! create_task_branch "$task"; then
+                    mark_task_blocked "$task" "Failed to create branch"
                     ((failed++))
+                    continue
+                fi
+            fi
+
+            # Run the appropriate processor
+            local task_result=0
+            if [[ "$use_teams" == "true" ]]; then
+                if process_task_teams "$task"; then
+                    task_result=0
+                else
+                    task_result=1
+                fi
+            elif [[ "$use_isolation" == "true" ]]; then
+                if process_task_isolated "$task"; then
+                    task_result=0
+                else
+                    task_result=1
                 fi
             else
                 if process_task_legacy "$task"; then
-                    ((completed++))
+                    task_result=0
                 else
-                    ((failed++))
+                    task_result=1
                 fi
+            fi
+
+            if [[ $task_result -eq 0 ]]; then
+                ((completed++))
+            else
+                ((failed++))
+            fi
+
+            # Branch cleanup: PR, return to base, sync backlog
+            if [[ "$GIT_BRANCH" == "true" ]]; then
+                if [[ $task_result -eq 0 ]]; then
+                    create_task_pr "$task" || true
+                fi
+                return_to_original_branch
+                # Sync task status to base branch
+                if [[ $task_result -eq 0 ]]; then
+                    mark_task_complete "$task"
+                else
+                    mark_task_blocked "$task" "See feature branch for details"
+                fi
+                git add "$BACKLOG_FILE" 2>/dev/null && \
+                    git commit -m "chore(backlog): update task status" 2>/dev/null || true
             fi
         fi
 

@@ -139,8 +139,14 @@ After writing any creative or analytical document artifact, apply this revision 
 1. **Write** the document fully
 2. **Re-read** from the top, as if seeing it for the first time
 3. **Evaluate**: Clarity, Completeness, Accuracy, Actionability
-4. **Revise** if concrete improvements found
-5. **Repeat** until clean or 5 passes
+4. **Revise** — improve anything that can be improved
+5. **Repeat** steps 2-4
 
-Track: `<!-- Self-revision: N passes, final pass clean -->`
+**Rule of Five** — For plans (PROJECT_*.md, .claude/current-plan.md, .claude/current-test-plan.md, DESIGN_*.md, BACKLOG.md):
+Always complete all 5 revision passes. Do not stop early.
+
+For other documents (research.md, code-review.md, security-audit.md):
+Repeat until clean or 5 passes.
+
+Track: `<!-- Self-revision: N/5 passes -->`
 Skip for: Structured reports (test-report.md, verify-report.md, plan-review.md).

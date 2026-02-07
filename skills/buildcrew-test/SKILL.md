@@ -202,6 +202,8 @@ Before running tests, create a test plan in `.claude/current-test-plan.md`:
 - [ ] Coverage meets project standards
 ```
 
+After writing the test plan, apply the **Rule of Five** self-revision (see core-principles.md) — complete all 5 revision passes on `.claude/current-test-plan.md`.
+
 ### Step 2: Detect Test Framework
 
 Look for these indicators:

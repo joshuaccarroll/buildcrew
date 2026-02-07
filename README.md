@@ -155,7 +155,10 @@ Each task runs through **5 isolated Claude invocations** (phase-isolated mode), 
 - **Quality gates** at every phase
 - **Automatic iteration** when reviews find issues
 - **Blocking security** - no commit until vulnerabilities are fixed
-- **Human review prompt** - a visible warning displays after plan review approval, before the build begins
+- **Human review** (`--review`) - pause at plan checkpoints for human inspection before proceeding
+- **Feature branches** (`--branch`) - create a branch per task with automatic PR creation
+- **Agent teams** (`--teams`) - experimental mode using Claude Code's agent teams for parallel work
+- **Rule of Five** - mandatory 5-pass self-revision on all plans
 - **Customizable** - modify phases or remove them entirely
 
 ---
@@ -233,12 +236,27 @@ buildcrew init         # Link project to BuildCrew
 buildcrew run          # Run workflow on BACKLOG.md
 buildcrew run --single # Process one task and stop
 buildcrew run --dry-run # Preview without executing
+buildcrew run --review # Pause for human review at plan checkpoints
+buildcrew run --branch # Create a feature branch per task with PR
+buildcrew run --teams  # Use agent teams mode (experimental)
 buildcrew stop         # Stop after current task completes
 buildcrew plugins      # Show recommended plugins
 buildcrew update       # Update BuildCrew
 buildcrew version      # Show installed version
 buildcrew uninstall    # Remove BuildCrew
 ```
+
+### Run Options
+
+| Flag | Description |
+|------|-------------|
+| `--single` | Process one task then exit |
+| `--dry-run` | Preview what would happen without executing |
+| `--review` | Pause after plan creation and after plan review for human inspection. Press Enter to continue, `s` to skip, `q` to quit. Phase-isolated mode only. |
+| `--branch` | Create a `buildcrew/<slug>` feature branch per task. Pushes to remote and creates a PR via `gh` if available. Each task branches independently from the base branch. Phase-isolated mode only. |
+| `--teams` | Use Claude Code's experimental agent teams feature. A team lead coordinates specialist teammates instead of 5 sequential invocations. Requires `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1`. |
+
+Flags can be combined: `buildcrew run --single --review --branch`
 
 ---
 
@@ -300,8 +318,8 @@ The local file merges with the global settings. Deny rules always win.
 
 ### Safety Features
 
-- **No auto-push** - Commits stay local until you review and push
-- **Human review prompt** - a prominent warning displays after plan review, before the build phase begins
+- **No auto-push** - Commits stay local until you review and push (unless `--branch` is used, which pushes feature branches only)
+- **Human review** (`--review`) - pauses the pipeline at plan checkpoints so you can inspect and edit plans before proceeding
 - **Blocking gates** - Security issues must be fixed before commit
 - **Deny-list protection** - System directories protected even when `rm` is allowed
 
