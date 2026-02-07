@@ -31,19 +31,10 @@ check_teams_prerequisites() {
 build_team_lead_prompt() {
     local task="$1"
 
-    # Inject project context files if they exist
-    local project_context=""
-    for ctx_file in .buildcrew/context/users.md .buildcrew/context/principles.md .buildcrew/context/domain.md; do
-        if [[ -f "$ctx_file" ]]; then
-            project_context+="$(cat "$ctx_file")"$'\n\n'
-        fi
-    done
-    if [[ -n "$project_context" ]]; then
-        local ctx_size=${#project_context}
-        if (( ctx_size > 10240 )); then
-            project_context="${project_context:0:10240}"$'\n\n[truncated]'
-        fi
-    fi
+    # Load project context (with teams-specific fallback for empty)
+    local project_context
+    project_context=$(load_project_context)
+    project_context="${project_context:-No project context files found.}"
 
     cat <<PROMPT
 You are the **BuildCrew Team Lead**. You coordinate a team of specialist agents to complete a development task through the full BuildCrew workflow.
@@ -185,66 +176,34 @@ process_task_teams() {
     local prompt
     prompt=$(build_team_lead_prompt "$task")
 
-    # Start file watcher that sends SIGINT when workflow-status.json appears
-    (
-        while true; do
-            if [[ -f "$STATUS_FILE" ]]; then
-                sleep 2
-                pkill -INT -f "claude.*BuildCrew Team Lead" 2>/dev/null || true
-                break
-            fi
-            sleep 1
-        done
-    ) &
-    local monitor_pid=$!
+    start_file_monitor "$STATUS_FILE" "claude.*BuildCrew Team Lead"
 
     claude "$prompt" --max-turns "$MAX_TURNS" || true
 
-    # Clean up monitor
-    kill $monitor_pid 2>/dev/null || true
-    wait $monitor_pid 2>/dev/null || true
+    stop_file_monitor
 
-    # Check completion status (same logic as legacy mode)
-    if [[ -f "$STATUS_FILE" ]]; then
-        if ! jq -e . "$STATUS_FILE" >/dev/null 2>&1; then
-            print_error "Status file contains invalid JSON"
-            mark_task_blocked "$task" "Invalid status file JSON"
-            return 1
-        fi
-
-        local status
-        status=$(jq -r '.status // ""' "$STATUS_FILE")
-
-        case "$status" in
+    # Check completion status
+    if parse_status_file "$STATUS_FILE"; then
+        case "$__STATUS_RESULT" in
             complete)
-                local summary
-                summary=$(jq -r '.summary // "No summary provided"' "$STATUS_FILE")
                 mark_task_complete "$task"
                 print_success "Completed: $task"
-                print_info "Summary: $summary"
+                print_info "Summary: $__STATUS_SUMMARY"
                 ;;
             blocked)
-                local reason
-                reason=$(jq -r '.reason // "Unknown reason"' "$STATUS_FILE")
-                mark_task_blocked "$task" "$reason"
+                mark_task_blocked "$task" "$__STATUS_REASON"
                 print_warning "Blocked: $task"
-                print_warning "Reason: $reason"
-                return 1
-                ;;
-            "")
-                print_error "Status file missing 'status' field"
-                mark_task_blocked "$task" "Missing status in response"
-                return 1
-                ;;
-            *)
-                print_error "Unexpected status value: $status"
-                mark_task_blocked "$task" "Unknown status: $status"
+                print_warning "Reason: $__STATUS_REASON"
                 return 1
                 ;;
         esac
     else
-        print_warning "No status file found - assuming task needs attention"
-        mark_task_blocked "$task" "No status file"
-        return 1
+        case "$__STATUS_RESULT" in
+            error)
+                print_error "$__STATUS_REASON"
+                mark_task_blocked "$task" "$__STATUS_REASON"
+                return 1
+                ;;
+        esac
     fi
 }

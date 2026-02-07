@@ -2,14 +2,9 @@
 # BuildCrew Plugin Recommendation System
 # https://github.com/joshuaccarroll/buildcrew
 
-# Colors
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[0;33m'
-BLUE='\033[0;34m'
-CYAN='\033[0;36m'
-NC='\033[0m'
-BOLD='\033[1m'
+# Self-source common.sh (needed when sourced directly by tests)
+__PLUGINS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$__PLUGINS_DIR/common.sh"
 
 # Plugin registry
 # Format: name|description|detection|type|install_url
@@ -39,7 +34,7 @@ detect_project_type() {
     fi
 
     # Language detection
-    if [[ -f "tsconfig.json" ]] || ls *.ts *.tsx 2>/dev/null | head -1 >/dev/null; then
+    if [[ -f "tsconfig.json" ]] || compgen -G "*.ts" >/dev/null 2>&1 || compgen -G "*.tsx" >/dev/null 2>&1; then
         types+=("typescript")
     fi
 
@@ -47,11 +42,11 @@ detect_project_type() {
         types+=("python")
     fi
 
-    if [[ -f "go.mod" ]] || ls *.go 2>/dev/null | head -1 >/dev/null; then
+    if [[ -f "go.mod" ]] || compgen -G "*.go" >/dev/null 2>&1; then
         types+=("go")
     fi
 
-    if [[ -f "Cargo.toml" ]] || ls *.rs 2>/dev/null | head -1 >/dev/null; then
+    if [[ -f "Cargo.toml" ]] || compgen -G "*.rs" >/dev/null 2>&1; then
         types+=("rust")
     fi
 

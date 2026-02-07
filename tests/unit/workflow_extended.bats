@@ -300,3 +300,53 @@ teardown() {
     run ensure_clean_worktree
     [ "$status" -eq 1 ]
 }
+
+# ─────────────────────────────────────────────────────────────────────────────
+# create_task_branch tests
+# ─────────────────────────────────────────────────────────────────────────────
+
+@test "create_task_branch: creates branch from current" {
+    git init
+    git config user.email "test@buildcrew.test"
+    git config user.name "Test"
+    git commit --allow-empty -m "init"
+    ORIGINAL_BRANCH="main"
+
+    run create_task_branch "Test task"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Created branch"* ]]
+
+    local current_branch
+    current_branch=$(git rev-parse --abbrev-ref HEAD)
+    [ "$current_branch" = "buildcrew/test-task" ]
+}
+
+@test "create_task_branch: recreates existing branch" {
+    git init
+    git config user.email "test@buildcrew.test"
+    git config user.name "Test"
+    git commit --allow-empty -m "init"
+    ORIGINAL_BRANCH="main"
+    git checkout -b "buildcrew/test-task"
+    git checkout main
+
+    run create_task_branch "Test task"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"exists from a previous run"* ]]
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Lockfile tests
+# ─────────────────────────────────────────────────────────────────────────────
+
+@test "cleanup: removes lockfile" {
+    mkdir -p .buildcrew
+    echo "12345" > "$LOCKFILE"
+    cleanup
+    [ ! -f "$LOCKFILE" ]
+}
+
+@test "cleanup: handles missing lockfile gracefully" {
+    run cleanup
+    [ "$status" -eq 0 ]
+}

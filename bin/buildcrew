@@ -17,20 +17,13 @@ while [ -L "$SOURCE" ]; do
 done
 SCRIPT_DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
 BUILDCREW_HOME="$(dirname "$SCRIPT_DIR")"
+export BUILDCREW_HOME
 
-# Source library files
+# Source library files (common.sh first — provides colors and helpers to all)
+source "$BUILDCREW_HOME/lib/common.sh"
 source "$BUILDCREW_HOME/lib/version.sh"
 source "$BUILDCREW_HOME/lib/update.sh"
 source "$BUILDCREW_HOME/lib/plugins.sh"
-
-# Colors
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[0;33m'
-BLUE='\033[0;34m'
-CYAN='\033[0;36m'
-NC='\033[0m' # No Color
-BOLD='\033[1m'
 
 print_logo() {
     echo -e "${CYAN}"
@@ -52,6 +45,7 @@ print_help() {
     echo -e "${BOLD}COMMANDS:${NC}"
     echo "    init        Initialize BuildCrew in current project"
     echo "    run         Execute workflow on BACKLOG.md"
+    echo "    status      Show backlog stats and last workflow result"
     echo "    stop        Stop workflow after current task completes"
     echo "    plugins     Show recommended plugins for your project"
     echo "    update      Check for and install updates"
@@ -643,6 +637,43 @@ cmd_stop() {
     echo -e "${GREEN}✓${NC} Stop signal sent. Workflow will stop after the current task completes."
 }
 
+cmd_status() {
+    local version
+    version=$(get_version)
+    echo -e "${BOLD}BuildCrew${NC} v$version"
+    echo ""
+
+    if [[ -f "$BACKLOG_FILE" ]]; then
+        echo -e "${BOLD}Backlog:${NC}"
+        echo "  Pending:   $(count_tasks pending)"
+        echo "  Completed: $(count_tasks completed)"
+        echo "  Blocked:   $(count_tasks blocked)"
+    else
+        echo -e "${YELLOW}No BACKLOG.md found.${NC} Run ${CYAN}buildcrew init${NC} to get started."
+    fi
+
+    echo ""
+    if [[ -f "$STATUS_FILE" ]]; then
+        echo -e "${BOLD}Last workflow result:${NC}"
+        if parse_status_file "$STATUS_FILE"; then
+            case "$__STATUS_RESULT" in
+                complete)
+                    echo -e "  Status:  ${GREEN}complete${NC}"
+                    echo -e "  Summary: $__STATUS_SUMMARY"
+                    ;;
+                blocked)
+                    echo -e "  Status:  ${YELLOW}blocked${NC}"
+                    echo -e "  Reason:  $__STATUS_REASON"
+                    ;;
+            esac
+        else
+            echo -e "  ${RED}$__STATUS_REASON${NC}"
+        fi
+    else
+        echo -e "${CYAN}No previous workflow run found.${NC}"
+    fi
+}
+
 cmd_run() {
     # Check for updates (non-blocking)
     check_for_updates &
@@ -771,6 +802,9 @@ case "${1:-}" in
     run)
         shift
         cmd_run "$@"
+        ;;
+    status)
+        cmd_status
         ;;
     stop)
         cmd_stop

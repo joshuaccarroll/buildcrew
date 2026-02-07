@@ -35,13 +35,19 @@
 set -euo pipefail
 
 # ─────────────────────────────────────────────────────────────────────────────────
+# Source shared utilities (works both when exec'd and when sourced by tests)
+# ─────────────────────────────────────────────────────────────────────────────────
+
+__WORKFLOW_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$__WORKFLOW_DIR/common.sh"
+
+# ─────────────────────────────────────────────────────────────────────────────────
 # Configuration
 # ─────────────────────────────────────────────────────────────────────────────────
 
-BACKLOG_FILE="BACKLOG.md"
-STATUS_FILE=".claude/workflow-status.json"
 PHASE_RESULT_FILE=".claude/phase-result.json"
 STOP_FILE=".buildcrew/.stop-workflow"
+LOCKFILE=".buildcrew/.workflow-lock"
 MAX_TURNS=100
 PAUSE_BETWEEN_TASKS=5
 
@@ -57,18 +63,6 @@ get_phase_max_turns() {
         *)        echo 30 ;;
     esac
 }
-
-# ─────────────────────────────────────────────────────────────────────────────────
-# Colors for terminal output
-# ─────────────────────────────────────────────────────────────────────────────────
-
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-CYAN='\033[0;36m'
-BOLD='\033[1m'
-NC='\033[0m' # No Color
 
 # ─────────────────────────────────────────────────────────────────────────────────
 # Argument parsing (only when executed directly)
@@ -127,35 +121,13 @@ parse_args() {
 }
 
 # ─────────────────────────────────────────────────────────────────────────────────
-# Helper functions
+# Workflow-specific helpers
 # ─────────────────────────────────────────────────────────────────────────────────
-
-print_header() {
-    echo -e "\n${BLUE}═══════════════════════════════════════════════════════════════${NC}"
-    echo -e "${BLUE}   ${BOLD}$1${NC}"
-    echo -e "${BLUE}═══════════════════════════════════════════════════════════════${NC}\n"
-}
 
 print_task_start() {
     echo -e "\n${YELLOW}───────────────────────────────────────────────────────────────${NC}"
     echo -e "${YELLOW}${BOLD}Task:${NC} $1"
     echo -e "${YELLOW}───────────────────────────────────────────────────────────────${NC}\n"
-}
-
-print_success() {
-    echo -e "${GREEN}✓ $1${NC}"
-}
-
-print_warning() {
-    echo -e "${YELLOW}⚠ $1${NC}"
-}
-
-print_error() {
-    echo -e "${RED}✗ $1${NC}"
-}
-
-print_info() {
-    echo -e "${CYAN}ℹ $1${NC}"
 }
 
 print_human_review_banner() {
@@ -164,6 +136,12 @@ print_human_review_banner() {
     echo -e "${YELLOW}   \"The hard work of thinking can't be outsourced to AI,${NC}"
     echo -e "${YELLOW}    only amplified by it.\" —Jake Nations${NC}"
     echo -e "${YELLOW}${BOLD}⚠═══════════════════════════════════════════════════════════════⚠${NC}\n"
+}
+
+# Cleanup handler for EXIT/INT/TERM
+cleanup() {
+    stop_file_monitor
+    rm -f "$LOCKFILE"
 }
 
 # Pause for human review when --review is set
@@ -397,24 +375,6 @@ mark_task_blocked() {
     TASK="$task" REASON="$reason" perl -i -pe 's/^- \[ \] \Q$ENV{TASK}\E.*/- [!] $ENV{TASK} (blocked: $ENV{REASON})/' "$BACKLOG_FILE"
 }
 
-# Count tasks by status
-count_tasks() {
-    local status="$1"
-    local count
-    case "$status" in
-        "pending")
-            count=$(grep -c '^\- \[ \]' "$BACKLOG_FILE" 2>/dev/null)
-            ;;
-        "completed")
-            count=$(grep -c '^\- \[x\]' "$BACKLOG_FILE" 2>/dev/null)
-            ;;
-        "blocked")
-            count=$(grep -c '^\- \[!\]' "$BACKLOG_FILE" 2>/dev/null)
-            ;;
-    esac
-    echo "${count:-0}"
-}
-
 # ─────────────────────────────────────────────────────────────────────────────────
 # Detect whether phase-isolated mode is available
 # ─────────────────────────────────────────────────────────────────────────────────
@@ -457,63 +417,30 @@ run_phase_group() {
         prompt="$prompt. Context: $extra_context"
     fi
 
-    # Inject project context files if they exist
-    local project_context=""
-    for ctx_file in .buildcrew/context/users.md .buildcrew/context/principles.md .buildcrew/context/domain.md; do
-        if [[ -f "$ctx_file" ]]; then
-            project_context+="$(cat "$ctx_file")"$'\n\n'
-        fi
-    done
+    # Inject project context
+    local project_context
+    project_context=$(load_project_context)
     if [[ -n "$project_context" ]]; then
-        # Guard against oversized context (10KB limit)
-        local ctx_size=${#project_context}
-        if (( ctx_size > 10240 )); then
-            print_warning "Project context exceeds 10KB ($ctx_size bytes), truncating"
-            project_context="${project_context:0:10240}"$'\n\n[truncated]'
-        fi
         prompt="$prompt"$'\n\nProject Context:\n'"$project_context"
     fi
 
-    # Start file watcher that sends SIGINT when phase-result.json appears
-    (
-        while true; do
-            if [[ -f "$PHASE_RESULT_FILE" ]]; then
-                sleep 2
-                pkill -INT -f "claude.*buildcrew-$phase" 2>/dev/null || true
-                break
-            fi
-            sleep 1
-        done
-    ) &
-    local monitor_pid=$!
+    # Start file watcher
+    start_file_monitor "$PHASE_RESULT_FILE" "claude.*buildcrew-$phase"
 
     claude "$prompt" --max-turns "$max_turns" || true
 
-    kill $monitor_pid 2>/dev/null || true
-    wait $monitor_pid 2>/dev/null || true
+    stop_file_monitor
 
     # Validate result (with one retry on failure)
     if [[ ! -f "$PHASE_RESULT_FILE" ]] || ! jq -e . "$PHASE_RESULT_FILE" >/dev/null 2>&1; then
         print_warning "Phase $phase produced no valid result. Retrying..."
         rm -f "$PHASE_RESULT_FILE"
 
-        # Re-launch monitor for retry
-        (
-            while true; do
-                if [[ -f "$PHASE_RESULT_FILE" ]]; then
-                    sleep 2
-                    pkill -INT -f "claude.*buildcrew-$phase" 2>/dev/null || true
-                    break
-                fi
-                sleep 1
-            done
-        ) &
-        local retry_monitor_pid=$!
+        start_file_monitor "$PHASE_RESULT_FILE" "claude.*buildcrew-$phase"
 
         claude "$prompt" --max-turns "$max_turns" || true
 
-        kill $retry_monitor_pid 2>/dev/null || true
-        wait $retry_monitor_pid 2>/dev/null || true
+        stop_file_monitor
 
         if [[ ! -f "$PHASE_RESULT_FILE" ]] || ! jq -e . "$PHASE_RESULT_FILE" >/dev/null 2>&1; then
             print_error "Phase $phase failed after retry"
@@ -679,35 +606,14 @@ process_task_legacy() {
     # Run Claude with the workflow skill
     print_info "Launching Claude Code..."
 
-    # Start a background monitor that watches for status file
-    # When status file appears, send SIGINT to Claude to exit gracefully
-    (
-        while true; do
-            if [[ -f "$STATUS_FILE" ]]; then
-                sleep 2  # Give Claude a moment to finish
-                # Find and interrupt the claude process
-                pkill -INT -f "claude.*Execute the buildcrew skill" 2>/dev/null || true
-                break
-            fi
-            sleep 1
-        done
-    ) &
-    MONITOR_PID=$!
+    # Start file monitor
+    start_file_monitor "$STATUS_FILE" "claude.*Execute the buildcrew skill"
 
     # Build prompt with optional project context
     local prompt="Execute the buildcrew skill for this task: $task"
-    local project_context=""
-    for ctx_file in .buildcrew/context/users.md .buildcrew/context/principles.md .buildcrew/context/domain.md; do
-        if [[ -f "$ctx_file" ]]; then
-            project_context+="$(cat "$ctx_file")"$'\n\n'
-        fi
-    done
+    local project_context
+    project_context=$(load_project_context)
     if [[ -n "$project_context" ]]; then
-        local ctx_size=${#project_context}
-        if (( ctx_size > 10240 )); then
-            print_warning "Project context exceeds 10KB ($ctx_size bytes), truncating"
-            project_context="${project_context:0:10240}"$'\n\n[truncated]'
-        fi
         prompt="$prompt"$'\n\nProject Context:\n'"$project_context"
     fi
 
@@ -715,55 +621,31 @@ process_task_legacy() {
     claude "$prompt" \
         --max-turns "$MAX_TURNS" || true
 
-    # Clean up monitor
-    kill $MONITOR_PID 2>/dev/null || true
-    wait $MONITOR_PID 2>/dev/null || true
+    stop_file_monitor
 
     # Check completion status
-    if [[ -f "$STATUS_FILE" ]]; then
-        # Validate JSON before parsing
-        if ! jq -e . "$STATUS_FILE" >/dev/null 2>&1; then
-            print_error "Status file contains invalid JSON"
-            print_info "File contents: $(cat "$STATUS_FILE" 2>/dev/null | head -c 200)"
-            mark_task_blocked "$task" "Invalid status file JSON"
-            return 1
-        fi
-
-        local status
-        status=$(jq -r '.status // ""' "$STATUS_FILE")
-
-        # Validate status field
-        case "$status" in
+    if parse_status_file "$STATUS_FILE"; then
+        case "$__STATUS_RESULT" in
             complete)
-                local summary
-                summary=$(jq -r '.summary // "No summary provided"' "$STATUS_FILE")
                 mark_task_complete "$task"
                 print_success "Completed: $task"
-                print_info "Summary: $summary"
+                print_info "Summary: $__STATUS_SUMMARY"
                 ;;
             blocked)
-                local reason
-                reason=$(jq -r '.reason // "Unknown reason"' "$STATUS_FILE")
-                mark_task_blocked "$task" "$reason"
+                mark_task_blocked "$task" "$__STATUS_REASON"
                 print_warning "Blocked: $task"
-                print_warning "Reason: $reason"
-                return 1
-                ;;
-            "")
-                print_error "Status file missing 'status' field"
-                mark_task_blocked "$task" "Missing status in response"
-                return 1
-                ;;
-            *)
-                print_error "Unexpected status value: $status"
-                mark_task_blocked "$task" "Unknown status: $status"
+                print_warning "Reason: $__STATUS_REASON"
                 return 1
                 ;;
         esac
     else
-        print_warning "No status file found - assuming task needs attention"
-        mark_task_blocked "$task" "No status file"
-        return 1
+        case "$__STATUS_RESULT" in
+            error)
+                print_error "$__STATUS_REASON"
+                mark_task_blocked "$task" "$__STATUS_REASON"
+                return 1
+                ;;
+        esac
     fi
 }
 
@@ -772,6 +654,19 @@ process_task_legacy() {
 # ─────────────────────────────────────────────────────────────────────────────────
 
 main() {
+    # Lockfile: prevent concurrent runs (check early, create after worktree check)
+    if [[ -f "$LOCKFILE" ]]; then
+        local existing_pid
+        existing_pid=$(cat "$LOCKFILE" 2>/dev/null)
+        if [[ -n "$existing_pid" ]] && kill -0 "$existing_pid" 2>/dev/null; then
+            print_error "Another BuildCrew workflow is already running (PID $existing_pid)"
+            print_info "If this is stale, remove $LOCKFILE"
+            exit 1
+        fi
+        # Stale lockfile — previous run crashed
+        rm -f "$LOCKFILE"
+    fi
+
     check_prerequisites
 
     # Clear any previous stop signal
@@ -785,9 +680,7 @@ main() {
     local use_teams=false
     if [[ "$USE_TEAMS" == "true" ]]; then
         # Source teams module
-        local script_dir
-        script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-        source "$script_dir/teams.sh"
+        source "$__WORKFLOW_DIR/teams.sh"
 
         if ! check_teams_prerequisites; then
             exit 1
@@ -842,6 +735,11 @@ main() {
             print_warning "No remote configured — branches will be created locally but cannot be pushed or PRed"
         fi
     fi
+
+    # Create lockfile now (after worktree check, so --branch mode sees clean tree)
+    mkdir -p .buildcrew
+    echo $$ > "$LOCKFILE"
+    trap cleanup EXIT INT TERM
 
     local completed=0
     local failed=0
@@ -987,5 +885,5 @@ main() {
 
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
     parse_args "$@"
-    main "$@"
+    main
 fi
