@@ -714,6 +714,10 @@ cmd_update() {
 
         echo ""
         echo -e "${GREEN}✓${NC} Updated to v$latest"
+
+        # Exit immediately — install.sh replaced the script on disk,
+        # so bash must not read further from the now-stale file descriptor.
+        exit 0
     else
         echo "Update cancelled."
     fi
