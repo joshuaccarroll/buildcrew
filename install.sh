@@ -162,6 +162,12 @@ install_local() {
     # Create install directory
     mkdir -p "$INSTALL_DIR"
 
+    # Remove the running script before copying so that during self-update,
+    # bash's open file descriptor stays on the old (unlinked) inode and
+    # finishes reading the old content cleanly. The new cp creates a fresh inode.
+    rm -f "$INSTALL_DIR/bin/buildcrew" 2>/dev/null
+    rm -f "$INSTALL_DIR/lib/workflow.sh" 2>/dev/null
+
     # Copy all files
     cp -r "$source_dir/bin" "$INSTALL_DIR/"
     cp -r "$source_dir/lib" "$INSTALL_DIR/"
