@@ -695,12 +695,7 @@ process_task_isolated() {
             verdict=$(jq -r '.verdict' "$PHASE_RESULT_FILE")
             case "$verdict" in
                 approved) break ;;
-                needs_rebuild) continue ;;
-                test_failure)
-                    mark_task_blocked "$task" "Tests failing after review"
-                    clear_task_progress
-                    return 1
-                    ;;
+                needs_rebuild|test_failure) continue ;;
                 *) mark_task_blocked "$task" "Unexpected review verdict: $verdict"; clear_task_progress; return 1 ;;
             esac
         done

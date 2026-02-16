@@ -45,7 +45,7 @@ Track completed phases in `.buildcrew/task-progress.json`. Add `--resume` flag t
 
 Currently `test_failure` immediately blocks the task in the build loop, while `needs_rebuild` gets a retry. The verify loop already rebuilds on test failures (lines 569-571), so the tool acknowledges rebuilds can fix test issues — just not in the build loop. Give `test_failure` one more build attempt before blocking.
 
-- [ ] Pending
+- [x] Done
 
 ### 6. Remove README update from research/plan phase
 **Category**: Token savings
