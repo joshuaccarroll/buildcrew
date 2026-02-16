@@ -50,6 +50,8 @@ STOP_FILE=".buildcrew/.stop-workflow"
 LOCKFILE=".buildcrew/.workflow-lock"
 MAX_TURNS=100
 PAUSE_BETWEEN_TASKS=5
+MAX_INVOCATIONS=${MAX_INVOCATIONS:-15}
+__INVOCATION_COUNT=0
 
 # Max turns per phase group (used in isolated mode)
 # Uses a function instead of declare -A for bash 3.2 (macOS) compatibility
@@ -408,6 +410,12 @@ run_phase_group() {
     local max_turns
     max_turns=$(get_phase_max_turns "$phase")
 
+    # Global invocation ceiling — prevent runaway API cost
+    if (( __INVOCATION_COUNT >= MAX_INVOCATIONS )); then
+        print_error "Global invocation ceiling reached ($__INVOCATION_COUNT/$MAX_INVOCATIONS) — aborting phase: $phase"
+        return 1
+    fi
+
     rm -f "$PHASE_RESULT_FILE"
 
     print_info "Phase: $phase (max $max_turns turns)"
@@ -427,6 +435,7 @@ run_phase_group() {
     # Start file watcher
     start_file_monitor "$PHASE_RESULT_FILE" "claude.*buildcrew-$phase"
 
+    __INVOCATION_COUNT=$(( __INVOCATION_COUNT + 1 ))
     claude "$prompt" --max-turns "$max_turns" || true
 
     stop_file_monitor
@@ -436,8 +445,15 @@ run_phase_group() {
         print_warning "Phase $phase produced no valid result. Retrying..."
         rm -f "$PHASE_RESULT_FILE"
 
+        # Check ceiling again before retry
+        if (( __INVOCATION_COUNT >= MAX_INVOCATIONS )); then
+            print_error "Global invocation ceiling reached ($__INVOCATION_COUNT/$MAX_INVOCATIONS) — cannot retry phase: $phase"
+            return 1
+        fi
+
         start_file_monitor "$PHASE_RESULT_FILE" "claude.*buildcrew-$phase"
 
+        __INVOCATION_COUNT=$(( __INVOCATION_COUNT + 1 ))
         claude "$prompt" --max-turns "$max_turns" || true
 
         stop_file_monitor
@@ -459,6 +475,9 @@ run_phase_group() {
 
 process_task_isolated() {
     local task="$1"
+
+    # Reset global invocation counter for this task
+    __INVOCATION_COUNT=0
 
     print_info "Running in phase-isolated mode (5 invocations)"
 

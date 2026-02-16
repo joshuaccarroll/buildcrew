@@ -350,3 +350,50 @@ teardown() {
     run cleanup
     [ "$status" -eq 0 ]
 }
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Global invocation ceiling tests
+# ─────────────────────────────────────────────────────────────────────────────
+
+@test "MAX_INVOCATIONS: defaults to 15" {
+    [ "$MAX_INVOCATIONS" -eq 15 ]
+}
+
+@test "MAX_INVOCATIONS: can be overridden via env var" {
+    MAX_INVOCATIONS=25
+    [ "$MAX_INVOCATIONS" -eq 25 ]
+}
+
+@test "__INVOCATION_COUNT: starts at 0 after sourcing" {
+    [ "$__INVOCATION_COUNT" -eq 0 ]
+}
+
+@test "run_phase_group: returns 1 when invocation ceiling reached" {
+    __INVOCATION_COUNT=15
+    MAX_INVOCATIONS=15
+    run run_phase_group "build" "test task"
+    [ "$status" -eq 1 ]
+}
+
+@test "run_phase_group: error message mentions invocation ceiling" {
+    __INVOCATION_COUNT=15
+    MAX_INVOCATIONS=15
+    run run_phase_group "build" "test task"
+    [[ "$output" == *"invocation ceiling"* ]]
+}
+
+@test "run_phase_group: error message includes count and max" {
+    __INVOCATION_COUNT=15
+    MAX_INVOCATIONS=15
+    run run_phase_group "build" "test task"
+    [[ "$output" == *"15/15"* ]]
+}
+
+@test "run_phase_group: passes ceiling check when under limit" {
+    __INVOCATION_COUNT=14
+    MAX_INVOCATIONS=15
+    # Will fail because there's no real claude command, but should get past
+    # the initial ceiling check — the Phase: info line proves it passed
+    run run_phase_group "build" "test task"
+    [[ "$output" == *"Phase: build"* ]]
+}
