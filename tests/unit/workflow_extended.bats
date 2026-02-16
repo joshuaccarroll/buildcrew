@@ -397,3 +397,159 @@ teardown() {
     run run_phase_group "build" "test task"
     [[ "$output" == *"Phase: build"* ]]
 }
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Task progress tracking tests (--resume)
+# ─────────────────────────────────────────────────────────────────────────────
+
+@test "save_task_progress: creates valid JSON file" {
+    echo "- [ ] Test task" > BACKLOG.md
+    save_task_progress "Test task" "research review" 4
+    [ -f "$PROGRESS_FILE" ]
+    jq -e . "$PROGRESS_FILE" >/dev/null
+}
+
+@test "save_task_progress: stores correct task name" {
+    echo "- [ ] Test task" > BACKLOG.md
+    save_task_progress "Test task" "research" 2
+    local stored_task
+    stored_task=$(jq -r '.task' "$PROGRESS_FILE")
+    [ "$stored_task" = "Test task" ]
+}
+
+@test "save_task_progress: stores completed phases as array" {
+    echo "- [ ] Test task" > BACKLOG.md
+    save_task_progress "Test task" "research review" 4
+    local count
+    count=$(jq '.completed_phases | length' "$PROGRESS_FILE")
+    [ "$count" -eq 2 ]
+    [ "$(jq -r '.completed_phases[0]' "$PROGRESS_FILE")" = "research" ]
+    [ "$(jq -r '.completed_phases[1]' "$PROGRESS_FILE")" = "review" ]
+}
+
+@test "save_task_progress: stores invocation count" {
+    echo "- [ ] Test task" > BACKLOG.md
+    save_task_progress "Test task" "research" 7
+    local count
+    count=$(jq '.invocation_count' "$PROGRESS_FILE")
+    [ "$count" -eq 7 ]
+}
+
+@test "save_task_progress: stores timestamp" {
+    echo "- [ ] Test task" > BACKLOG.md
+    save_task_progress "Test task" "research" 1
+    local ts
+    ts=$(jq -r '.timestamp' "$PROGRESS_FILE")
+    [ -n "$ts" ]
+    [ "$ts" != "null" ]
+}
+
+@test "save_task_progress: handles special characters in task name" {
+    echo '- [ ] Create `tests/e2e/seed.ts` — a utility (v1.0+) module.' > BACKLOG.md
+    save_task_progress 'Create `tests/e2e/seed.ts` — a utility (v1.0+) module.' "research" 1
+    jq -e . "$PROGRESS_FILE" >/dev/null
+    local stored_task
+    stored_task=$(jq -r '.task' "$PROGRESS_FILE")
+    [ "$stored_task" = 'Create `tests/e2e/seed.ts` — a utility (v1.0+) module.' ]
+}
+
+@test "load_task_progress: returns 1 when no file exists" {
+    echo "- [ ] Test task" > BACKLOG.md
+    run load_task_progress
+    [ "$status" -eq 1 ]
+}
+
+@test "load_task_progress: returns 1 with invalid JSON" {
+    echo "- [ ] Test task" > BACKLOG.md
+    mkdir -p .buildcrew
+    echo "not valid json" > "$PROGRESS_FILE"
+    run load_task_progress
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"Invalid progress file"* ]]
+}
+
+@test "load_task_progress: returns 1 when task is empty" {
+    echo "- [ ] Test task" > BACKLOG.md
+    mkdir -p .buildcrew
+    echo '{"task": "", "completed_phases": [], "invocation_count": 0}' > "$PROGRESS_FILE"
+    run load_task_progress
+    [ "$status" -eq 1 ]
+}
+
+@test "load_task_progress: returns 1 when task no longer pending" {
+    echo "- [x] Completed task" > BACKLOG.md
+    mkdir -p .buildcrew
+    echo '{"task": "Completed task", "completed_phases": ["research"], "invocation_count": 2}' > "$PROGRESS_FILE"
+    run load_task_progress
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"no longer pending"* ]]
+    # Progress file should be cleared
+    [ ! -f "$PROGRESS_FILE" ]
+}
+
+@test "load_task_progress: sets globals on success" {
+    echo "- [ ] Test task" > BACKLOG.md
+    mkdir -p .buildcrew
+    echo '{"task": "Test task", "completed_phases": ["research", "review"], "invocation_count": 5, "timestamp": "2024-01-15T10:30:00"}' > "$PROGRESS_FILE"
+    load_task_progress
+    [ "$__RESUME_TASK" = "Test task" ]
+    [ "$__RESUME_PHASES" = "research review" ]
+    [ "$__RESUME_INVOCATIONS" -eq 5 ]
+}
+
+@test "clear_task_progress: removes progress file" {
+    mkdir -p .buildcrew
+    echo '{}' > "$PROGRESS_FILE"
+    clear_task_progress
+    [ ! -f "$PROGRESS_FILE" ]
+}
+
+@test "clear_task_progress: succeeds when no file exists" {
+    run clear_task_progress
+    [ "$status" -eq 0 ]
+}
+
+@test "phase_completed: returns 0 for completed phase" {
+    __RESUME_PHASES="research review"
+    run phase_completed "research"
+    [ "$status" -eq 0 ]
+}
+
+@test "phase_completed: returns 0 for second completed phase" {
+    __RESUME_PHASES="research review"
+    run phase_completed "review"
+    [ "$status" -eq 0 ]
+}
+
+@test "phase_completed: returns 1 for incomplete phase" {
+    __RESUME_PHASES="research review"
+    run phase_completed "build"
+    [ "$status" -eq 1 ]
+}
+
+@test "phase_completed: returns 1 when no phases completed" {
+    __RESUME_PHASES=""
+    run phase_completed "research"
+    [ "$status" -eq 1 ]
+}
+
+@test "parse_args: --resume sets RESUME_MODE=true" {
+    parse_args --resume
+    [ "$RESUME_MODE" = "true" ]
+}
+
+@test "parse_args: --resume combined with --single" {
+    parse_args --resume --single
+    [ "$RESUME_MODE" = "true" ]
+    [ "$SINGLE_TASK" = "true" ]
+}
+
+@test "parse_args: no args leaves RESUME_MODE=false" {
+    parse_args
+    [ "$RESUME_MODE" = "false" ]
+}
+
+@test "parse_args: --help mentions --resume" {
+    run parse_args --help
+    [[ "$output" == *"--resume"* ]]
+}

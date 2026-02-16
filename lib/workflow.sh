@@ -52,6 +52,7 @@ MAX_TURNS=100
 PAUSE_BETWEEN_TASKS=5
 MAX_INVOCATIONS=${MAX_INVOCATIONS:-15}
 __INVOCATION_COUNT=0
+__RESUME_PHASES=""
 
 # Max turns per phase group (used in isolated mode)
 # Uses a function instead of declare -A for bash 3.2 (macOS) compatibility
@@ -74,6 +75,7 @@ DRY_RUN=false
 SINGLE_TASK=false
 HUMAN_REVIEW=false
 GIT_BRANCH=false
+RESUME_MODE=false
 ORIGINAL_BRANCH=""
 HAS_REMOTE=false
 GH_AVAILABLE=false
@@ -98,6 +100,10 @@ parse_args() {
                 GIT_BRANCH=true
                 shift
                 ;;
+            --resume)
+                RESUME_MODE=true
+                shift
+                ;;
             --teams)
                 USE_TEAMS=true
                 shift
@@ -110,6 +116,7 @@ parse_args() {
                 echo "  --single     Process only one task then exit"
                 echo "  --review     Pause for human review after plan and plan review (phase-isolated mode only)"
                 echo "  --branch     Create a feature branch per task with optional PR (phase-isolated mode only)"
+                echo "  --resume     Resume an interrupted task from where it left off (phase-isolated mode only)"
                 echo "  --teams      Use agent teams mode (experimental, requires CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1)"
                 echo "  --help, -h   Show this help message"
                 exit 0
@@ -378,6 +385,96 @@ mark_task_blocked() {
 }
 
 # ─────────────────────────────────────────────────────────────────────────────────
+# Task progress tracking (for --resume)
+# ─────────────────────────────────────────────────────────────────────────────────
+
+PROGRESS_FILE=".buildcrew/task-progress.json"
+
+# Save progress after a phase group completes successfully.
+# Usage: save_task_progress "task text" "research review" 4
+save_task_progress() {
+    local task="$1"
+    local phases="$2"
+    local invocations="$3"
+    mkdir -p .buildcrew
+
+    # Convert space-separated phases to JSON array (single jq call, no shell loop)
+    local phases_json="[]"
+    if [[ -n "$phases" ]]; then
+        phases_json=$(printf '%s\n' $phases | jq -R -s 'split("\n") | map(select(length > 0))')
+    fi
+
+    jq -n \
+        --arg task "$task" \
+        --argjson phases "$phases_json" \
+        --argjson invocations "$invocations" \
+        --arg timestamp "$(date '+%Y-%m-%dT%H:%M:%S')" \
+        '{task: $task, completed_phases: $phases, invocation_count: $invocations, timestamp: $timestamp}' \
+        > "$PROGRESS_FILE"
+}
+
+# Load progress for resume. Sets __RESUME_TASK, __RESUME_PHASES, __RESUME_INVOCATIONS.
+# Returns 0 if valid progress found (task still pending), 1 otherwise.
+load_task_progress() {
+    __RESUME_TASK=""
+    __RESUME_PHASES=""
+    __RESUME_INVOCATIONS=0
+
+    if [[ ! -f "$PROGRESS_FILE" ]]; then
+        return 1
+    fi
+
+    if ! jq -e . "$PROGRESS_FILE" >/dev/null 2>&1; then
+        print_warning "Invalid progress file — ignoring"
+        return 1
+    fi
+
+    local saved_task
+    saved_task=$(jq -r '.task // ""' "$PROGRESS_FILE")
+    if [[ -z "$saved_task" ]]; then
+        return 1
+    fi
+
+    # Validate saved task is still pending in backlog
+    if ! TASK="$saved_task" perl -ne 'if (/^- \[ \] \Q$ENV{TASK}\E$/) { $f=1; last } END { exit($f ? 0 : 1) }' "$BACKLOG_FILE"; then
+        print_warning "Saved task no longer pending in backlog — clearing progress"
+        clear_task_progress
+        return 1
+    fi
+
+    __RESUME_TASK="$saved_task"
+    __RESUME_PHASES=$(jq -r '.completed_phases // [] | join(" ")' "$PROGRESS_FILE")
+    __RESUME_INVOCATIONS=$(jq -r '.invocation_count // 0' "$PROGRESS_FILE")
+
+    local saved_ts
+    saved_ts=$(jq -r '.timestamp // ""' "$PROGRESS_FILE")
+    if [[ -n "$saved_ts" ]]; then
+        print_info "Resuming task from $saved_ts"
+        print_info "Completed phases: ${__RESUME_PHASES:-none}"
+    fi
+
+    return 0
+}
+
+# Clear progress file (on completion or fresh start).
+clear_task_progress() {
+    rm -f "$PROGRESS_FILE"
+}
+
+# Check if a phase was already completed in a previous run.
+# Usage: if phase_completed "research"; then skip; fi
+phase_completed() {
+    local phase="$1"
+    local p
+    for p in $__RESUME_PHASES; do
+        if [[ "$p" == "$phase" ]]; then
+            return 0
+        fi
+    done
+    return 1
+}
+
+# ─────────────────────────────────────────────────────────────────────────────────
 # Detect whether phase-isolated mode is available
 # ─────────────────────────────────────────────────────────────────────────────────
 
@@ -475,107 +572,153 @@ run_phase_group() {
 
 process_task_isolated() {
     local task="$1"
+    local __completed_phases=""
+    local __is_resuming=false
 
-    # Reset global invocation counter for this task
-    __INVOCATION_COUNT=0
+    # Resume or fresh start
+    if [[ "$RESUME_MODE" == "true" ]] && load_task_progress; then
+        if [[ "$__RESUME_TASK" == "$task" ]] || [[ -z "$task" ]]; then
+            task="${__RESUME_TASK}"
+            __INVOCATION_COUNT=$__RESUME_INVOCATIONS
+            __completed_phases="$__RESUME_PHASES"
+            __is_resuming=true
+            print_info "Resuming task (invocation count: $__INVOCATION_COUNT)"
+        else
+            print_warning "Progress file is for a different task — starting fresh"
+            clear_task_progress
+            __INVOCATION_COUNT=0
+        fi
+    else
+        # Reset global invocation counter for this task
+        __INVOCATION_COUNT=0
+        clear_task_progress
+    fi
 
     print_info "Running in phase-isolated mode (5 invocations)"
 
-    # Clean up artifacts from any previous task
-    rm -f .claude/research.md .claude/current-plan.md .claude/plan-review.md \
-          .claude/code-review.md .claude/test-report.md .claude/security-audit.md \
-          .claude/verify-report.md .claude/current-test-plan.md \
-          "$PHASE_RESULT_FILE" "$STATUS_FILE"
+    if [[ "$__is_resuming" != "true" ]]; then
+        # Clean up artifacts from any previous task
+        rm -f .claude/research.md .claude/current-plan.md .claude/plan-review.md \
+              .claude/code-review.md .claude/test-report.md .claude/security-audit.md \
+              .claude/verify-report.md .claude/current-test-plan.md \
+              "$PHASE_RESULT_FILE" "$STATUS_FILE"
+    fi
 
     # --- Group 1: Research + Plan ---
-    run_phase_group "research" "$task" || return 1
+    if phase_completed "research"; then
+        print_info "Skipping phase: research (completed in previous run)"
+    else
+        run_phase_group "research" "$task" || { clear_task_progress; return 1; }
+        __completed_phases="${__completed_phases:+$__completed_phases }research"
+        save_task_progress "$task" "$__completed_phases" "$__INVOCATION_COUNT"
 
-    # Human review pause: after research+plan, before AI review starts
-    local hr_exit=0
-    handle_human_review "$task" "Implementation plan ready" ".claude/current-plan.md" || hr_exit=$?
-    if [[ $hr_exit -eq 1 ]]; then
-        mark_task_blocked "$task" "Skipped during human review"
-        return 1
-    elif [[ $hr_exit -eq 2 ]]; then
-        touch "$STOP_FILE"
-        mark_task_blocked "$task" "Pipeline stopped by human review"
-        return 1
+        # Human review pause: after research+plan, before AI review starts
+        local hr_exit=0
+        handle_human_review "$task" "Implementation plan ready" ".claude/current-plan.md" || hr_exit=$?
+        if [[ $hr_exit -eq 1 ]]; then
+            mark_task_blocked "$task" "Skipped during human review"
+            clear_task_progress
+            return 1
+        elif [[ $hr_exit -eq 2 ]]; then
+            touch "$STOP_FILE"
+            mark_task_blocked "$task" "Pipeline stopped by human review"
+            clear_task_progress
+            return 1
+        fi
     fi
 
     # --- Group 2: Plan Review (max 3 external cycles) ---
-    local plan_review_cycle=0
-    while true; do
-        ((plan_review_cycle++))
-        run_phase_group "review" "$task" "Plan review cycle $plan_review_cycle of 3" || return 1
+    if phase_completed "review"; then
+        print_info "Skipping phase: review (completed in previous run)"
+    else
+        local plan_review_cycle=0
+        while true; do
+            ((plan_review_cycle++))
+            run_phase_group "review" "$task" "Plan review cycle $plan_review_cycle of 3" || { clear_task_progress; return 1; }
 
-        local verdict
-        verdict=$(jq -r '.verdict' "$PHASE_RESULT_FILE")
-        case "$verdict" in
-            approved)
-                local hr_exit=0
-                handle_human_review "$task" "Plan approved — review before build" ".claude/plan-review.md" || hr_exit=$?
-                if [[ $hr_exit -eq 1 ]]; then
-                    mark_task_blocked "$task" "Skipped during human review"
-                    return 1
-                elif [[ $hr_exit -eq 2 ]]; then
-                    touch "$STOP_FILE"
-                    mark_task_blocked "$task" "Pipeline stopped by human review"
-                    return 1
-                fi
-                break ;;
-            rejected) mark_task_blocked "$task" "Plan rejected"; return 1 ;;
-            needs_revision)
-                if (( plan_review_cycle >= 3 )); then
-                    mark_task_blocked "$task" "Plan review failed to converge after 3 cycles"
-                    return 1
-                fi
-                ;;
-            *) mark_task_blocked "$task" "Unexpected plan review verdict: $verdict"; return 1 ;;
-        esac
-    done
+            local verdict
+            verdict=$(jq -r '.verdict' "$PHASE_RESULT_FILE")
+            case "$verdict" in
+                approved)
+                    local hr_exit=0
+                    handle_human_review "$task" "Plan approved — review before build" ".claude/plan-review.md" || hr_exit=$?
+                    if [[ $hr_exit -eq 1 ]]; then
+                        mark_task_blocked "$task" "Skipped during human review"
+                        clear_task_progress
+                        return 1
+                    elif [[ $hr_exit -eq 2 ]]; then
+                        touch "$STOP_FILE"
+                        mark_task_blocked "$task" "Pipeline stopped by human review"
+                        clear_task_progress
+                        return 1
+                    fi
+                    break ;;
+                rejected) mark_task_blocked "$task" "Plan rejected"; clear_task_progress; return 1 ;;
+                needs_revision)
+                    if (( plan_review_cycle >= 3 )); then
+                        mark_task_blocked "$task" "Plan review failed to converge after 3 cycles"
+                        clear_task_progress
+                        return 1
+                    fi
+                    ;;
+                *) mark_task_blocked "$task" "Unexpected plan review verdict: $verdict"; clear_task_progress; return 1 ;;
+            esac
+        done
+        __completed_phases="${__completed_phases:+$__completed_phases }review"
+        save_task_progress "$task" "$__completed_phases" "$__INVOCATION_COUNT"
+    fi
 
     # --- Group 3 + 4: Build → Review/Test (with rebuild loop) ---
-    local build_attempt=0
-    while true; do
-        ((build_attempt++))
-        if (( build_attempt > 2 )); then
-            mark_task_blocked "$task" "Build failed after 2 attempts"
-            return 1
-        fi
-
-        local build_context=""
-        if (( build_attempt > 1 )); then
-            local prev_reason
-            prev_reason=$(jq -r '.details // "unknown"' "$PHASE_RESULT_FILE")
-            build_context="This is build attempt $build_attempt. Previous attempt failed: $prev_reason. Avoid the same mistakes."
-        fi
-
-        run_phase_group "build" "$task" "$build_context" || return 1
-        run_phase_group "test" "$task" || return 1
-
-        local verdict
-        verdict=$(jq -r '.verdict' "$PHASE_RESULT_FILE")
-        case "$verdict" in
-            approved) break ;;
-            needs_rebuild) continue ;;
-            test_failure)
-                mark_task_blocked "$task" "Tests failing after review"
+    if phase_completed "build"; then
+        print_info "Skipping phase: build+test (completed in previous run)"
+    else
+        local build_attempt=0
+        while true; do
+            ((build_attempt++))
+            if (( build_attempt > 2 )); then
+                mark_task_blocked "$task" "Build failed after 2 attempts"
+                clear_task_progress
                 return 1
-                ;;
-            *) mark_task_blocked "$task" "Unexpected review verdict: $verdict"; return 1 ;;
-        esac
-    done
+            fi
 
-    # --- Group 5: Verify + Commit ---
+            local build_context=""
+            if (( build_attempt > 1 )); then
+                local prev_reason
+                prev_reason=$(jq -r '.details // "unknown"' "$PHASE_RESULT_FILE")
+                build_context="This is build attempt $build_attempt. Previous attempt failed: $prev_reason. Avoid the same mistakes."
+            fi
+
+            run_phase_group "build" "$task" "$build_context" || { clear_task_progress; return 1; }
+            run_phase_group "test" "$task" || { clear_task_progress; return 1; }
+
+            local verdict
+            verdict=$(jq -r '.verdict' "$PHASE_RESULT_FILE")
+            case "$verdict" in
+                approved) break ;;
+                needs_rebuild) continue ;;
+                test_failure)
+                    mark_task_blocked "$task" "Tests failing after review"
+                    clear_task_progress
+                    return 1
+                    ;;
+                *) mark_task_blocked "$task" "Unexpected review verdict: $verdict"; clear_task_progress; return 1 ;;
+            esac
+        done
+        __completed_phases="${__completed_phases:+$__completed_phases }build"
+        save_task_progress "$task" "$__completed_phases" "$__INVOCATION_COUNT"
+    fi
+
+    # --- Group 5: Verify + Commit (never skipped — always re-verify) ---
     local verify_attempt=0
     while true; do
         ((verify_attempt++))
         if (( verify_attempt > 3 )); then
             mark_task_blocked "$task" "Verification failed after 3 attempts"
+            clear_task_progress
             return 1
         fi
 
-        run_phase_group "verify" "$task" || return 1
+        run_phase_group "verify" "$task" || { clear_task_progress; return 1; }
 
         local verdict
         verdict=$(jq -r '.verdict' "$PHASE_RESULT_FILE")
@@ -586,23 +729,25 @@ process_task_isolated() {
                 failing=$(jq -r '.failing_check // "unknown"' "$PHASE_RESULT_FILE")
                 case "$failing" in
                     tests|security)
-                        run_phase_group "build" "$task" "Verify failed: $failing. Fix and rebuild." || return 1
-                        run_phase_group "test" "$task" || return 1
+                        run_phase_group "build" "$task" "Verify failed: $failing. Fix and rebuild." || { clear_task_progress; return 1; }
+                        run_phase_group "test" "$task" || { clear_task_progress; return 1; }
                         ;;
                     code_review)
-                        run_phase_group "test" "$task" || return 1
+                        run_phase_group "test" "$task" || { clear_task_progress; return 1; }
                         ;;
                     *)
                         mark_task_blocked "$task" "Verification blocked: $failing"
+                        clear_task_progress
                         return 1
                         ;;
                 esac
                 ;;
-            *) mark_task_blocked "$task" "Unexpected verify verdict: $verdict"; return 1 ;;
+            *) mark_task_blocked "$task" "Unexpected verify verdict: $verdict"; clear_task_progress; return 1 ;;
         esac
     done
 
     # Task succeeded
+    clear_task_progress
     mark_task_complete "$task"
     local summary
     summary=$(jq -r '.summary // "Completed"' "$STATUS_FILE" 2>/dev/null || echo "Completed")
@@ -724,6 +869,10 @@ main() {
             print_warning "--branch requires phase-isolated mode (no phase boundaries in legacy mode). Ignoring."
             GIT_BRANCH=false
         fi
+        if [[ "$RESUME_MODE" == "true" ]]; then
+            print_warning "--resume requires phase-isolated mode (no phase boundaries in legacy mode). Ignoring."
+            RESUME_MODE=false
+        fi
         if [[ "$USE_TEAMS" == "true" ]]; then
             print_warning "--teams requires phase-isolated mode. Ignoring."
             USE_TEAMS=false
@@ -771,6 +920,23 @@ main() {
     echo "  Completed: $(count_tasks completed)"
     echo "  Blocked:   $(count_tasks blocked)"
 
+    # Resume mode pre-check
+    if [[ "$RESUME_MODE" == "true" ]]; then
+        if [[ ! -f "$PROGRESS_FILE" ]]; then
+            print_info "No interrupted task found. Starting normally."
+            RESUME_MODE=false
+        else
+            SINGLE_TASK=true
+            print_info "Resume mode: will process one task and exit"
+        fi
+    fi
+
+    # Track dry-run progress (since dry-run doesn't modify the backlog)
+    local dry_run_remaining=0
+    if [[ "$DRY_RUN" == "true" ]]; then
+        dry_run_remaining=$(count_tasks pending)
+    fi
+
     while true; do
         # Check for stop signal
         if check_stop_signal; then
@@ -795,12 +961,22 @@ main() {
             if [[ "$use_teams" == "true" ]]; then
                 print_info "[DRY RUN] Would launch agent teams for: $task"
             elif [[ "$use_isolation" == "true" ]]; then
-                print_info "[DRY RUN] Would execute 5 phase groups for: $task"
+                if [[ "$RESUME_MODE" == "true" ]] && [[ -f "$PROGRESS_FILE" ]]; then
+                    local skip_phases
+                    skip_phases=$(jq -r '.completed_phases // [] | join(", ")' "$PROGRESS_FILE" 2>/dev/null)
+                    print_info "[DRY RUN] Would resume task, skipping phases: ${skip_phases:-none}"
+                else
+                    print_info "[DRY RUN] Would execute 5 phase groups for: $task"
+                fi
             else
                 print_info "[DRY RUN] Would execute: claude -p \"Execute the buildcrew skill for this task: $task\""
             fi
-            mark_task_complete "$task"
+            print_info "[DRY RUN] Would mark complete: $task"
             ((completed++))
+            ((dry_run_remaining--))
+            if (( dry_run_remaining <= 0 )); then
+                break
+            fi
         else
             # Create feature branch if --branch is set
             if [[ "$GIT_BRANCH" == "true" ]]; then

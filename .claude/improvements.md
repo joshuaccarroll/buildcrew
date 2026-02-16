@@ -27,7 +27,7 @@ The skill instructs Claude to do up to 3 internal revision cycles (line 146), bu
 
 `mark_task_complete "$task"` is called during `--dry-run`, which mutates BACKLOG.md. Dry run should not modify state. Replace with a no-op or print statement.
 
-- [ ] Pending
+- [x] Done
 
 ### 4. Task recovery / resume
 **Category**: Feature
@@ -36,7 +36,7 @@ The skill instructs Claude to do up to 3 internal revision cycles (line 146), bu
 
 Track completed phases in `.buildcrew/task-progress.json`. Add `--resume` flag to pick up where a failed/interrupted task left off instead of restarting from scratch. Saves API cost when a task fails at phase 4+ and phases 1-3 were fine.
 
-- [ ] Pending
+- [x] Done
 
 ### 5. Treat `test_failure` like `needs_rebuild` in build loop
 **Category**: Improvement

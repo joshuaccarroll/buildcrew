@@ -32,14 +32,16 @@ teardown() {
     [[ "$output" == *"Claude Code CLI not found"* ]]
 }
 
-@test "run: dry-run mode marks tasks complete without executing" {
+@test "run: dry-run mode does not mutate backlog" {
     echo "- [ ] Test task" > BACKLOG.md
     run "$BUILDCREW_HOME/lib/workflow.sh" --dry-run --single
     [ "$status" -eq 0 ]
-    grep -q "\[x\] Test task" BACKLOG.md
+    # Dry run should NOT mark tasks complete (no side effects)
+    grep -q "\[ \] Test task" BACKLOG.md
+    [[ "$output" == *"[DRY RUN]"* ]]
 }
 
-@test "run: single mode exits after first task" {
+@test "run: single mode processes only one task" {
     cat > BACKLOG.md << 'EOF'
 - [ ] Task 1
 - [ ] Task 2
@@ -47,9 +49,10 @@ teardown() {
 EOF
     run "$BUILDCREW_HOME/lib/workflow.sh" --dry-run --single
     [ "$status" -eq 0 ]
-    # Only first task should be completed
-    grep -q "\[x\] Task 1" BACKLOG.md
-    grep -q "\[ \] Task 2" BACKLOG.md
+    # Dry run should only mention the first task
+    [[ "$output" == *"Task 1"* ]]
+    # Should exit after single task mode message
+    [[ "$output" == *"Single task mode"* ]]
 }
 
 @test "run: shows backlog status" {
