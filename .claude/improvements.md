@@ -90,4 +90,4 @@ Add `buildcrew run --task "task name"` or `--task 3` to process a specific task 
 
 Clear blocked tasks back to pending (`[!]` → `[ ]`), clean `.claude/` artifacts, and remove stale lockfile. Currently requires manual BACKLOG.md editing.
 
-- [ ] Pending
+- [x] Done

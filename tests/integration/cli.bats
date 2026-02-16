@@ -82,3 +82,97 @@ teardown() {
     [ -f .buildcrew/.stop-workflow ]
     [[ "$output" == *"Stop signal sent"* ]]
 }
+
+# ─────────────────────────────────────────────────────────────────────────────
+# reset command tests
+# ─────────────────────────────────────────────────────────────────────────────
+
+@test "cli: reset fails without BACKLOG.md" {
+    run "$BUILDCREW_HOME/bin/buildcrew" reset
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"No BACKLOG.md found"* ]]
+}
+
+@test "cli: reset clears blocked tasks to pending" {
+    cat > BACKLOG.md << 'EOF'
+# Backlog
+- [x] Completed task
+- [!] Blocked task one (blocked: Plan rejected)
+- [ ] Pending task
+- [!] Blocked task two (blocked: Build failed after 2 attempts)
+EOF
+    run "$BUILDCREW_HOME/bin/buildcrew" reset
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Reset 2 blocked task"* ]]
+    # Verify blocked tasks are now pending
+    run grep -c '^\- \[ \]' BACKLOG.md
+    [ "$output" = "3" ]
+    # Verify no blocked tasks remain
+    run grep -c '^\- \[!\]' BACKLOG.md
+    [ "$output" = "0" ]
+    # Verify completed task is untouched
+    run grep -c '^\- \[x\]' BACKLOG.md
+    [ "$output" = "1" ]
+}
+
+@test "cli: reset removes .claude artifacts" {
+    cat > BACKLOG.md << 'EOF'
+# Backlog
+- [ ] Task one
+EOF
+    mkdir -p .claude
+    echo "research" > .claude/research.md
+    echo "plan" > .claude/current-plan.md
+    echo '{"status":"complete"}' > .claude/workflow-status.json
+    run "$BUILDCREW_HOME/bin/buildcrew" reset
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Removed 3 artifact"* ]]
+    [ ! -f .claude/research.md ]
+    [ ! -f .claude/current-plan.md ]
+    [ ! -f .claude/workflow-status.json ]
+}
+
+@test "cli: reset removes stale state files" {
+    cat > BACKLOG.md << 'EOF'
+# Backlog
+- [ ] Task one
+EOF
+    mkdir -p .buildcrew
+    echo "12345" > .buildcrew/.workflow-lock
+    echo '{"task":"test"}' > .buildcrew/task-progress.json
+    echo "test task" > .buildcrew/.current-task
+    touch .buildcrew/.stop-workflow
+    run "$BUILDCREW_HOME/bin/buildcrew" reset
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Removed 4 state"* ]]
+    [ ! -f .buildcrew/.workflow-lock ]
+    [ ! -f .buildcrew/task-progress.json ]
+    [ ! -f .buildcrew/.current-task ]
+    [ ! -f .buildcrew/.stop-workflow ]
+}
+
+@test "cli: reset with nothing to clean shows no-op messages" {
+    cat > BACKLOG.md << 'EOF'
+# Backlog
+- [ ] Task one
+- [x] Completed task
+EOF
+    run "$BUILDCREW_HOME/bin/buildcrew" reset
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"No blocked tasks"* ]]
+    [[ "$output" == *"No artifacts"* ]]
+    [[ "$output" == *"No stale state"* ]]
+    [[ "$output" == *"Reset complete"* ]]
+}
+
+@test "cli: reset strips blocked reason from task name" {
+    cat > BACKLOG.md << 'EOF'
+# Backlog
+- [!] Add user auth (blocked: Plan review failed to converge after 3 cycles)
+EOF
+    run "$BUILDCREW_HOME/bin/buildcrew" reset
+    [ "$status" -eq 0 ]
+    # Task name should be clean, without the reason
+    run grep '^\- \[ \] Add user auth$' BACKLOG.md
+    [ "$status" -eq 0 ]
+}

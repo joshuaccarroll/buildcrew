@@ -47,6 +47,7 @@ print_help() {
     echo "    run         Execute workflow on BACKLOG.md"
     echo "    status      Show backlog stats and last workflow result"
     echo "    stop        Stop workflow after current task completes"
+    echo "    reset       Clear blocked tasks and clean up artifacts"
     echo "    plugins     Show recommended plugins for your project"
     echo "    update      Check for and install updates"
     echo "    version     Show version information"
@@ -639,6 +640,73 @@ cmd_stop() {
     echo -e "${GREEN}✓${NC} Stop signal sent. Workflow will stop after the current task completes."
 }
 
+cmd_reset() {
+    source "$BUILDCREW_HOME/lib/common.sh"
+
+    # Require BACKLOG.md
+    if [[ ! -f "$BACKLOG_FILE" ]]; then
+        echo -e "${RED}Error:${NC} No BACKLOG.md found in current directory."
+        exit 1
+    fi
+
+    echo -e "${BOLD}BuildCrew Reset${NC}"
+    echo ""
+
+    local blocked_count
+    blocked_count=$(count_tasks blocked)
+
+    # 1. Reset blocked tasks → pending (strip blocked marker and reason)
+    if [[ "$blocked_count" -gt 0 ]]; then
+        # [!] Task name (blocked: reason) → [ ] Task name
+        perl -i -pe 's/^- \[!\] (.+?) \(blocked:.*?\)$/- [ ] $1/' "$BACKLOG_FILE"
+        # Catch any [!] lines without a reason suffix
+        perl -i -pe 's/^- \[!\] /- [ ] /' "$BACKLOG_FILE"
+        echo -e "  ${GREEN}✓${NC} Reset $blocked_count blocked task(s) to pending"
+    else
+        echo -e "  ${CYAN}○${NC} No blocked tasks to reset"
+    fi
+
+    # 2. Clean .claude/ artifacts
+    local artifact_files=(
+        .claude/research.md .claude/current-plan.md .claude/plan-review.md
+        .claude/code-review.md .claude/test-report.md .claude/security-audit.md
+        .claude/verify-report.md .claude/current-test-plan.md
+        .claude/phase-result.json .claude/workflow-status.json
+    )
+    local cleaned=0
+    for f in "${artifact_files[@]}"; do
+        if [[ -f "$f" ]]; then
+            rm -f "$f"
+            ((cleaned++))
+        fi
+    done
+    if [[ "$cleaned" -gt 0 ]]; then
+        echo -e "  ${GREEN}✓${NC} Removed $cleaned artifact file(s)"
+    else
+        echo -e "  ${CYAN}○${NC} No artifacts to clean"
+    fi
+
+    # 3. Remove stale lockfile and state files
+    local state_cleaned=0
+    for f in .buildcrew/.workflow-lock .buildcrew/task-progress.json .buildcrew/.current-task .buildcrew/.stop-workflow; do
+        if [[ -f "$f" ]]; then
+            rm -f "$f"
+            ((state_cleaned++))
+        fi
+    done
+    if [[ "$state_cleaned" -gt 0 ]]; then
+        echo -e "  ${GREEN}✓${NC} Removed $state_cleaned state file(s)"
+    else
+        echo -e "  ${CYAN}○${NC} No stale state files"
+    fi
+
+    echo ""
+    echo -e "${GREEN}${BOLD}Reset complete.${NC}"
+    echo ""
+    echo -e "  Pending: $(count_tasks pending) | Completed: $(count_tasks completed) | Blocked: $(count_tasks blocked)"
+    echo ""
+}
+
 cmd_status() {
     local version
     version=$(get_version)
@@ -810,6 +878,9 @@ case "${1:-}" in
         ;;
     stop)
         cmd_stop
+        ;;
+    reset)
+        cmd_reset
         ;;
     plugins)
         shift
