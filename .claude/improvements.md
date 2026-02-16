@@ -18,7 +18,7 @@ Add a global counter across all phase invocations in `process_task_isolated()`. 
 
 The skill instructs Claude to do up to 3 internal revision cycles (line 146), but the orchestrator ALSO loops up to 3 times externally (workflow.sh:488-516), creating a potential 9-cycle compound. Fix: update the skill to perform exactly 1 review+revise cycle and report its verdict. Let the orchestrator handle retries.
 
-- [ ] Pending
+- [x] Done
 
 ### 3. Fix dry-run side effect
 **Category**: Bug fix

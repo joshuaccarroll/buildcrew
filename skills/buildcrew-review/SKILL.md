@@ -1,6 +1,6 @@
 ---
 name: buildcrew-review
-description: BuildCrew Plan Review phase — 3-pass review of implementation plan
+description: BuildCrew Plan Review phase — single-cycle 3-pass review of implementation plan
 allowed-tools: Read, Write, Edit, Glob, Grep, Bash, Task
 ---
 
@@ -137,14 +137,14 @@ Write the combined review to `.claude/plan-review.md`:
 ### Approved to Proceed: [YES | NO - revise plan first]
 ```
 
-### Revision Cycle
+### Revision Handling
 
 If any pass returns NEEDS_REVISION:
 1. Update `.claude/current-plan.md` with the required changes
 2. When revising `.claude/current-plan.md`, apply the **Rule of Five** self-revision to the updated plan
-3. Re-enter the 3-pass review cycle
-4. **Maximum 3 full revision cycles** — if the plan hasn't converged after 3 cycles, mark the task as BLOCKED
-5. Only proceed when the overall verdict is APPROVED
+3. **Do NOT re-enter the 3-pass review cycle** — the orchestrator handles retries externally
+4. Report the overall verdict as `needs_revision` in `.claude/phase-result.json`
+5. Only report `approved` when all 3 passes return PASS/APPROVED in a single cycle
 
 ---
 

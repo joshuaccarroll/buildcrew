@@ -344,12 +344,12 @@ Write the combined review to `.claude/plan-review.md`:
 ### Approved to Proceed: [YES | NO - revise plan first]
 ```
 
-### Revision Cycle
+### Revision Handling
 
 If any pass returns NEEDS_REVISION:
 1. Update `.claude/current-plan.md` with the required changes
-2. Re-enter the 3-pass review cycle
-3. **Maximum 3 full revision cycles** — if the plan hasn't converged after 3 cycles, mark the task as BLOCKED
+2. **Do NOT re-enter the 3-pass review cycle** — perform only 1 review cycle per invocation
+3. If the plan cannot be approved after revisions within this single cycle, mark the task as BLOCKED
 4. Only proceed to BUILD when the overall verdict is APPROVED
 
 ---
