@@ -621,6 +621,33 @@ run_phase_group() {
 }
 
 # ─────────────────────────────────────────────────────────────────────────────────
+# Verify-failure rebuild context builder
+# ─────────────────────────────────────────────────────────────────────────────────
+
+# Build rich context string for rebuild after verify failure.
+# Reads phase-result.json details and points the build skill to the right artifacts.
+build_verify_failure_context() {
+    local failing="$1"
+    local details
+    details=$(jq -r '.details // "unknown"' "$PHASE_RESULT_FILE" 2>/dev/null)
+
+    local context="REBUILD AFTER VERIFY FAILURE"
+    context="$context | Failing check: $failing"
+    context="$context | Details: $details"
+
+    case "$failing" in
+        tests)
+            context="$context | Read .claude/test-report.md and .claude/verify-report.md for failure details before fixing."
+            ;;
+        security)
+            context="$context | Read .claude/security-audit.md and .claude/verify-report.md for vulnerability details before fixing."
+            ;;
+    esac
+
+    echo "$context"
+}
+
+# ─────────────────────────────────────────────────────────────────────────────────
 # Phase-Isolated Mode: process_task_isolated
 # ─────────────────────────────────────────────────────────────────────────────────
 
@@ -782,7 +809,9 @@ process_task_isolated() {
                 failing=$(jq -r '.failing_check // "unknown"' "$PHASE_RESULT_FILE")
                 case "$failing" in
                     tests|security)
-                        run_phase_group "build" "$task" "Verify failed: $failing. Fix and rebuild." || { clear_task_progress; return 1; }
+                        local rebuild_context
+                        rebuild_context=$(build_verify_failure_context "$failing")
+                        run_phase_group "build" "$task" "$rebuild_context" || { clear_task_progress; return 1; }
                         run_phase_group "test" "$task" || { clear_task_progress; return 1; }
                         ;;
                     code_review)

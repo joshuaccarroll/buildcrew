@@ -45,6 +45,16 @@ Red flags that trigger rebuild: wrong architecture pattern | fundamentally wrong
 4. **Keep changes atomic**: Each edit should be self-contained
 5. **Think like a user**: Test your work from the user's perspective
 
+### Rebuilding After Verify Failure
+
+If the context mentions **REBUILD AFTER VERIFY FAILURE**, this is a targeted fix — not a full rebuild. Before writing any code:
+
+1. **Read the failure artifacts** referenced in the context:
+   - Test failures → read `.claude/test-report.md` and `.claude/verify-report.md`
+   - Security failures → read `.claude/security-audit.md` and `.claude/verify-report.md`
+2. **Identify the specific failures** — extract the exact test names, error messages, or vulnerability descriptions
+3. **Make surgical fixes** — only change what's needed to resolve the failures. Do not refactor or expand scope.
+
 ### Guidelines:
 - **Retrieval-led reasoning**: Always read actual project files, configs, and dependencies. Never assume API signatures, framework behavior, or library versions from training data. When in doubt, read the file.
 - Follow existing code patterns and conventions in the project

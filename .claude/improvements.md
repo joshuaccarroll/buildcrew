@@ -72,7 +72,7 @@ Artifacts are deleted at the start of each task. If a task was blocked, the debu
 
 When verify fails and triggers a rebuild, the context passed is thin: `"Verify failed: $failing. Fix and rebuild."` The build skill doesn't know to read `.claude/security-audit.md` or `.claude/test-report.md`. Fix: (a) pass structured failure details in the orchestrator's extra_context, and (b) add conditional instructions to the build skill to read failure artifacts when rebuilding.
 
-- [ ] Pending
+- [x] Done
 
 ### 9. Add `--task` targeting
 **Category**: QoL
