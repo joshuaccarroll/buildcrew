@@ -63,7 +63,7 @@ The research skill updates README speculatively (before code exists), then the b
 
 Artifacts are deleted at the start of each task. If a task was blocked, the debugging artifacts (research.md, plan-review.md, test-report.md, etc.) are gone when the next task starts. Save them to `.buildcrew/history/<task-slug>/<timestamp>/` before cleanup.
 
-- [ ] Pending
+- [x] Done
 
 ### 8. Richer context on verify-failure rebuilds
 **Category**: Quality

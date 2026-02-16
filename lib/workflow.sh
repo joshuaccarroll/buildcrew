@@ -202,14 +202,19 @@ ensure_clean_worktree() {
     fi
 }
 
-task_to_branch_name() {
+task_to_slug() {
     local task="$1"
     local slug
     # Lowercase, replace non-alphanumeric with hyphens, collapse multiple hyphens, trim
     slug=$(echo "$task" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]/-/g' | sed 's/--*/-/g' | sed 's/^-//' | sed 's/-$//')
     # Truncate to 60 chars
     slug="${slug:0:60}"
-    echo "buildcrew/$slug"
+    echo "$slug"
+}
+
+task_to_branch_name() {
+    local task="$1"
+    echo "buildcrew/$(task_to_slug "$task")"
 }
 
 create_task_branch() {
@@ -475,6 +480,55 @@ phase_completed() {
 }
 
 # ─────────────────────────────────────────────────────────────────────────────────
+# Artifact archival (save debugging artifacts from blocked tasks)
+# ─────────────────────────────────────────────────────────────────────────────────
+
+CURRENT_TASK_FILE=".buildcrew/.current-task"
+ARTIFACT_FILES=(
+    .claude/research.md .claude/current-plan.md .claude/plan-review.md
+    .claude/code-review.md .claude/test-report.md .claude/security-audit.md
+    .claude/verify-report.md .claude/current-test-plan.md
+)
+
+# Archive any existing .claude/ artifacts before cleanup.
+# Reads .buildcrew/.current-task to determine which task produced them.
+archive_task_artifacts() {
+    # Check if any artifacts exist
+    local has_artifacts=false
+    local f
+    for f in "${ARTIFACT_FILES[@]}" "$PHASE_RESULT_FILE" "$STATUS_FILE"; do
+        if [[ -f "$f" ]]; then
+            has_artifacts=true
+            break
+        fi
+    done
+    [[ "$has_artifacts" == "true" ]] || return 0
+
+    # Determine task slug from saved state
+    local slug="unknown"
+    if [[ -f "$CURRENT_TASK_FILE" ]]; then
+        local prev_task
+        prev_task=$(cat "$CURRENT_TASK_FILE")
+        if [[ -n "$prev_task" ]]; then
+            slug=$(task_to_slug "$prev_task")
+        fi
+    fi
+
+    local timestamp
+    timestamp=$(date '+%Y%m%d-%H%M%S')
+    local archive_dir=".buildcrew/history/$slug/$timestamp"
+    mkdir -p "$archive_dir"
+
+    for f in "${ARTIFACT_FILES[@]}" "$PHASE_RESULT_FILE" "$STATUS_FILE"; do
+        if [[ -f "$f" ]]; then
+            cp "$f" "$archive_dir/"
+        fi
+    done
+
+    print_info "Archived artifacts to $archive_dir"
+}
+
+# ─────────────────────────────────────────────────────────────────────────────────
 # Detect whether phase-isolated mode is available
 # ─────────────────────────────────────────────────────────────────────────────────
 
@@ -597,12 +651,16 @@ process_task_isolated() {
     print_info "Running in phase-isolated mode (5 invocations)"
 
     if [[ "$__is_resuming" != "true" ]]; then
+        # Archive artifacts from any previous task before cleanup
+        archive_task_artifacts
+
         # Clean up artifacts from any previous task
-        rm -f .claude/research.md .claude/current-plan.md .claude/plan-review.md \
-              .claude/code-review.md .claude/test-report.md .claude/security-audit.md \
-              .claude/verify-report.md .claude/current-test-plan.md \
-              "$PHASE_RESULT_FILE" "$STATUS_FILE"
+        rm -f "${ARTIFACT_FILES[@]}" "$PHASE_RESULT_FILE" "$STATUS_FILE"
     fi
+
+    # Track current task for future archiving
+    mkdir -p .buildcrew
+    echo "$task" > "$CURRENT_TASK_FILE"
 
     # --- Group 1: Research + Plan ---
     if phase_completed "research"; then
@@ -743,6 +801,7 @@ process_task_isolated() {
 
     # Task succeeded
     clear_task_progress
+    rm -f "$CURRENT_TASK_FILE"
     mark_task_complete "$task"
     local summary
     summary=$(jq -r '.summary // "Completed"' "$STATUS_FILE" 2>/dev/null || echo "Completed")

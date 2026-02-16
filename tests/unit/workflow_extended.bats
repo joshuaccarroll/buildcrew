@@ -553,3 +553,114 @@ teardown() {
     run parse_args --help
     [[ "$output" == *"--resume"* ]]
 }
+
+# ─────────────────────────────────────────────────────────────────────────────
+# task_to_slug tests
+# ─────────────────────────────────────────────────────────────────────────────
+
+@test "task_to_slug: lowercases input" {
+    run task_to_slug "Fix The BUG"
+    [ "$output" = "fix-the-bug" ]
+}
+
+@test "task_to_slug: replaces non-alphanumeric with hyphens" {
+    run task_to_slug "fix: bug in /api/users"
+    [ "$output" = "fix-bug-in-api-users" ]
+}
+
+@test "task_to_slug: collapses multiple hyphens" {
+    run task_to_slug "fix   multiple   spaces"
+    [ "$output" = "fix-multiple-spaces" ]
+}
+
+@test "task_to_slug: trims leading and trailing hyphens" {
+    run task_to_slug "---hello world---"
+    [ "$output" = "hello-world" ]
+}
+
+@test "task_to_slug: truncates to 60 chars" {
+    local long_task="this is a very long task name that should definitely be truncated because it exceeds sixty characters"
+    run task_to_slug "$long_task"
+    [ "${#output}" -le 60 ]
+}
+
+@test "task_to_slug: handles backticks and parentheses" {
+    run task_to_slug "Create \`tests/e2e/seed.ts\` — a utility (v1.0+) module"
+    [ "$output" = "create-tests-e2e-seed-ts-a-utility-v1-0-module" ]
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# archive_task_artifacts tests
+# ─────────────────────────────────────────────────────────────────────────────
+
+@test "archive_task_artifacts: no-op when no artifacts exist" {
+    run archive_task_artifacts
+    [ "$status" -eq 0 ]
+    [ ! -d ".buildcrew/history" ]
+}
+
+@test "archive_task_artifacts: archives existing artifacts" {
+    mkdir -p .claude .buildcrew
+    echo "# Research" > .claude/research.md
+    echo "# Plan" > .claude/current-plan.md
+    echo "Task A" > "$CURRENT_TASK_FILE"
+
+    archive_task_artifacts
+
+    # Should have created archive directory
+    local archive_dir
+    archive_dir=$(find .buildcrew/history/task-a -mindepth 1 -maxdepth 1 -type d 2>/dev/null | head -1)
+    [ -n "$archive_dir" ]
+    [ -f "$archive_dir/research.md" ]
+    [ -f "$archive_dir/current-plan.md" ]
+}
+
+@test "archive_task_artifacts: uses 'unknown' slug when no current-task file" {
+    mkdir -p .claude
+    echo "# Research" > .claude/research.md
+
+    archive_task_artifacts
+
+    local archive_dir
+    archive_dir=$(find .buildcrew/history/unknown -mindepth 1 -maxdepth 1 -type d 2>/dev/null | head -1)
+    [ -n "$archive_dir" ]
+    [ -f "$archive_dir/research.md" ]
+}
+
+@test "archive_task_artifacts: only copies files that exist" {
+    mkdir -p .claude .buildcrew
+    echo "# Plan" > .claude/current-plan.md
+    echo "Task B" > "$CURRENT_TASK_FILE"
+
+    archive_task_artifacts
+
+    local archive_dir
+    archive_dir=$(find .buildcrew/history/task-b -mindepth 1 -maxdepth 1 -type d 2>/dev/null | head -1)
+    [ -n "$archive_dir" ]
+    [ -f "$archive_dir/current-plan.md" ]
+    [ ! -f "$archive_dir/research.md" ]
+}
+
+@test "archive_task_artifacts: prints info message" {
+    mkdir -p .claude .buildcrew
+    echo "# Research" > .claude/research.md
+    echo "Task C" > "$CURRENT_TASK_FILE"
+
+    run archive_task_artifacts
+    [[ "$output" == *"Archived artifacts to"* ]]
+}
+
+@test "archive_task_artifacts: archives phase-result and status files" {
+    mkdir -p .claude .buildcrew
+    echo '{"verdict": "blocked"}' > "$PHASE_RESULT_FILE"
+    echo '{"status": "blocked"}' > "$STATUS_FILE"
+    echo "Task D" > "$CURRENT_TASK_FILE"
+
+    archive_task_artifacts
+
+    local archive_dir
+    archive_dir=$(find .buildcrew/history/task-d -mindepth 1 -maxdepth 1 -type d 2>/dev/null | head -1)
+    [ -n "$archive_dir" ]
+    [ -f "$archive_dir/phase-result.json" ]
+    [ -f "$archive_dir/workflow-status.json" ]
+}
