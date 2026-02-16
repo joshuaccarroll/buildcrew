@@ -554,6 +554,37 @@ teardown() {
     [[ "$output" == *"--resume"* ]]
 }
 
+@test "parse_args: --task sets TARGET_TASK" {
+    parse_args --task "Build auth system"
+    [ "$TARGET_TASK" = "Build auth system" ]
+}
+
+@test "parse_args: --task with number sets TARGET_TASK" {
+    parse_args --task 3
+    [ "$TARGET_TASK" = "3" ]
+}
+
+@test "parse_args: --task without value exits 1" {
+    run parse_args --task
+    [ "$status" -eq 1 ]
+}
+
+@test "parse_args: --task combined with other flags" {
+    parse_args --task "my task" --dry-run
+    [ "$TARGET_TASK" = "my task" ]
+    [ "$DRY_RUN" = "true" ]
+}
+
+@test "parse_args: no args leaves TARGET_TASK empty" {
+    parse_args
+    [ "$TARGET_TASK" = "" ]
+}
+
+@test "parse_args: --help mentions --task" {
+    run parse_args --help
+    [[ "$output" == *"--task"* ]]
+}
+
 # ─────────────────────────────────────────────────────────────────────────────
 # task_to_slug tests
 # ─────────────────────────────────────────────────────────────────────────────

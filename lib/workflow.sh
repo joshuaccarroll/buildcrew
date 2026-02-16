@@ -76,6 +76,7 @@ SINGLE_TASK=false
 HUMAN_REVIEW=false
 GIT_BRANCH=false
 RESUME_MODE=false
+TARGET_TASK=""
 ORIGINAL_BRANCH=""
 HAS_REMOTE=false
 GH_AVAILABLE=false
@@ -104,6 +105,14 @@ parse_args() {
                 RESUME_MODE=true
                 shift
                 ;;
+            --task)
+                if [[ -z "${2:-}" ]]; then
+                    echo "Error: --task requires a value (task name or number)"
+                    exit 1
+                fi
+                TARGET_TASK="$2"
+                shift 2
+                ;;
             --teams)
                 USE_TEAMS=true
                 shift
@@ -116,6 +125,7 @@ parse_args() {
                 echo "  --single     Process only one task then exit"
                 echo "  --review     Pause for human review after plan and plan review (phase-isolated mode only)"
                 echo "  --branch     Create a feature branch per task with optional PR (phase-isolated mode only)"
+                echo "  --task NAME  Target a specific task by name or number (implies --single)"
                 echo "  --resume     Resume an interrupted task from where it left off (phase-isolated mode only)"
                 echo "  --teams      Use agent teams mode (experimental, requires CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1)"
                 echo "  --help, -h   Show this help message"
@@ -374,6 +384,21 @@ check_prerequisites() {
 # Get the next uncompleted task from the backlog
 get_next_task() {
     grep -m1 '^\- \[ \]' "$BACKLOG_FILE" 2>/dev/null | sed 's/^- \[ \] //' || echo ""
+}
+
+# Get a specific task by name or number
+# If target is a number, returns the Nth pending task (1-indexed)
+# If target is a string, returns the first pending task containing that string (case-insensitive)
+get_task_by_target() {
+    local target="$1"
+
+    if [[ "$target" =~ ^[0-9]+$ ]]; then
+        # Numeric: get the Nth pending task
+        grep '^\- \[ \]' "$BACKLOG_FILE" 2>/dev/null | sed -n "${target}p" | sed 's/^- \[ \] //' || echo ""
+    else
+        # String: find first pending task matching (case-insensitive)
+        grep -i '^\- \[ \].*'"$target" "$BACKLOG_FILE" 2>/dev/null | head -1 | sed 's/^- \[ \] //' || echo ""
+    fi
 }
 
 # Mark a task as completed in the backlog
@@ -1003,6 +1028,12 @@ main() {
     echo "  Completed: $(count_tasks completed)"
     echo "  Blocked:   $(count_tasks blocked)"
 
+    # Task targeting pre-check
+    if [[ -n "$TARGET_TASK" ]]; then
+        SINGLE_TASK=true
+        print_info "Task targeting: --task '$TARGET_TASK'"
+    fi
+
     # Resume mode pre-check
     if [[ "$RESUME_MODE" == "true" ]]; then
         if [[ ! -f "$PROGRESS_FILE" ]]; then
@@ -1027,9 +1058,19 @@ main() {
             break
         fi
 
-        # Get next task
+        # Get next task (or targeted task)
         local task
-        task=$(get_next_task)
+        if [[ -n "$TARGET_TASK" ]]; then
+            task=$(get_task_by_target "$TARGET_TASK")
+            if [[ -z "$task" ]]; then
+                print_error "No pending task matching '$TARGET_TASK'"
+                break
+            fi
+            # Clear so subsequent iterations (shouldn't happen with SINGLE_TASK) use normal order
+            TARGET_TASK=""
+        else
+            task=$(get_next_task)
+        fi
 
         if [[ -z "$task" ]]; then
             break

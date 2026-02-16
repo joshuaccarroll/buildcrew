@@ -141,6 +141,82 @@ EOF
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
+# get_task_by_target tests
+# ─────────────────────────────────────────────────────────────────────────────
+
+@test "get_task_by_target: returns Nth pending task by number" {
+    cat > BACKLOG.md << 'EOF'
+- [x] Completed task
+- [ ] First pending task
+- [ ] Second pending task
+- [ ] Third pending task
+EOF
+    run get_task_by_target "2"
+    [ "$output" = "Second pending task" ]
+}
+
+@test "get_task_by_target: returns first pending task with number 1" {
+    cat > BACKLOG.md << 'EOF'
+- [x] Completed task
+- [ ] First pending task
+- [ ] Second pending task
+EOF
+    run get_task_by_target "1"
+    [ "$output" = "First pending task" ]
+}
+
+@test "get_task_by_target: returns empty for out-of-range number" {
+    cat > BACKLOG.md << 'EOF'
+- [ ] Only task
+EOF
+    run get_task_by_target "5"
+    [ "$output" = "" ]
+}
+
+@test "get_task_by_target: finds task by name substring" {
+    cat > BACKLOG.md << 'EOF'
+- [ ] Build the authentication system
+- [ ] Add user profile page
+- [ ] Fix login bug
+EOF
+    run get_task_by_target "profile"
+    [ "$output" = "Add user profile page" ]
+}
+
+@test "get_task_by_target: name match is case-insensitive" {
+    cat > BACKLOG.md << 'EOF'
+- [ ] Build the Authentication System
+- [ ] Add user profile page
+EOF
+    run get_task_by_target "authentication"
+    [ "$output" = "Build the Authentication System" ]
+}
+
+@test "get_task_by_target: returns empty when no name match" {
+    cat > BACKLOG.md << 'EOF'
+- [ ] Build the auth system
+- [ ] Add profile page
+EOF
+    run get_task_by_target "nonexistent"
+    [ "$output" = "" ]
+}
+
+@test "get_task_by_target: skips completed and blocked tasks" {
+    cat > BACKLOG.md << 'EOF'
+- [x] Completed auth task
+- [!] Blocked auth task
+- [ ] Pending auth task
+EOF
+    run get_task_by_target "auth"
+    [ "$output" = "Pending auth task" ]
+}
+
+@test "get_task_by_target: returns empty when no BACKLOG.md" {
+    run get_task_by_target "anything"
+    [ "$output" = "" ]
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
 # mark_task_complete tests
 # ─────────────────────────────────────────────────────────────────────────────
 

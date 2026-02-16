@@ -59,6 +59,7 @@ print_help() {
     echo "    --review    Pause for human review at plan checkpoints (with 'run')"
     echo "    --branch    Create a feature branch per task with optional PR (with 'run')"
     echo "    --resume    Resume an interrupted task from where it left off (with 'run')"
+    echo "    --task N    Target a specific task by name or number (with 'run')"
     echo "    --teams     Use agent teams mode — experimental (with 'run')"
     echo ""
     echo -e "${BOLD}GETTING STARTED:${NC}"

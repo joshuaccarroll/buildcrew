@@ -81,7 +81,7 @@ When verify fails and triggers a rebuild, the context passed is thin: `"Verify f
 
 Add `buildcrew run --task "task name"` or `--task 3` to process a specific task from the backlog instead of always processing in order.
 
-- [ ] Pending
+- [x] Done
 
 ### 10. Add `buildcrew reset` command
 **Category**: QoL
