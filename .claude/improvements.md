@@ -54,7 +54,7 @@ Currently `test_failure` immediately blocks the task in the build loop, while `n
 
 The research skill updates README speculatively (before code exists), then the build skill overwrites it with the actual implementation. The speculative update wastes tokens — especially the Rule of Five self-revision on a document that gets replaced. Remove README instructions from the research skill; keep them only in the build skill.
 
-- [ ] Pending
+- [x] Done
 
 ### 7. Archive artifacts for blocked tasks
 **Category**: Feature

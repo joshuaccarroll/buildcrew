@@ -180,14 +180,6 @@ Write your plan to `.claude/current-plan.md` using this structure:
 
 After writing the plan, apply the **Rule of Five** self-revision (see core-principles.md) — complete all 5 revision passes on `.claude/current-plan.md`.
 
-### Documentation
-
-After the plan is finalized, create or update the project `README.md`:
-- If no README.md exists, create one with: project name, description, setup instructions (if known), and a "Current Status" section describing what's been built so far and what this task will add.
-- If README.md exists, update it to reflect the planned changes — add new sections, update feature descriptions, revise setup steps as needed.
-- The README should always answer: **What is this? How do I set it up? What does it do right now?**
-- Apply the **Self-Revision Protocol** (see core-principles.md) to README.md.
-
 ---
 
 ## Phase Result Protocol
