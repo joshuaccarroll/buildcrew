@@ -366,7 +366,7 @@ run_norms_analysis() {
     print_info "Analyzing codebase patterns, conventions, and team norms..."
 
     # Inject project context if available
-    local prompt="Execute the buildcrew-norms skill to analyze this codebase."
+    local prompt="Execute the buildcrew-norms skill to analyze this codebase. If the user declines or skips this step, exit immediately without further interaction."
     local project_context
     project_context=$(load_project_context)
     if [[ -n "$project_context" ]]; then
