@@ -102,6 +102,10 @@ load_project_context() {
             project_context+="$(cat "$ctx_file")"$'\n\n'
         fi
     done
+    # Load norms index (if generated)
+    if [[ -f ".buildcrew/norms/NORMS.md" ]]; then
+        project_context+="$(cat ".buildcrew/norms/NORMS.md")"$'\n\n'
+    fi
     if [[ -n "$project_context" ]]; then
         local ctx_size=${#project_context}
         if (( ctx_size > 10240 )); then

@@ -346,6 +346,55 @@ is_fresh_backlog() {
     return 1
 }
 
+# Check if this is a brownfield project (has existing source code)
+has_existing_codebase() {
+    # Language/framework manifest files (Makefile intentionally excluded -- too generic)
+    for f in package.json go.mod pyproject.toml Cargo.toml Gemfile composer.json pom.xml build.gradle requirements.txt setup.py .sln; do
+        [[ -f "$f" ]] && return 0
+    done
+    # Check for common source directories (any contents)
+    for d in src lib app; do
+        [[ -d "$d" ]] && return 0
+    done
+    return 1
+}
+
+# Run norms analysis as a single Claude invocation
+run_norms_analysis() {
+    local max_turns=40
+    print_header "Codebase Norms Analysis"
+    print_info "Analyzing codebase patterns, conventions, and team norms..."
+
+    # Inject project context if available
+    local prompt="Execute the buildcrew-norms skill to analyze this codebase."
+    local project_context
+    project_context=$(load_project_context)
+    if [[ -n "$project_context" ]]; then
+        prompt="$prompt"$'\n\nProject Context:\n'"$project_context"
+    fi
+
+    # Global invocation ceiling check
+    if (( __INVOCATION_COUNT >= MAX_INVOCATIONS )); then
+        print_warning "Invocation ceiling reached — skipping norms analysis"
+        return
+    fi
+
+    __INVOCATION_COUNT=$(( __INVOCATION_COUNT + 1 ))
+    claude "$prompt" --max-turns "$max_turns" || true
+
+    if [[ -f ".buildcrew/norms/NORMS.md" ]]; then
+        print_success "Norms generated at .buildcrew/norms/"
+        print_info "Review .buildcrew/norms/ and edit if needed."
+        # Only pause for interactive terminals
+        if [[ -t 0 ]]; then
+            print_info "Press Enter to continue, or Ctrl+C to stop and review first."
+            read -r
+        fi
+    else
+        print_warning "Norms analysis did not produce output. Continuing without norms."
+    fi
+}
+
 # Check if project is in "completed phase" state (established but no pending work)
 is_completed_phase() {
     has_project_file || return 1
@@ -959,6 +1008,11 @@ main() {
 
     # Clear any previous stop signal
     clear_stop_signal
+
+    # Auto-generate norms for brownfield projects on first run
+    if [[ "$DRY_RUN" != "true" ]] && [[ ! -f ".buildcrew/norms/NORMS.md" ]] && has_existing_codebase; then
+        run_norms_analysis
+    fi
 
     print_header "BuildCrew - Autonomous Development Pipeline"
     print_info "To stop after the current task: buildcrew stop"

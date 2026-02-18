@@ -65,6 +65,7 @@ If the context mentions **REBUILD AFTER VERIFY FAILURE**, this is a targeted fix
 - No premature abstractions - wait until you have 3+ use cases
 - Write helpful error messages that guide users
 - Consider loading states and edge cases users will hit
+- If `.buildcrew/norms/` exists, read `code-style.md` and `patterns.md` before writing code. Follow the team's established conventions for naming, imports, error handling, and utility usage.
 
 ### Documentation Maintenance
 

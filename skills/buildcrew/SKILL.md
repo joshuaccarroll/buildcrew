@@ -173,7 +173,8 @@ After writing the research document, run the **Document Review Protocol** on `.c
    - Look for similar implementations to follow existing patterns
    - Identify files that will need modification
    - Check for existing tests you can model yours after
-5. **Create implementation plan**: Write a step-by-step plan to `.claude/current-plan.md`. Be extremely concise. Sacrifice grammar for the sake of concision.
+5. **Check team norms**: If `.buildcrew/norms/` exists, read `patterns.md` and `code-style.md`. Reference relevant norms in the plan (e.g., "use existing `lib/api-client.ts` per norms" rather than creating new utilities).
+6. **Create implementation plan**: Write a step-by-step plan to `.claude/current-plan.md`. Be extremely concise. Sacrifice grammar for the sake of concision.
    - List all files to create or modify
    - Describe each change needed
    - Note any dependencies or order requirements
@@ -184,7 +185,7 @@ After writing the research document, run the **Document Review Protocol** on `.c
      2. Infrastructure, platform, and environment setup before feature work
      3. Zero-change migrations before functional changes (migrate first, verify, then iterate)
      4. Each step should produce a verifiable state -- include a "Verify" line after each step
-6. **Identify risks**: Note anything unclear or potentially problematic
+7. **Identify risks**: Note anything unclear or potentially problematic
 
 ### Plan Template
 
@@ -429,6 +430,7 @@ You are now a **Feature Engineer** focused on:
 - No premature abstractions - wait until you have 3+ use cases
 - Write helpful error messages that guide users
 - Consider loading states and edge cases users will hit
+- If `.buildcrew/norms/` exists, read `code-style.md` and `patterns.md` before writing code. Follow the team's established conventions for naming, imports, error handling, and utility usage.
 
 ### Documentation Maintenance
 

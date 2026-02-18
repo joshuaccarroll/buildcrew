@@ -246,6 +246,9 @@ Look for these indicators:
 | `Cargo.toml` | Rust/Cargo | `cargo test` |
 | `*.bats` | Bats | `bats <test-dir>` |
 
+### Step 2.5: Check Team Test Norms
+If `.buildcrew/norms/testing.md` exists, read it. Follow the team's test conventions for file location, naming, mocking patterns, and assertion style. This takes precedence over the general conventions in this skill.
+
 ### Step 3: Create or Update Experience Testing Harness
 
 The experience harness is a **persistent test file** in the project's test directory that simulates actual end-user interaction. Unlike unit tests, it exercises the system the way a real user would. It is cumulative -- each task extends it, existing scenarios are never removed unless the current task intentionally changes the tested behavior.

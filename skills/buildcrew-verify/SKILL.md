@@ -42,6 +42,7 @@ All items must be checked and pass:
 - [ ] No unresolved Critical issues (BLOCKING)
 - [ ] No unresolved Major concerns (BLOCKING)
 - [ ] Advisory findings (Minor Suggestions) are permitted — they do NOT block verification
+- [ ] If `.buildcrew/norms/NORMS.md` exists, spot-check that new code follows established norms. Flag norms deviations as Minor Suggestions (advisory, not blocking).
 
 **Note**: The gate checks for absence of unresolved blocking findings, not just an "APPROVED" verdict string. Advisory findings are acceptable.
 

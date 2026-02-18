@@ -35,6 +35,7 @@ Evaluate `.claude/current-plan.md` against:
    - Does this align with existing architecture?
    - Will this create technical debt?
    - Are patterns and conventions being followed?
+   - If `.buildcrew/norms/` exists, read `patterns.md`. Does the plan follow established architectural patterns and use existing utilities?
 
 3. **Simplicity Check**
    - Is this the simplest approach that works?
