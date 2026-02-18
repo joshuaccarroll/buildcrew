@@ -110,7 +110,29 @@ For internal-only tasks (light research):
 - If WebFetch fails on specific URLs, log the URLs as "could not fetch" in the Sources section and continue.
 - The research phase should never block the workflow — always produce a `.claude/research.md`, even if it only contains local context.
 
-After writing the research document, apply the **Self-Revision Protocol** (see core-principles.md) to `.claude/research.md`.
+After writing the research document, run iterative sub-agent review on `.claude/research.md`:
+
+```
+iteration = 0
+while iteration < 5:
+    Spawn a Task sub-agent (general-purpose type) with this prompt:
+
+    "Read .claude/research.md. Review it critically as if you are seeing it for the first time.
+    Look for: gaps, missing details, unclear sections, over-engineering, incorrect assumptions,
+    missing edge cases, and areas that could be improved.
+
+    Make concrete improvements directly to the file. Be specific and substantive --
+    do not add filler or unnecessary content.
+
+    If the document is solid and no meaningful improvements can be made,
+    respond with exactly: CONVERGED
+
+    Do not explain what you reviewed. Either improve the file or respond CONVERGED."
+
+    if sub-agent output contains "CONVERGED":
+        break
+    iteration += 1
+```
 
 ---
 
@@ -178,7 +200,38 @@ Write your plan to `.claude/current-plan.md` using this structure:
 - [Any concerns or open questions]
 ```
 
-After writing the plan, apply the **Rule of Five** self-revision (see core-principles.md) — complete all 5 revision passes on `.claude/current-plan.md`.
+After writing the plan, run iterative sub-agent review on `.claude/current-plan.md`:
+
+```
+iteration = 0
+converged = false
+while iteration < 5:
+    Spawn a Task sub-agent (general-purpose type) with this prompt:
+
+    "Read .claude/current-plan.md. Review it critically as if you are seeing it for the first time.
+    Look for: gaps, missing details, unclear sections, over-engineering, incorrect assumptions,
+    missing edge cases, and areas that could be improved.
+
+    Make concrete improvements directly to the file. Be specific and substantive --
+    do not add filler or unnecessary content.
+
+    If the document is solid and no meaningful improvements can be made,
+    respond with exactly: CONVERGED
+
+    Do not explain what you reviewed. Either improve the file or respond CONVERGED."
+
+    if sub-agent output contains "CONVERGED":
+        converged = true
+        break
+    iteration += 1
+```
+
+After the review loop completes, assess whether human review is recommended based on these objective criteria (any = true):
+- Task description mentions "breaking change", "migration", or "deprecation"
+- Plan modifies more than 10 files
+- Plan involves security-sensitive areas (auth, crypto, secrets, permissions)
+- Plan changes public APIs, CLI interfaces, or database schemas
+- The review sub-agents did NOT converge within 5 iterations (the `converged` flag is false after the loop)
 
 ---
 
@@ -190,8 +243,12 @@ When both Research and Plan are complete, write `.claude/phase-result.json`:
 {
   "phase": "research_and_plan",
   "verdict": "complete",
+  "human_review": true,
+  "human_review_reason": "Plan modifies 14 files and changes CLI interface",
   "details": "Research and plan written"
 }
 ```
+
+Include `human_review: true` and a `human_review_reason` string when any of the objective criteria above are met. When `human_review` is false or absent, omit `human_review_reason`.
 
 Then exit.

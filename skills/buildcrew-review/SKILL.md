@@ -141,7 +141,22 @@ Write the combined review to `.claude/plan-review.md`:
 
 If any pass returns NEEDS_REVISION:
 1. Update `.claude/current-plan.md` with the required changes
-2. When revising `.claude/current-plan.md`, apply the **Rule of Five** self-revision to the updated plan
+2. When revising `.claude/current-plan.md`, run iterative sub-agent review on the updated plan:
+   ```
+   iteration = 0
+   while iteration < 5:
+       Spawn a Task sub-agent (general-purpose type) with this prompt:
+       "Read .claude/current-plan.md. Review it critically as if you are seeing it for the first time.
+       Look for: gaps, missing details, unclear sections, over-engineering, incorrect assumptions,
+       missing edge cases, and areas that could be improved.
+       Make concrete improvements directly to the file. Be specific and substantive --
+       do not add filler or unnecessary content.
+       If the document is solid and no meaningful improvements can be made,
+       respond with exactly: CONVERGED
+       Do not explain what you reviewed. Either improve the file or respond CONVERGED."
+       if sub-agent output contains "CONVERGED": break
+       iteration += 1
+   ```
 3. **Do NOT re-enter the 3-pass review cycle** — the orchestrator handles retries externally
 4. Report the overall verdict as `needs_revision` in `.claude/phase-result.json`
 5. Only report `approved` when all 3 passes return PASS/APPROVED in a single cycle

@@ -202,7 +202,29 @@ Before running tests, create a test plan in `.claude/current-test-plan.md`:
 - [ ] Coverage meets project standards
 ```
 
-After writing the test plan, apply the **Rule of Five** self-revision (see core-principles.md) — complete all 5 revision passes on `.claude/current-test-plan.md`.
+After writing the test plan, run iterative sub-agent review on `.claude/current-test-plan.md`:
+
+```
+iteration = 0
+while iteration < 5:
+    Spawn a Task sub-agent (general-purpose type) with this prompt:
+
+    "Read .claude/current-test-plan.md. Review it critically as if you are seeing it for the first time.
+    Look for: gaps, missing details, unclear sections, over-engineering, incorrect assumptions,
+    missing edge cases, and areas that could be improved.
+
+    Make concrete improvements directly to the file. Be specific and substantive --
+    do not add filler or unnecessary content.
+
+    If the document is solid and no meaningful improvements can be made,
+    respond with exactly: CONVERGED
+
+    Do not explain what you reviewed. Either improve the file or respond CONVERGED."
+
+    if sub-agent output contains "CONVERGED":
+        break
+    iteration += 1
+```
 
 ### Step 2: Detect Test Framework
 

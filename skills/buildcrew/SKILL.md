@@ -37,28 +37,34 @@ The task you are working on was provided in the prompt. Parse it and understand 
 
 ---
 
-## Self-Revision Protocol
+## Document Review Protocol
 
-After writing any creative or analytical document artifact, apply this revision loop before proceeding:
+After writing any creative or analytical document artifact, improve it through iterative sub-agent review before proceeding:
 
 1. **Write** the document fully
-2. **Re-read** the entire document from the top, as if seeing it for the first time
-3. **Evaluate** against these criteria:
-   - **Clarity**: Could someone unfamiliar with this task understand it?
-   - **Completeness**: Are there gaps, missing steps, or unstated assumptions?
-   - **Accuracy**: Do all claims match what you actually found in the codebase?
-   - **Actionability**: Is every item specific enough to act on without guesswork?
-4. **Revise** if you identified concrete improvements. Update the file in place.
-5. **Repeat** steps 2-4
+2. **Run iterative sub-agent review** (up to 5 iterations):
 
-**Rule of Five** — For plans (.claude/current-plan.md, .claude/current-test-plan.md):
-Always complete all 5 revision passes. Do not stop early.
+```
+iteration = 0
+while iteration < 5:
+    Spawn a Task sub-agent (general-purpose type) with this prompt:
 
-For other documents (research.md, code-review.md, security-audit.md):
-Repeat until clean or 5 passes.
+    "Read [FILE_PATH]. Review it critically as if you are seeing it for the first time.
+    Look for: gaps, missing details, unclear sections, over-engineering, incorrect assumptions,
+    missing edge cases, and areas that could be improved.
 
-Track revision passes at the bottom of the document:
-`<!-- Self-revision: N/5 passes -->`
+    Make concrete improvements directly to the file. Be specific and substantive --
+    do not add filler or unnecessary content.
+
+    If the document is solid and no meaningful improvements can be made,
+    respond with exactly: CONVERGED
+
+    Do not explain what you reviewed. Either improve the file or respond CONVERGED."
+
+    if sub-agent output contains "CONVERGED":
+        break
+    iteration += 1
+```
 
 **Skip for**: Structured reports that capture factual outcomes (test-report.md, verify-report.md, plan-review.md) — these report data, not analysis.
 
@@ -150,7 +156,7 @@ For internal-only tasks (light research):
 - If WebFetch fails on specific URLs, log the URLs as "could not fetch" in the Sources section and continue.
 - The research phase should never block the workflow — always produce a `.claude/research.md`, even if it only contains local context.
 
-After writing the research document, apply the **Self-Revision Protocol** to `.claude/research.md`.
+After writing the research document, run the **Document Review Protocol** on `.claude/research.md`.
 
 ---
 
@@ -211,7 +217,7 @@ Write your plan to `.claude/current-plan.md` using this structure:
 - [Any concerns or open questions]
 ```
 
-After writing the plan, apply the **Rule of Five** self-revision — complete all 5 revision passes on `.claude/current-plan.md`.
+After writing the plan, run the **Document Review Protocol** on `.claude/current-plan.md`.
 
 ### Documentation
 
@@ -219,7 +225,7 @@ After the plan is finalized, create or update the project `README.md`:
 - If no README.md exists, create one with: project name, description, setup instructions (if known), and a "Current Status" section describing what's been built so far and what this task will add.
 - If README.md exists, update it to reflect the planned changes — add new sections, update feature descriptions, revise setup steps as needed.
 - The README should always answer: **What is this? How do I set it up? What does it do right now?**
-- Apply the **Self-Revision Protocol** to README.md.
+- Run the **Document Review Protocol** on README.md.
 
 ---
 
@@ -471,7 +477,7 @@ Write your review to `.claude/code-review.md`:
 ### Proceed to Testing: [YES | NO - refactor first | NO - rebuild required]
 ```
 
-After writing the code review, apply the **Self-Revision Protocol** to `.claude/code-review.md`.
+After writing the code review, run the **Document Review Protocol** on `.claude/code-review.md`.
 
 ### Verdict Definitions
 
@@ -587,7 +593,7 @@ Before running tests, create a test plan in `.claude/current-test-plan.md`:
 - [ ] Coverage meets project standards
 ```
 
-After writing the test plan, apply the **Rule of Five** self-revision — complete all 5 revision passes on `.claude/current-test-plan.md`.
+After writing the test plan, run the **Document Review Protocol** on `.claude/current-test-plan.md`.
 
 ### Step 2: Detect Test Framework
 
@@ -711,7 +717,7 @@ Invoke the Security Engineer persona for a comprehensive security audit:
 1. Invoke the Security Engineer persona
 2. Perform the full security audit checklist
 3. Write findings to `.claude/security-audit.md`
-4. Apply the **Self-Revision Protocol** to `.claude/security-audit.md`
+4. Run the **Document Review Protocol** on `.claude/security-audit.md`
 
 **Security checks include:**
 - OWASP Top 10 vulnerability scan

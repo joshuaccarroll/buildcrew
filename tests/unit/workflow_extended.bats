@@ -263,6 +263,14 @@ teardown() {
     [[ "$output" == *"Non-interactive terminal"* ]]
 }
 
+@test "handle_human_review: proceeds when --force passed even if HUMAN_REVIEW=false" {
+    HUMAN_REVIEW=false
+    # Non-interactive terminal, so it will hit the fallback path
+    run handle_human_review "task" "description" "artifact" "--force"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Non-interactive terminal"* ]]
+}
+
 # ─────────────────────────────────────────────────────────────────────────────
 # save_original_branch / ensure_clean_worktree tests
 # ─────────────────────────────────────────────────────────────────────────────

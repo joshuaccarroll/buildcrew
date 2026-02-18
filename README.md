@@ -158,7 +158,7 @@ Each task runs through **5 isolated Claude invocations** (phase-isolated mode), 
 - **Human review** (`--review`) - pause at plan checkpoints for human inspection before proceeding
 - **Feature branches** (`--branch`) - create a branch per task with automatic PR creation
 - **Agent teams** (`--teams`) - experimental mode using Claude Code's agent teams for parallel work
-- **Rule of Five** - mandatory 5-pass self-revision on all plans
+- **Document Review Protocol** - sub-agent iterative review on all plans (up to 5 iterations or convergence)
 - **Customizable** - modify phases or remove them entirely
 
 ---

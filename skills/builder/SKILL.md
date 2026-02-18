@@ -1,7 +1,7 @@
 ---
 name: builder
 description: Orchestrate the greenfield project builder flow. Guides users through project definition with a Product Manager persona, optional design with a UX Designer persona, and generates a backlog for execution.
-allowed-tools: Read, Write, Edit, Glob, Grep, Bash, AskUserQuestion, Skill
+allowed-tools: Read, Write, Edit, Glob, Grep, Bash, AskUserQuestion, Skill, Task
 ---
 
 # BuildCrew Builder
@@ -57,22 +57,34 @@ You are orchestrating the **Builder** flow for creating a new project from scrat
 
 ---
 
-## Self-Revision Protocol
+## Document Review Protocol
 
-After writing any document artifact, apply this revision loop before presenting it to the user or proceeding:
+After writing any document artifact, improve it through iterative sub-agent review before presenting it to the user or proceeding:
 
 1. **Write** the document fully
-2. **Re-read** the entire document from the top, as if seeing it for the first time
-3. **Evaluate** against these criteria:
-   - **Clarity**: Could someone unfamiliar with this project understand it?
-   - **Completeness**: Are there gaps, missing sections, or unstated assumptions?
-   - **Accuracy**: Does this faithfully reflect what the user communicated?
-   - **Actionability**: Is every task specific enough to execute autonomously?
-4. **Revise** if you identified concrete improvements. Update the file in place.
-5. **Repeat** steps 2-4 until no meaningful improvements remain, or you have completed **5 revision passes**.
+2. **Run iterative sub-agent review** (up to 5 iterations):
 
-Track revision passes at the bottom of the document:
-`<!-- Self-revision: N passes, final pass clean -->`
+```
+iteration = 0
+while iteration < 5:
+    Spawn a Task sub-agent (general-purpose type) with this prompt:
+
+    "Read [FILE_PATH]. Review it critically as if you are seeing it for the first time.
+    Look for: gaps, missing details, unclear sections, over-engineering, incorrect assumptions,
+    missing edge cases, and areas that could be improved.
+
+    Make concrete improvements directly to the file. Be specific and substantive --
+    do not add filler or unnecessary content.
+
+    If the document is solid and no meaningful improvements can be made,
+    respond with exactly: CONVERGED
+
+    Do not explain what you reviewed. Either improve the file or respond CONVERGED."
+
+    if sub-agent output contains "CONVERGED":
+        break
+    iteration += 1
+```
 
 ---
 
@@ -131,7 +143,9 @@ Now invoke the **Product Manager persona**.
    - Technical considerations
    - Risks & mitigations
 
-5. Apply the **Rule of Five** self-revision (see core-principles.md) — complete all 5 revision passes on `PROJECT_[name].md` before proceeding.
+5. Run the **Document Review Protocol** on `PROJECT_[name].md` (spawn up to 5 Task sub-agents for iterative review, stop on convergence).
+
+6. **Present the reviewed plan to the user for approval** via AskUserQuestion before proceeding to Step 3. Show a summary of the project plan and ask whether to proceed, revise, or stop.
 
 **Important:**
 - Ask ONE topic at a time
@@ -196,7 +210,7 @@ If not available, inform the user:
    - Responsive considerations
    - Accessibility checklist
 
-6. Apply the **Rule of Five** self-revision (see core-principles.md) — complete all 5 revision passes on `DESIGN_[name].md` before proceeding.
+6. Run the **Document Review Protocol** on `DESIGN_[name].md` (spawn up to 5 Task sub-agents for iterative review, stop on convergence).
 
 ---
 
@@ -253,7 +267,7 @@ If this is **adding scope** (existing project with completed tasks):
 *Use frontend-design skill for UI implementation*
 ```
 
-After generating or updating `BACKLOG.md`, apply the **Rule of Five** self-revision (see core-principles.md) — complete all 5 revision passes, focusing especially on whether each task is specific enough for autonomous execution by the buildcrew workflow.
+After generating or updating `BACKLOG.md`, run the **Document Review Protocol** on `BACKLOG.md` (spawn up to 5 Task sub-agents for iterative review, stop on convergence). Focus especially on whether each task is specific enough for autonomous execution by the buildcrew workflow.
 
 ### Generate or Update README
 
@@ -268,7 +282,7 @@ After finalizing BACKLOG.md, create or update `README.md` for the project:
    - Getting started placeholder (to be filled during build)
    - Current status: "Project planned, build not yet started"
 4. If `README.md` already exists (adding scope to an existing project), update it to reflect the new phases and tasks being added
-5. Apply the **Self-Revision Protocol** to README.md
+5. Run the **Document Review Protocol** on README.md (spawn up to 5 Task sub-agents for iterative review, stop on convergence)
 
 ---
 

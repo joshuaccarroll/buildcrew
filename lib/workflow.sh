@@ -169,8 +169,9 @@ handle_human_review() {
     local task="$1"
     local description="$2"
     local artifact="$3"
+    local force="${4:-}"
 
-    [[ "$HUMAN_REVIEW" == "true" ]] || return 0
+    [[ "$HUMAN_REVIEW" == "true" || "$force" == "--force" ]] || return 0
 
     # Fall back to autonomous if not interactive
     if [[ ! -t 0 ]]; then
@@ -722,9 +723,20 @@ process_task_isolated() {
         __completed_phases="${__completed_phases:+$__completed_phases }research"
         save_task_progress "$task" "$__completed_phases" "$__INVOCATION_COUNT"
 
-        # Human review pause: after research+plan, before AI review starts
+        # Human review pause: automatic if AI recommends it, or if --review flag set
         local hr_exit=0
-        handle_human_review "$task" "Implementation plan ready" ".claude/current-plan.md" || hr_exit=$?
+        local needs_human_review=false
+        local hr_reason=""
+        if [[ -f "$PHASE_RESULT_FILE" ]] && jq -e '.human_review == true' "$PHASE_RESULT_FILE" >/dev/null 2>&1; then
+            needs_human_review=true
+            hr_reason=$(jq -r '.human_review_reason // "AI recommended review"' "$PHASE_RESULT_FILE")
+        fi
+
+        if [[ "$needs_human_review" == "true" ]]; then
+            handle_human_review "$task" "Implementation plan ready — $hr_reason" ".claude/current-plan.md" "--force" || hr_exit=$?
+        elif [[ "$HUMAN_REVIEW" == "true" ]]; then
+            handle_human_review "$task" "Implementation plan ready" ".claude/current-plan.md" || hr_exit=$?
+        fi
         if [[ $hr_exit -eq 1 ]]; then
             mark_task_blocked "$task" "Skipped during human review"
             clear_task_progress
@@ -751,7 +763,11 @@ process_task_isolated() {
             case "$verdict" in
                 approved)
                     local hr_exit=0
-                    handle_human_review "$task" "Plan approved — review before build" ".claude/plan-review.md" || hr_exit=$?
+                    if [[ "$needs_human_review" == "true" ]]; then
+                        handle_human_review "$task" "Plan approved (review recommended by AI)" ".claude/plan-review.md" "--force" || hr_exit=$?
+                    elif [[ "$HUMAN_REVIEW" == "true" ]]; then
+                        handle_human_review "$task" "Plan approved — review before build" ".claude/plan-review.md" || hr_exit=$?
+                    fi
                     if [[ $hr_exit -eq 1 ]]; then
                         mark_task_blocked "$task" "Skipped during human review"
                         clear_task_progress

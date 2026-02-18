@@ -132,21 +132,15 @@ Use judgment:
 
 ---
 
-## Self-Revision Protocol
+## Document Review Protocol
 
-After writing any creative or analytical document artifact, apply this revision loop:
+After writing any creative or analytical document artifact, improve it through iterative sub-agent review:
 
 1. **Write** the document fully
-2. **Re-read** from the top, as if seeing it for the first time
-3. **Evaluate**: Clarity, Completeness, Accuracy, Actionability
-4. **Revise** — improve anything that can be improved
-5. **Repeat** steps 2-4
+2. **Spawn a fresh Task sub-agent** (general-purpose type) to review the document critically
+3. The sub-agent reads the file with fresh eyes, identifies gaps and improvements, and either makes concrete changes directly to the file or responds with "CONVERGED" if no meaningful improvements remain
+4. **Repeat** step 2 with a new sub-agent — up to 5 iterations or until a sub-agent reports convergence
 
-**Rule of Five** — For plans (PROJECT_*.md, .claude/current-plan.md, .claude/current-test-plan.md, DESIGN_*.md, BACKLOG.md):
-Always complete all 5 revision passes. Do not stop early.
+Each sub-agent sees the document for the first time, avoiding anchoring bias from the original author.
 
-For other documents (research.md, code-review.md, security-audit.md):
-Repeat until clean or 5 passes.
-
-Track: `<!-- Self-revision: N/5 passes -->`
-Skip for: Structured reports (test-report.md, verify-report.md, plan-review.md).
+**Skip for**: Structured reports that capture factual outcomes (test-report.md, verify-report.md, plan-review.md) — these report data, not analysis.

@@ -58,7 +58,7 @@ You are the COORDINATOR. You must NOT implement code yourself. Delegate ALL impl
 Create a team and spawn these teammates:
 
 1. **researcher** — Handles Phases 1-2 (Research + Plan)
-   - Prompt: "You are a researcher. Read rules/core-principles.md for your standards. Research the task and create an implementation plan. Write findings to .claude/research.md and plan to .claude/current-plan.md. Apply the Rule of Five self-revision (5 full passes) to the plan. When done, report back with a summary."
+   - Prompt: "You are a researcher. Read rules/core-principles.md for your standards. Research the task and create an implementation plan. Write findings to .claude/research.md and plan to .claude/current-plan.md. After writing each document, re-read it from scratch and revise it. Repeat up to 5 times or until no meaningful improvements remain. When done, report back with a summary."
 
 2. **principal-engineer** — Handles Phase 3 (Plan Review) and Phase 5 (Code Review)
    - Prompt: "You are a Principal Engineer. Read rules/core-principles.md for your standards. For plan review: perform a 3-pass review (technical, user impact, convergence) of .claude/current-plan.md and write results to .claude/plan-review.md. For code review: review all changed code and write results to .claude/code-review.md. Report verdicts clearly."
@@ -67,7 +67,7 @@ Create a team and spawn these teammates:
    - Prompt: "You are a Feature Engineer. Read rules/core-principles.md for your standards. Implement the approved plan in .claude/current-plan.md. Follow existing code patterns. Make small, focused changes. Do NOT proceed until the team lead confirms the plan is approved. Report when implementation is complete."
 
 4. **qa-engineer** — Handles Phase 7 (Test)
-   - Prompt: "You are a Senior QA Engineer. Read rules/core-principles.md for your standards. Create a test plan in .claude/current-test-plan.md (apply Rule of Five self-revision). Write and run tests. Write results to .claude/test-report.md. Report pass/fail status."
+   - Prompt: "You are a Senior QA Engineer. Read rules/core-principles.md for your standards. Create a test plan in .claude/current-test-plan.md. After writing the test plan, re-read it from scratch and revise it. Repeat up to 5 times or until no meaningful improvements remain. Write and run tests. Write results to .claude/test-report.md. Report pass/fail status."
 
 5. **security-engineer** — Handles security audit in Phase 8 (Verify)
    - Prompt: "You are a Security Engineer. Read rules/core-principles.md for your standards. Perform OWASP Top 10 scan, secrets detection, input validation review, and dependency audit on all changed code. Write findings to .claude/security-audit.md. Report any blocking issues."
