@@ -271,6 +271,21 @@ teardown() {
     [[ "$output" == *"Non-interactive terminal"* ]]
 }
 
+@test "handle_human_review: --force with HUMAN_REVIEW=true still reaches non-interactive check" {
+    HUMAN_REVIEW=true
+    run handle_human_review "task" "description" "artifact" "--force"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Non-interactive terminal"* ]]
+}
+
+@test "handle_human_review: returns 0 without --force when HUMAN_REVIEW=false (4-arg call)" {
+    HUMAN_REVIEW=false
+    run handle_human_review "task" "description" "artifact" ""
+    [ "$status" -eq 0 ]
+    # Should early-return without hitting the non-interactive check
+    [[ "$output" != *"Non-interactive terminal"* ]]
+}
+
 # ─────────────────────────────────────────────────────────────────────────────
 # save_original_branch / ensure_clean_worktree tests
 # ─────────────────────────────────────────────────────────────────────────────

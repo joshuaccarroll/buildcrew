@@ -66,3 +66,23 @@ teardown() {
     run build_team_lead_prompt "Test task"
     [[ "$output" == *"No project context files found"* ]]
 }
+
+@test "build_team_lead_prompt: researcher prompt uses iterative self-review" {
+    run build_team_lead_prompt "Test task"
+    [[ "$output" == *"Re-read"*"from scratch"*"revise"* ]]
+    [[ "$output" == *"Repeat up to 5 times"* ]]
+}
+
+@test "build_team_lead_prompt: researcher prompt does not use Rule of Five" {
+    run build_team_lead_prompt "Test task"
+    [[ "$output" != *"Rule of Five"* ]]
+}
+
+@test "build_team_lead_prompt: qa-engineer prompt uses iterative self-review" {
+    run build_team_lead_prompt "Test task"
+    # QA prompt also has "Re-read" and "Repeat up to 5 times"
+    # Count occurrences to confirm both researcher and QA have the pattern
+    local count
+    count=$(echo "$output" | grep -c "Repeat up to 5 times")
+    [ "$count" -ge 2 ]
+}

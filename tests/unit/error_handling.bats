@@ -176,3 +176,39 @@ teardown() {
     reason=$(jq -r '.reason // "Unknown reason"' .claude/workflow-status.json)
     [ "$reason" = "Unknown reason" ]
 }
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Phase result human_review field parsing tests
+# ─────────────────────────────────────────────────────────────────────────────
+
+@test "phase-result parsing: detects human_review=true" {
+    echo '{"phase": "research_and_plan", "verdict": "complete", "human_review": true, "human_review_reason": "Plan modifies 14 files"}' > .claude/phase-result.json
+    run jq -e '.human_review == true' .claude/phase-result.json
+    [ "$status" -eq 0 ]
+}
+
+@test "phase-result parsing: extracts human_review_reason" {
+    echo '{"phase": "research_and_plan", "verdict": "complete", "human_review": true, "human_review_reason": "Plan modifies 14 files"}' > .claude/phase-result.json
+    local reason
+    reason=$(jq -r '.human_review_reason // "AI recommended review"' .claude/phase-result.json)
+    [ "$reason" = "Plan modifies 14 files" ]
+}
+
+@test "phase-result parsing: human_review=false does not match" {
+    echo '{"phase": "research_and_plan", "verdict": "complete", "human_review": false}' > .claude/phase-result.json
+    run jq -e '.human_review == true' .claude/phase-result.json
+    [ "$status" -ne 0 ]
+}
+
+@test "phase-result parsing: missing human_review does not match" {
+    echo '{"phase": "research_and_plan", "verdict": "complete"}' > .claude/phase-result.json
+    run jq -e '.human_review == true' .claude/phase-result.json
+    [ "$status" -ne 0 ]
+}
+
+@test "phase-result parsing: provides default reason when human_review_reason missing" {
+    echo '{"phase": "research_and_plan", "verdict": "complete", "human_review": true}' > .claude/phase-result.json
+    local reason
+    reason=$(jq -r '.human_review_reason // "AI recommended review"' .claude/phase-result.json)
+    [ "$reason" = "AI recommended review" ]
+}
