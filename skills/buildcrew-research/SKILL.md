@@ -151,6 +151,7 @@ reference that file. Do not re-search or re-explore.
 
 1. **Load research findings**: Read `.claude/research.md` from the Research phase. Use the key findings, API docs, local context, and constraints to inform your plan.
 2. **Analyze the task**: Break down what needs to be done
+3. **Identify human prerequisites**: Surface anything the human must do -- account creation, API keys, DNS configuration, external service setup, purchasing, approvals. These go in a dedicated plan section and should be sequenced as early as possible.
 4. **Explore the codebase**: Use Glob and Grep to find relevant files
    - Look for similar implementations to follow existing patterns
    - Identify files that will need modification
@@ -161,6 +162,11 @@ reference that file. Do not re-search or re-explore.
    - Note any dependencies or order requirements
    - Reference relevant project context (users, principles, domain) when applicable
    - Include a "Research Context" section summarizing key findings from `.claude/research.md`
+   - **Order steps using these principles**:
+     1. Human prerequisites and external setup first (things that block the human)
+     2. Infrastructure, platform, and environment setup before feature work
+     3. Zero-change migrations before functional changes (migrate first, verify, then iterate)
+     4. Each step should produce a verifiable state -- include a "Verify" line after each step
 6. **Identify risks**: Note anything unclear or potentially problematic
 
 ### Plan Template
@@ -176,6 +182,11 @@ Write your plan to `.claude/current-plan.md` using this structure:
 ## Research Context
 [Key findings from .claude/research.md that inform this plan]
 
+## Human Prerequisites
+[Anything the human must do before or during implementation -- account creation, API keys, DNS, service setup. "None" if not applicable.]
+- [ ] [e.g., Create account on X service]
+- [ ] [e.g., Obtain API key for Y]
+
 ## Files to Modify
 - `path/to/file.ts` - [what changes]
 - `path/to/other.ts` - [what changes]
@@ -184,9 +195,18 @@ Write your plan to `.claude/current-plan.md` using this structure:
 - `path/to/new.ts` - [purpose]
 
 ## Implementation Steps
-1. [First step]
-2. [Second step]
-...
+
+> Order: foundations/infrastructure first, human-blocked items first, zero-change migrations before feature work. Each step should produce a verifiable state.
+
+### Step 1: [Name]
+- [ ] Sub-task 1
+- [ ] Sub-task 2
+- **Verify**: [What to check before moving to Step 2]
+
+### Step 2: [Name]
+- [ ] Sub-task 1
+- [ ] Sub-task 2
+- **Verify**: [What to check before moving to Step 3]
 
 ## Architecture Notes
 - [How this fits into the existing architecture]
@@ -195,6 +215,11 @@ Write your plan to `.claude/current-plan.md` using this structure:
 ## Testing Strategy
 - [How to verify this works]
 - [Test types needed: unit, integration, e2e]
+
+## Dependencies & Ordering Rationale
+- [Any prerequisites that must be done first]
+- [External dependencies needed]
+- **Why this order**: [Explain why steps are sequenced this way]
 
 ## Risks/Notes
 - [Any concerns or open questions]
@@ -228,6 +253,7 @@ while iteration < 5:
 
 After the review loop completes, assess whether human review is recommended based on these objective criteria (any = true):
 - Task description mentions "breaking change", "migration", or "deprecation"
+- Plan involves platform migration, replatforming, or infrastructure-first sequencing where ordering errors could waste the entire build
 - Plan modifies more than 10 files
 - Plan involves security-sensitive areas (auth, crypto, secrets, permissions)
 - Plan changes public APIs, CLI interfaces, or database schemas

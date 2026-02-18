@@ -133,6 +133,7 @@ Now invoke the **Product Manager persona**.
    - Success Metrics (what does winning look like)
    - Scope & Constraints (what's in, what's out)
    - Pushback & Refinement (challenge assumptions)
+   - Infrastructure & Prerequisites (hosting, platform, external services, API keys, DNS -- anything requiring human setup)
 
 4. After discovery, create `PROJECT_[name].md` with:
    - Vision statement
@@ -233,7 +234,12 @@ If this is **adding scope** (existing project with completed tasks):
 1. Read `PROJECT_[name].md`
 2. Extract all tasks from all phases
 3. Maintain phase order (Phase 1 tasks first)
-4. Generate or update `BACKLOG.md` in the format below. Be extremely concise. Sacrifice grammar for the sake of concision.
+4. **Apply phase ordering principles**:
+   - Phases requiring human setup (account creation, API keys, DNS, hosting) come first
+   - Infrastructure/platform/environment phases before feature phases
+   - For migrations: zero-change migration phase before feature-change phases
+   - Each phase should be independently verifiable before proceeding to the next
+5. Generate or update `BACKLOG.md` in the format below. Be extremely concise. Sacrifice grammar for the sake of concision.
 
 ```markdown
 # Backlog

@@ -192,6 +192,12 @@ When invoked during Phase 3 of the BuildCrew pipeline, the Product Manager revie
    - Does this align with product principles (check `.buildcrew/context/principles.md` if present)?
    - Does this serve the target users (check `.buildcrew/context/users.md` if present)?
 
+5. **Human Prerequisites & Sequencing**
+   - Are all human-required actions identified? (account creation, API keys, DNS, purchasing, external service setup)
+   - Are they in a dedicated "Human Prerequisites" section near the top of the plan?
+   - Are they sequenced early so the human won't discover blockers late?
+   - Is each implementation step independently verifiable?
+
 ### Plan Review Output
 
 ```markdown

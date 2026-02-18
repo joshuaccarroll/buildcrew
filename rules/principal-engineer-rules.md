@@ -33,6 +33,12 @@ Rules for architecture review, plan review, and code review.
    - Is the design testable?
    - What's the testing strategy?
 
+6. **Step Ordering**
+   - Are steps sequenced foundations-first? (infrastructure/platform before features)
+   - Does each step produce a verifiable state?
+   - For migrations: is there a zero-change migration step before feature changes?
+   - Are human-required actions (API keys, accounts, service setup) surfaced early?
+
 ### Code Review Checklist
 
 1. **Correctness**

@@ -52,6 +52,12 @@ Evaluate `.claude/current-plan.md` against:
    - Missing error handling?
    - Security considerations?
 
+6. **Step Ordering & Testability**
+   - Are steps ordered foundations-first? (infrastructure/platform before features)
+   - Does each step produce a verifiable state with a clear verification checkpoint?
+   - If this involves migration or replatforming, is there a zero-change migration step before feature work?
+   - Are human-required actions (API keys, accounts, DNS) sequenced as early as possible?
+
 **Pass 1 Verdict**: PASS / NEEDS_REVISION
 
 If NEEDS_REVISION: Update `.claude/current-plan.md` with required changes before proceeding to Pass 2.
@@ -84,6 +90,11 @@ Walk through the plan from the end user's perspective:
    - Would a user actually want this, or is this engineering-driven?
    - Does this align with project principles (if `.buildcrew/context/principles.md` exists)?
 
+5. **Human Prerequisites Check**
+   - Are all human-required actions identified? (account creation, API keys, DNS, external service setup)
+   - Are they listed in a dedicated "Human Prerequisites" section?
+   - Are they sequenced early enough that the human won't be blocked late in the build?
+
 **Pass 2 Verdict**: PASS / NEEDS_REVISION
 
 If NEEDS_REVISION: Update `.claude/current-plan.md` to address user-facing gaps before proceeding to Pass 3.
@@ -99,7 +110,8 @@ Review the plan with all prior feedback incorporated:
 1. Are we solving the right problem the right way?
 2. Has PM feedback been properly addressed without introducing technical issues?
 3. Is the plan as good as it can get — simple, correct, user-focused, and testable?
-4. Final sanity check: anything missing or unnecessary?
+4. Were step ordering issues from Pass 1 addressed? (foundations first, verification checkpoints present, human prerequisites early)
+5. Final sanity check: anything missing or unnecessary?
 
 **Pass 3 Verdict**: APPROVED / NEEDS_REVISION / REJECTED
 
