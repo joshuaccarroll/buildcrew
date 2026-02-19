@@ -7,11 +7,13 @@
 # This script orchestrates an autonomous development workflow using Claude Code.
 # It reads tasks from BACKLOG.md and processes each one through phase groups:
 #
-# Phase-isolated mode (5 separate Claude invocations):
+# Phase-isolated mode (up to 7 separate Claude invocations):
+#   0. Spec (optional, skipped with --skip-spec)
 #   1. Research + Plan
 #   2. Plan Review (3-pass)
 #   3. Build
 #   4. Code Review + Refactor + Test
+#   4.5. Outcome Verification (validates against spec acceptance criteria)
 #   5. Verify + Security Audit + Commit + Signal
 #
 # Legacy mode (single Claude invocation with all phases):
@@ -58,10 +60,12 @@ __RESUME_PHASES=""
 # Uses a function instead of declare -A for bash 3.2 (macOS) compatibility
 get_phase_max_turns() {
     case "$1" in
+        spec)     echo 30 ;;
         research) echo 40 ;;
         review)   echo 50 ;;
         build)    echo 50 ;;
         test)     echo 60 ;;
+        outcome)  echo 40 ;;
         verify)   echo 30 ;;
         *)        echo 30 ;;
     esac
@@ -81,6 +85,8 @@ ORIGINAL_BRANCH=""
 HAS_REMOTE=false
 GH_AVAILABLE=false
 USE_TEAMS=false
+SKIP_SPEC=false
+STRICT_MODE=false
 
 parse_args() {
     while [[ $# -gt 0 ]]; do
@@ -117,6 +123,14 @@ parse_args() {
                 USE_TEAMS=true
                 shift
                 ;;
+            --skip-spec)
+                SKIP_SPEC=true
+                shift
+                ;;
+            --strict)
+                STRICT_MODE=true
+                shift
+                ;;
             --help|-h)
                 echo "Usage: $0 [OPTIONS]"
                 echo ""
@@ -128,6 +142,8 @@ parse_args() {
                 echo "  --task NAME  Target a specific task by name or number (implies --single)"
                 echo "  --resume     Resume an interrupted task from where it left off (phase-isolated mode only)"
                 echo "  --teams      Use agent teams mode (experimental, requires CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1)"
+                echo "  --skip-spec  Skip the specification refinement phase (for tasks with detailed specs already)"
+                echo "  --strict     Require ALL acceptance criteria to pass before commit (outcome phase)"
                 echo "  --help, -h   Show this help message"
                 exit 0
                 ;;
@@ -572,10 +588,11 @@ phase_completed() {
 # ─────────────────────────────────────────────────────────────────────────────────
 
 CURRENT_TASK_FILE=".buildcrew/.current-task"
+LESSONS_FILE=".buildcrew/lessons.md"
 ARTIFACT_FILES=(
-    .claude/research.md .claude/current-plan.md .claude/plan-review.md
-    .claude/code-review.md .claude/test-report.md .claude/security-audit.md
-    .claude/verify-report.md .claude/current-test-plan.md
+    .claude/spec.md .claude/research.md .claude/current-plan.md .claude/plan-review.md
+    .claude/code-review.md .claude/test-report.md .claude/outcome-report.md
+    .claude/security-audit.md .claude/verify-report.md .claude/current-test-plan.md
 )
 
 # Archive any existing .claude/ artifacts before cleanup.
@@ -614,6 +631,138 @@ archive_task_artifacts() {
     done
 
     print_info "Archived artifacts to $archive_dir"
+}
+
+# ─────────────────────────────────────────────────────────────────────────────────
+# Lessons system (Change 2: Self-Improvement Loop)
+# ─────────────────────────────────────────────────────────────────────────────────
+
+LESSONS_MAX_ENTRIES=100
+LESSONS_SUMMARIZE_COUNT=50
+
+# Append a structured lesson to .buildcrew/lessons.md after a failure.
+# Usage: append_lesson "phase" "what_went_wrong" "what_fixed_it" "rule"
+append_lesson() {
+    local phase="$1"
+    local what_went_wrong="$2"
+    local what_fixed_it="$3"
+    local rule="$4"
+
+    mkdir -p .buildcrew
+
+    # Count existing lesson entries (lines starting with "## Lesson")
+    local entry_count=0
+    if [[ -f "$LESSONS_FILE" ]]; then
+        entry_count=$(grep -c '^## Lesson [0-9]' "$LESSONS_FILE" 2>/dev/null || echo 0)
+    fi
+
+    # Summarize oldest entries if at cap
+    if (( entry_count >= LESSONS_MAX_ENTRIES )); then
+        _summarize_old_lessons
+    fi
+
+    # Get next lesson number
+    local next_num=1
+    if [[ -f "$LESSONS_FILE" ]]; then
+        local last_num
+        last_num=$(grep '^## Lesson [0-9]' "$LESSONS_FILE" 2>/dev/null | tail -1 | sed 's/^## Lesson //' | sed 's/:.*//' || echo 0)
+        next_num=$(( last_num + 1 ))
+    else
+        # Initialize file header
+        cat > "$LESSONS_FILE" << 'LESSONS_HEADER'
+# BuildCrew Lessons
+
+Lessons learned from failures across runs. Injected into every persona's context automatically.
+Use `buildcrew lessons` to list, `buildcrew lessons promote N` to graduate to project rules,
+and `buildcrew lessons prune` to remove stale entries.
+
+---
+
+LESSONS_HEADER
+    fi
+
+    local timestamp
+    timestamp=$(date '+%Y-%m-%d %H:%M')
+    cat >> "$LESSONS_FILE" << EOF
+
+## Lesson ${next_num}: ${timestamp}
+
+**Phase**: ${phase}
+**What went wrong**: ${what_went_wrong}
+**What fixed it**: ${what_fixed_it}
+**Rule**: ${rule}
+**Applies to**: ${phase} persona
+
+---
+EOF
+    print_info "Lesson recorded in $LESSONS_FILE"
+}
+
+# Summarize oldest LESSONS_SUMMARIZE_COUNT entries into a Patterns section.
+_summarize_old_lessons() {
+    local tmp_file
+    tmp_file=$(mktemp)
+
+    # Extract the header/patterns section (before first "## Lesson") and all lesson entries
+    local header_end
+    header_end=$(grep -n '^## Lesson [0-9]' "$LESSONS_FILE" 2>/dev/null | head -1 | cut -d: -f1)
+    if [[ -z "$header_end" ]]; then
+        return 0
+    fi
+
+    # Get existing patterns section (if any) or just the header
+    local existing_patterns=""
+    if grep -q '^## Patterns' "$LESSONS_FILE" 2>/dev/null; then
+        existing_patterns=$(awk '/^## Patterns/,/^## Lesson [0-9]/' "$LESSONS_FILE" 2>/dev/null | head -n -1)
+    fi
+
+    # Get all lesson entries
+    local all_lessons
+    all_lessons=$(grep -n '^## Lesson [0-9]' "$LESSONS_FILE" 2>/dev/null)
+    local total_lessons
+    total_lessons=$(echo "$all_lessons" | wc -l | tr -d ' ')
+
+    if (( total_lessons <= LESSONS_SUMMARIZE_COUNT )); then
+        return 0
+    fi
+
+    # Get line numbers of the first LESSONS_SUMMARIZE_COUNT lessons to summarize
+    local last_to_summarize_line
+    last_to_summarize_line=$(echo "$all_lessons" | sed -n "${LESSONS_SUMMARIZE_COUNT}p" | cut -d: -f1)
+    local first_to_keep_line
+    first_to_keep_line=$(echo "$all_lessons" | sed -n "$((LESSONS_SUMMARIZE_COUNT + 1))p" | cut -d: -f1)
+
+    if [[ -z "$first_to_keep_line" ]]; then
+        return 0
+    fi
+
+    # Build new file: header + condensed patterns + remaining lessons
+    {
+        # File header (lines before first lesson, excluding any old patterns section)
+        awk "NR < ${header_end} && !/^## Patterns/" "$LESSONS_FILE"
+
+        # Condensed patterns section
+        echo "## Patterns (condensed from oldest ${LESSONS_SUMMARIZE_COUNT} lessons)"
+        echo ""
+        echo "*The following patterns were extracted from the first ${LESSONS_SUMMARIZE_COUNT} lessons:*"
+        echo ""
+        # Emit preserved bullet rules from previous condensation cycles (if any)
+        if [[ -n "$existing_patterns" ]]; then
+            printf '%s\n' "$existing_patterns" | grep '^- ' || true
+        fi
+        # Extract just the "Rule" lines from summarized lessons as bullet points
+        awk "NR >= ${header_end} && NR < ${first_to_keep_line} && /^\*\*Rule\*\*:/" "$LESSONS_FILE" | \
+            sed 's/\*\*Rule\*\*: /- /'
+        echo ""
+        echo "---"
+        echo ""
+
+        # Remaining lessons (keep from first_to_keep_line onwards)
+        awk "NR >= ${first_to_keep_line}" "$LESSONS_FILE"
+    } > "$tmp_file"
+
+    mv "$tmp_file" "$LESSONS_FILE"
+    print_info "Condensed oldest ${LESSONS_SUMMARIZE_COUNT} lessons into patterns section"
 }
 
 # ─────────────────────────────────────────────────────────────────────────────────
@@ -743,6 +892,9 @@ process_task_isolated() {
     local task="$1"
     local __completed_phases=""
     local __is_resuming=false
+    local __replan_count=0           # circuit breaker: how many times we've re-planned
+    local __need_replan=false        # circuit breaker: set true to restart from research
+    local __replan_context=""        # circuit breaker: failure context for re-plan prompt
 
     # Resume or fresh start
     if [[ "$RESUME_MODE" == "true" ]] && load_task_progress; then
@@ -763,7 +915,7 @@ process_task_isolated() {
         clear_task_progress
     fi
 
-    print_info "Running in phase-isolated mode (5 invocations)"
+    print_info "Running in phase-isolated mode"
 
     if [[ "$__is_resuming" != "true" ]]; then
         # Archive artifacts from any previous task before cleanup
@@ -777,18 +929,64 @@ process_task_isolated() {
     mkdir -p .buildcrew
     echo "$task" > "$CURRENT_TASK_FILE"
 
-    # --- Group 1: Research + Plan ---
+    # ─────────────────────────────────────────────────────────────────────────
+    # Outer loop: supports circuit breaker re-planning
+    # ─────────────────────────────────────────────────────────────────────────
+    local __outer_iterations=0
+    while true; do
+        (( ++__outer_iterations ))
+        if (( __outer_iterations > 2 )); then
+            print_error "Outer loop safety limit exceeded"
+            mark_task_blocked "$task" "Safety: outer loop exceeded 2 iterations"
+            return 1
+        fi
+        __need_replan=false
+
+    # --- Phase 0: Spec (optional, skipped with --skip-spec) ---
+    local __spec_context=""
+    local needs_human_review=false
+    local hr_reason=""
+
+    if [[ "$SKIP_SPEC" == "true" ]]; then
+        print_info "Skipping phase: spec (--skip-spec flag set)"
+    elif phase_completed "spec"; then
+        print_info "Skipping phase: spec (completed in previous run)"
+        if [[ -f ".claude/spec.md" ]]; then
+            __spec_context="Specification available at .claude/spec.md — read it for acceptance criteria."
+        fi
+    elif [[ -d ".claude/skills/buildcrew-spec" ]]; then
+        run_phase_group "spec" "$task" "${__replan_context:+Re-planning context: $__replan_context}" || { clear_task_progress; return 1; }
+
+        local spec_verdict
+        spec_verdict=$(jq -r '.verdict // "complete"' "$PHASE_RESULT_FILE")
+        if [[ "$spec_verdict" == "vague" ]]; then
+            local vague_reason
+            vague_reason=$(jq -r '.details // "Task too vague"' "$PHASE_RESULT_FILE")
+            mark_task_blocked "$task" "$vague_reason"
+            clear_task_progress
+            print_warning "Task flagged as too vague to spec. See .claude/spec.md for details."
+            return 1
+        fi
+
+        __spec_context="Specification available at .claude/spec.md — read it for acceptance criteria and scope boundaries."
+        __completed_phases="${__completed_phases:+$__completed_phases }spec"
+        save_task_progress "$task" "$__completed_phases" "$__INVOCATION_COUNT"
+    fi
+
+    # --- Phase 1: Research + Plan ---
     if phase_completed "research"; then
         print_info "Skipping phase: research (completed in previous run)"
     else
-        run_phase_group "research" "$task" || { clear_task_progress; return 1; }
+        local research_extra="${__spec_context}"
+        if [[ -n "$__replan_context" ]]; then
+            research_extra="${research_extra:+$research_extra | }REPLAN: $__replan_context"
+        fi
+        run_phase_group "research" "$task" "$research_extra" || { clear_task_progress; return 1; }
         __completed_phases="${__completed_phases:+$__completed_phases }research"
         save_task_progress "$task" "$__completed_phases" "$__INVOCATION_COUNT"
 
         # Human review pause: automatic if AI recommends it, or if --review flag set
         local hr_exit=0
-        local needs_human_review=false
-        local hr_reason=""
         if [[ -f "$PHASE_RESULT_FILE" ]] && jq -e '.human_review == true' "$PHASE_RESULT_FILE" >/dev/null 2>&1; then
             needs_human_review=true
             hr_reason=$(jq -r '.human_review_reason // "AI recommended review"' "$PHASE_RESULT_FILE")
@@ -811,19 +1009,25 @@ process_task_isolated() {
         fi
     fi
 
-    # --- Group 2: Plan Review (max 3 external cycles) ---
+    # --- Phase 2: Plan Review (max 3 external cycles, circuit breaker at 2 consecutive failures) ---
     if phase_completed "review"; then
         print_info "Skipping phase: review (completed in previous run)"
     else
         local plan_review_cycle=0
+        local consecutive_review_failures=0
         while true; do
             ((plan_review_cycle++))
-            run_phase_group "review" "$task" "Plan review cycle $plan_review_cycle of 3" || { clear_task_progress; return 1; }
+            local review_extra="Plan review cycle $plan_review_cycle (max 2 before re-planning)"
+            if [[ -n "$__spec_context" ]]; then
+                review_extra="$review_extra | $__spec_context"
+            fi
+            run_phase_group "review" "$task" "$review_extra" || { clear_task_progress; return 1; }
 
             local verdict
             verdict=$(jq -r '.verdict' "$PHASE_RESULT_FILE")
             case "$verdict" in
                 approved)
+                    consecutive_review_failures=0
                     local hr_exit=0
                     if [[ "$needs_human_review" == "true" ]]; then
                         handle_human_review "$task" "Plan approved (review recommended by AI)" ".claude/plan-review.md" "--force" || hr_exit=$?
@@ -841,84 +1045,292 @@ process_task_isolated() {
                         return 1
                     fi
                     break ;;
-                rejected) mark_task_blocked "$task" "Plan rejected"; clear_task_progress; return 1 ;;
+                rejected)
+                    append_lesson "review" \
+                        "Plan rejected after $plan_review_cycle cycle(s)" \
+                        "Task marked blocked due to fundamental plan issues" \
+                        "Ensure plans are grounded in actual codebase patterns before review"
+                    mark_task_blocked "$task" "Plan rejected"
+                    clear_task_progress
+                    return 1 ;;
                 needs_revision)
-                    if (( plan_review_cycle >= 3 )); then
-                        mark_task_blocked "$task" "Plan review failed to converge after 3 cycles"
+                    ((consecutive_review_failures++))
+                    if (( consecutive_review_failures >= 2 )); then
+                        # Circuit breaker: plan is not converging
+                        local failure_summary
+                        failure_summary=$(jq -r '.details // "Plan failed to converge after 2 revision cycles"' "$PHASE_RESULT_FILE")
+                        print_warning "[CIRCUIT BREAKER] Approach failed twice at Plan Review phase. Re-planning from scratch with failure context."
+                        append_lesson "review" \
+                            "Plan failed to converge after $plan_review_cycle cycles: $failure_summary" \
+                            "Triggered circuit breaker and re-planned from scratch" \
+                            "Start from a different architectural approach when plan review rejects the same issues twice"
+                        if (( __replan_count >= 1 )); then
+                            print_error "Circuit breaker triggered again after re-planning. Stopping task."
+                            mark_task_blocked "$task" "Circuit breaker: plan failed twice even after re-planning"
+                            clear_task_progress
+                            return 1
+                        fi
+                        ((__replan_count++))
+                        __replan_context="CIRCUIT BREAKER: Plan review failed twice. Previous approach: $failure_summary. Try a fundamentally different approach."
+                        __need_replan=true
+                        __completed_phases=""
                         clear_task_progress
-                        return 1
+                        break
                     fi
                     ;;
                 *) mark_task_blocked "$task" "Unexpected plan review verdict: $verdict"; clear_task_progress; return 1 ;;
             esac
         done
+
+        if [[ "$__need_replan" == "true" ]]; then
+            continue  # restart outer while loop
+        fi
+
         __completed_phases="${__completed_phases:+$__completed_phases }review"
         save_task_progress "$task" "$__completed_phases" "$__INVOCATION_COUNT"
     fi
 
-    # --- Group 3 + 4: Build → Review/Test (with rebuild loop) ---
+    # --- Phase 3 + 4: Build → Code Review/Test (with rebuild loop, circuit breaker) ---
     if phase_completed "build"; then
         print_info "Skipping phase: build+test (completed in previous run)"
     else
         local build_attempt=0
+        local consecutive_build_failures=0
         while true; do
             ((build_attempt++))
-            if (( build_attempt > 2 )); then
-                mark_task_blocked "$task" "Build failed after 2 attempts"
-                clear_task_progress
-                return 1
-            fi
 
             local build_context=""
+            if [[ -n "$__spec_context" ]]; then
+                build_context="$__spec_context"
+            fi
             if (( build_attempt > 1 )); then
                 local prev_reason
                 prev_reason=$(jq -r '.details // "unknown"' "$PHASE_RESULT_FILE")
-                build_context="This is build attempt $build_attempt. Previous attempt failed: $prev_reason. Avoid the same mistakes."
+                build_context="${build_context:+$build_context | }This is build attempt $build_attempt. Previous attempt failed: $prev_reason. Avoid the same mistakes."
             fi
 
             run_phase_group "build" "$task" "$build_context" || { clear_task_progress; return 1; }
-            run_phase_group "test" "$task" || { clear_task_progress; return 1; }
+
+            local test_extra="${__spec_context}"
+            run_phase_group "test" "$task" "$test_extra" || { clear_task_progress; return 1; }
 
             local verdict
             verdict=$(jq -r '.verdict' "$PHASE_RESULT_FILE")
             case "$verdict" in
-                approved) break ;;
-                needs_rebuild|test_failure) continue ;;
+                approved)
+                    consecutive_build_failures=0
+                    break ;;
+                needs_rebuild|test_failure)
+                    ((consecutive_build_failures++))
+                    if (( consecutive_build_failures >= 2 )); then
+                        local failure_summary
+                        failure_summary=$(jq -r '.details // "Build/test failed twice"' "$PHASE_RESULT_FILE")
+                        print_warning "[CIRCUIT BREAKER] Approach failed twice at Build/Test phase. Re-planning from scratch with failure context."
+                        append_lesson "build" \
+                            "Build/test failed after $build_attempt attempts: $failure_summary" \
+                            "Triggered circuit breaker and re-planned from scratch" \
+                            "When build fails twice on the same approach, the plan itself is likely flawed — re-plan rather than retry"
+                        if (( __replan_count >= 1 )); then
+                            print_error "Circuit breaker triggered again after re-planning. Stopping task."
+                            mark_task_blocked "$task" "Circuit breaker: build/test failed twice even after re-planning"
+                            clear_task_progress
+                            return 1
+                        fi
+                        ((__replan_count++))
+                        __replan_context="CIRCUIT BREAKER: Build/test failed twice. Previous failure: $failure_summary. The implementation approach needs to change — re-plan with a different strategy."
+                        __need_replan=true
+                        __completed_phases=""
+                        clear_task_progress
+                        break
+                    fi
+                    local first_fail_details
+                    first_fail_details=$(jq -r '.details // "Build/test failed"' "$PHASE_RESULT_FILE")
+                    append_lesson "build" \
+                        "Build/test failed on attempt $build_attempt: $first_fail_details" \
+                        "Retrying build with revised approach" \
+                        "Read test output carefully before retrying — the error usually indicates a misunderstanding of the existing codebase"
+                    continue ;;
                 *) mark_task_blocked "$task" "Unexpected review verdict: $verdict"; clear_task_progress; return 1 ;;
             esac
         done
+
+        if [[ "$__need_replan" == "true" ]]; then
+            continue  # restart outer while loop
+        fi
+
         __completed_phases="${__completed_phases:+$__completed_phases }build"
         save_task_progress "$task" "$__completed_phases" "$__INVOCATION_COUNT"
     fi
 
-    # --- Group 5: Verify + Commit (never skipped — always re-verify) ---
+    # --- Phase 4.5: Outcome Verification (validates against spec acceptance criteria) ---
+    if [[ -d ".claude/skills/buildcrew-outcome" ]] && [[ "$SKIP_SPEC" != "true" ]] && [[ -f ".claude/spec.md" ]]; then
+        local outcome_attempt=0
+        local consecutive_outcome_failures=0
+        while true; do
+            ((outcome_attempt++))
+
+            local outcome_extra="Read .claude/spec.md for acceptance criteria to verify. STRICT_MODE=${STRICT_MODE}"
+            if (( outcome_attempt > 1 )); then
+                local prev_outcome_reason
+                prev_outcome_reason=$(jq -r '.details // "unknown"' "$PHASE_RESULT_FILE")
+                outcome_extra="$outcome_extra | Retry after fix. Previous failure: $prev_outcome_reason"
+            fi
+
+            run_phase_group "outcome" "$task" "$outcome_extra" || { clear_task_progress; return 1; }
+
+            local outcome_verdict
+            outcome_verdict=$(jq -r '.verdict // "unknown"' "$PHASE_RESULT_FILE")
+            case "$outcome_verdict" in
+                passed)
+                    consecutive_outcome_failures=0
+                    break ;;
+                partial)
+                    # Some criteria failed — warn but allow if not --strict
+                    if [[ "$STRICT_MODE" == "true" ]]; then
+                        local partial_details
+                        partial_details=$(jq -r '.details // "Some acceptance criteria not met"' "$PHASE_RESULT_FILE")
+                        print_warning "--strict mode: partial outcome failure blocks commit. Rebuilding..."
+                        # Fall through to failed path
+                        ((consecutive_outcome_failures++))
+                        if (( consecutive_outcome_failures >= 2 )); then
+                            local failure_summary
+                            failure_summary=$(jq -r '.details // "Outcome verification failed twice"' "$PHASE_RESULT_FILE")
+                            print_warning "[CIRCUIT BREAKER] Approach failed twice at Outcome Verification. Re-planning from scratch."
+                            append_lesson "outcome" \
+                                "Acceptance criteria not met after $outcome_attempt attempts: $failure_summary" \
+                                "Triggered circuit breaker and re-planned from scratch" \
+                                "When acceptance criteria fail twice, the implementation misunderstands the spec — re-read spec carefully before coding"
+                            if (( __replan_count >= 1 )); then
+                                print_error "Circuit breaker triggered again after re-planning. Stopping task."
+                                mark_task_blocked "$task" "Circuit breaker: outcome verification failed twice even after re-planning"
+                                clear_task_progress
+                                return 1
+                            fi
+                            ((__replan_count++))
+                            __replan_context="CIRCUIT BREAKER: Outcome verification failed twice. Unmet criteria: $failure_summary. Re-read the spec in .claude/spec.md and plan differently."
+                            __need_replan=true
+                            __completed_phases=""
+                            clear_task_progress
+                            break
+                        fi
+                        # Rebuild to fix failing criteria
+                        append_lesson "outcome" \
+                            "Acceptance criteria partially met on attempt $outcome_attempt: $partial_details" \
+                            "Rebuilt with targeted fix for failing criteria" \
+                            "Partial acceptance at outcome stage means the implementation is incomplete — re-read the specific failing criteria in the spec"
+                        run_phase_group "build" "$task" "OUTCOME FIX: $partial_details | $__spec_context" || { clear_task_progress; return 1; }
+                        run_phase_group "test" "$task" "$__spec_context" || { clear_task_progress; return 1; }
+                        continue
+                    else
+                        local partial_details
+                        partial_details=$(jq -r '.details // "Some acceptance criteria not met"' "$PHASE_RESULT_FILE")
+                        print_warning "Outcome verification: some acceptance criteria not fully met. Proceeding without --strict."
+                        print_warning "Details: $partial_details"
+                        break
+                    fi
+                    ;;
+                failed)
+                    ((consecutive_outcome_failures++))
+                    if (( consecutive_outcome_failures >= 2 )); then
+                        local failure_summary
+                        failure_summary=$(jq -r '.details // "Outcome verification failed twice"' "$PHASE_RESULT_FILE")
+                        print_warning "[CIRCUIT BREAKER] Approach failed twice at Outcome Verification. Re-planning from scratch."
+                        append_lesson "outcome" \
+                            "Acceptance criteria failed after $outcome_attempt attempts: $failure_summary" \
+                            "Triggered circuit breaker and re-planned from scratch" \
+                            "When acceptance criteria fail twice, the implementation misunderstands the spec — re-read spec before coding"
+                        if (( __replan_count >= 1 )); then
+                            print_error "Circuit breaker triggered again after re-planning. Stopping task."
+                            mark_task_blocked "$task" "Circuit breaker: outcome verification failed twice even after re-planning"
+                            clear_task_progress
+                            return 1
+                        fi
+                        ((__replan_count++))
+                        __replan_context="CIRCUIT BREAKER: Outcome verification failed twice. Unmet criteria: $failure_summary. Re-read the spec in .claude/spec.md and plan differently."
+                        __need_replan=true
+                        __completed_phases=""
+                        clear_task_progress
+                        break
+                    fi
+                    local rebuild_ctx
+                    rebuild_ctx=$(jq -r '.details // "Acceptance criteria not met"' "$PHASE_RESULT_FILE")
+                    print_info "Outcome verification failed — rebuilding to fix failing criteria..."
+                    append_lesson "outcome" \
+                        "Acceptance criteria failed: $rebuild_ctx" \
+                        "Rebuilt with targeted fix for failing criteria" \
+                        "Always run the feature against its acceptance criteria before consider it done"
+                    run_phase_group "build" "$task" "OUTCOME FIX: $rebuild_ctx | $__spec_context" || { clear_task_progress; return 1; }
+                    run_phase_group "test" "$task" "$__spec_context" || { clear_task_progress; return 1; }
+                    continue ;;
+                *)
+                    mark_task_blocked "$task" "Unexpected outcome verdict: $outcome_verdict"
+                    clear_task_progress
+                    return 1 ;;
+            esac
+        done
+
+        if [[ "$__need_replan" == "true" ]]; then
+            continue  # restart outer while loop
+        fi
+    fi
+
+    # --- Phase 5: Verify + Commit (never skipped — always re-verify) ---
     local verify_attempt=0
+    local consecutive_verify_failures=0
     while true; do
         ((verify_attempt++))
-        if (( verify_attempt > 3 )); then
-            mark_task_blocked "$task" "Verification failed after 3 attempts"
-            clear_task_progress
-            return 1
-        fi
 
-        run_phase_group "verify" "$task" || { clear_task_progress; return 1; }
+        local verify_extra="${__spec_context}"
+        run_phase_group "verify" "$task" "$verify_extra" || { clear_task_progress; return 1; }
 
         local verdict
         verdict=$(jq -r '.verdict' "$PHASE_RESULT_FILE")
         case "$verdict" in
             complete) break ;;
             blocked)
+                ((consecutive_verify_failures++))
                 local failing
                 failing=$(jq -r '.failing_check // "unknown"' "$PHASE_RESULT_FILE")
+                local failure_details
+                failure_details=$(jq -r '.details // "unknown"' "$PHASE_RESULT_FILE")
+
+                if (( consecutive_verify_failures >= 2 )); then
+                    print_warning "[CIRCUIT BREAKER] Approach failed twice at Verify phase ($failing). Re-planning from scratch."
+                    append_lesson "verify" \
+                        "Verification blocked twice on '$failing': $failure_details" \
+                        "Triggered circuit breaker and re-planned from scratch" \
+                        "When verification fails twice on the same check, the build approach itself is wrong — re-plan"
+                    if (( __replan_count >= 1 )); then
+                        print_error "Circuit breaker triggered again after re-planning. Stopping task."
+                        mark_task_blocked "$task" "Circuit breaker: verification failed twice even after re-planning"
+                        clear_task_progress
+                        return 1
+                    fi
+                    ((__replan_count++))
+                    __replan_context="CIRCUIT BREAKER: Verification failed twice on '$failing': $failure_details. Plan a different approach that avoids this issue."
+                    __need_replan=true
+                    __completed_phases=""
+                    clear_task_progress
+                    break
+                fi
+
                 case "$failing" in
                     tests|security)
                         local rebuild_context
                         rebuild_context=$(build_verify_failure_context "$failing")
+                        append_lesson "verify" \
+                            "Verify blocked on '$failing': $failure_details" \
+                            "Rebuilt with targeted fix for $failing issues" \
+                            "Always run the full verify check before considering a build complete"
                         run_phase_group "build" "$task" "$rebuild_context" || { clear_task_progress; return 1; }
-                        run_phase_group "test" "$task" || { clear_task_progress; return 1; }
+                        run_phase_group "test" "$task" "$verify_extra" || { clear_task_progress; return 1; }
                         ;;
                     code_review)
-                        run_phase_group "test" "$task" || { clear_task_progress; return 1; }
+                        append_lesson "verify" \
+                            "Code review blocked verify on attempt $verify_attempt: $failure_details" \
+                            "Re-ran test phase to address code review issues" \
+                            "Code review failures at verify stage mean test phase missed quality checks — address style/structure issues during build"
+                        run_phase_group "test" "$task" "$verify_extra" || { clear_task_progress; return 1; }
                         ;;
                     *)
                         mark_task_blocked "$task" "Verification blocked: $failing"
@@ -930,6 +1342,15 @@ process_task_isolated() {
             *) mark_task_blocked "$task" "Unexpected verify verdict: $verdict"; clear_task_progress; return 1 ;;
         esac
     done
+
+    if [[ "$__need_replan" == "true" ]]; then
+        continue  # restart outer while loop
+    fi
+
+    # Task succeeded — exit the outer while loop
+    break
+
+    done  # end of outer re-planning while loop
 
     # Task succeeded
     clear_task_progress
@@ -1049,7 +1470,10 @@ main() {
         fi
     elif is_phase_isolation_available; then
         use_isolation=true
-        print_info "Mode: Phase-isolated (5 invocations per task)"
+        local _phase_count=5
+        [[ "$SKIP_SPEC" != "true" ]] && [[ -d ".claude/skills/buildcrew-spec" ]] && _phase_count=$((_phase_count + 1))
+        [[ -d ".claude/skills/buildcrew-outcome" ]] && _phase_count=$((_phase_count + 1))
+        print_info "Mode: Phase-isolated ($_phase_count invocations per task)"
     else
         print_info "Mode: Legacy (single invocation per task)"
         if [[ "$HUMAN_REVIEW" == "true" ]]; then
@@ -1173,7 +1597,14 @@ main() {
                     skip_phases=$(jq -r '.completed_phases // [] | join(", ")' "$PROGRESS_FILE" 2>/dev/null)
                     print_info "[DRY RUN] Would resume task, skipping phases: ${skip_phases:-none}"
                 else
-                    print_info "[DRY RUN] Would execute 5 phase groups for: $task"
+                    local phase_list="research review build test verify"
+                    if [[ "$SKIP_SPEC" != "true" ]]; then
+                        phase_list="spec $phase_list"
+                    fi
+                    if [[ -d ".claude/skills/buildcrew-outcome" ]]; then
+                        phase_list="${phase_list/test verify/test outcome verify}"
+                    fi
+                    print_info "[DRY RUN] Would execute phases: $phase_list"
                 fi
             else
                 print_info "[DRY RUN] Would execute: claude -p \"Execute the buildcrew skill for this task: $task\""
@@ -1287,5 +1718,8 @@ main() {
 
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
     parse_args "$@"
+    if [[ "$STRICT_MODE" == "true" ]] && [[ "$SKIP_SPEC" == "true" ]]; then
+        print_warning "--strict has no effect with --skip-spec (outcome phase requires a spec)"
+    fi
     main
 fi
