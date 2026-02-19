@@ -365,8 +365,21 @@ run_norms_analysis() {
     print_header "Codebase Norms Analysis"
     print_info "Analyzing codebase patterns, conventions, and team norms..."
 
+    # Offer opt-out for interactive terminals
+    if [[ -t 0 ]]; then
+        echo -e "${CYAN}Existing codebase detected.${NC} Run norms analysis to learn your conventions?"
+        echo -e "  ${BOLD}[Enter]${NC} Yes, analyze  |  ${BOLD}[s]${NC} Skip"
+        read -r norms_response
+        case "$norms_response" in
+            s|S|n|N)
+                print_info "Skipping norms analysis. Run later with: buildcrew norms"
+                return
+                ;;
+        esac
+    fi
+
     # Inject project context if available
-    local prompt="Execute the buildcrew-norms skill to analyze this codebase. If the user declines or skips this step, exit immediately without further interaction."
+    local prompt="Execute the buildcrew-norms skill to analyze this codebase."
     local project_context
     project_context=$(load_project_context)
     if [[ -n "$project_context" ]]; then
@@ -380,7 +393,7 @@ run_norms_analysis() {
     fi
 
     __INVOCATION_COUNT=$(( __INVOCATION_COUNT + 1 ))
-    claude "$prompt" --max-turns "$max_turns" || true
+    claude -p "$prompt" --max-turns "$max_turns" || true
 
     if [[ -f ".buildcrew/norms/NORMS.md" ]]; then
         print_success "Norms generated at .buildcrew/norms/"
@@ -662,7 +675,7 @@ run_phase_group() {
     start_file_monitor "$PHASE_RESULT_FILE" "claude.*buildcrew-$phase"
 
     __INVOCATION_COUNT=$(( __INVOCATION_COUNT + 1 ))
-    claude "$prompt" --max-turns "$max_turns" || true
+    claude -p "$prompt" --max-turns "$max_turns" || true
 
     stop_file_monitor
 
@@ -680,7 +693,7 @@ run_phase_group() {
         start_file_monitor "$PHASE_RESULT_FILE" "claude.*buildcrew-$phase"
 
         __INVOCATION_COUNT=$(( __INVOCATION_COUNT + 1 ))
-        claude "$prompt" --max-turns "$max_turns" || true
+        claude -p "$prompt" --max-turns "$max_turns" || true
 
         stop_file_monitor
 
@@ -955,7 +968,7 @@ process_task_legacy() {
     fi
 
     # Run Claude (monitor will terminate it when status file appears)
-    claude "$prompt" \
+    claude -p "$prompt" \
         --max-turns "$MAX_TURNS" || true
 
     stop_file_monitor

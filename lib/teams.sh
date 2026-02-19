@@ -178,7 +178,7 @@ process_task_teams() {
 
     start_file_monitor "$STATUS_FILE" "claude.*BuildCrew Team Lead"
 
-    claude "$prompt" --max-turns "$MAX_TURNS" || true
+    claude -p "$prompt" --max-turns "$MAX_TURNS" || true
 
     stop_file_monitor
 
