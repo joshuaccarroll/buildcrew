@@ -718,3 +718,243 @@ teardown() {
     [ -f "$archive_dir/phase-result.json" ]
     [ -f "$archive_dir/workflow-status.json" ]
 }
+
+# ─────────────────────────────────────────────────────────────────────────────
+# New phase turns (spec, outcome)
+# ─────────────────────────────────────────────────────────────────────────────
+
+@test "get_phase_max_turns: spec returns 30" {
+    run get_phase_max_turns "spec"
+    [ "$output" = "30" ]
+}
+
+@test "get_phase_max_turns: outcome returns 40" {
+    run get_phase_max_turns "outcome"
+    [ "$output" = "40" ]
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# New flags: --skip-spec and --strict
+# ─────────────────────────────────────────────────────────────────────────────
+
+@test "parse_args: --skip-spec sets SKIP_SPEC=true" {
+    parse_args --skip-spec
+    [ "$SKIP_SPEC" = "true" ]
+}
+
+@test "parse_args: --strict sets STRICT_MODE=true" {
+    parse_args --strict
+    [ "$STRICT_MODE" = "true" ]
+}
+
+@test "parse_args: no args leaves SKIP_SPEC=false" {
+    parse_args
+    [ "$SKIP_SPEC" = "false" ]
+}
+
+@test "parse_args: no args leaves STRICT_MODE=false" {
+    parse_args
+    [ "$STRICT_MODE" = "false" ]
+}
+
+@test "parse_args: --skip-spec combined with other flags" {
+    parse_args --skip-spec --strict --dry-run
+    [ "$SKIP_SPEC" = "true" ]
+    [ "$STRICT_MODE" = "true" ]
+    [ "$DRY_RUN" = "true" ]
+}
+
+@test "parse_args: --help mentions --skip-spec" {
+    run parse_args --help
+    [[ "$output" == *"--skip-spec"* ]]
+}
+
+@test "parse_args: --help mentions --strict" {
+    run parse_args --help
+    [[ "$output" == *"--strict"* ]]
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Lessons system (append_lesson, LESSONS_FILE)
+# ─────────────────────────────────────────────────────────────────────────────
+
+@test "append_lesson: creates lessons file when none exists" {
+    mkdir -p .buildcrew
+    append_lesson "review" "plan failed" "re-planned" "always validate approach before review"
+    [ -f "$LESSONS_FILE" ]
+}
+
+@test "append_lesson: creates valid markdown lesson entry" {
+    mkdir -p .buildcrew
+    append_lesson "build" "syntax error" "fixed typo" "run syntax check before committing"
+    grep -q "## Lesson 1:" "$LESSONS_FILE"
+    grep -qF "**Phase**: build" "$LESSONS_FILE"
+    grep -qF "**Rule**: run syntax check before committing" "$LESSONS_FILE"
+}
+
+@test "append_lesson: increments lesson number on second call" {
+    mkdir -p .buildcrew
+    append_lesson "build" "error one" "fix one" "rule one"
+    append_lesson "test" "error two" "fix two" "rule two"
+    grep -q "## Lesson 1:" "$LESSONS_FILE"
+    grep -q "## Lesson 2:" "$LESSONS_FILE"
+}
+
+@test "append_lesson: prints info message" {
+    mkdir -p .buildcrew
+    run append_lesson "verify" "test failure" "fixed test" "write better tests"
+    [[ "$output" == *"Lesson recorded"* ]]
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# _summarize_old_lessons regression (Fix 1)
+# ─────────────────────────────────────────────────────────────────────────────
+
+@test "_summarize_old_lessons: preserves existing Patterns bullet rules on second summarization" {
+    mkdir -p .buildcrew
+    LESSONS_SUMMARIZE_COUNT=2
+
+    # Seed a lessons file with an existing Patterns section plus 3 lesson entries.
+    # total_lessons=3 > LESSONS_SUMMARIZE_COUNT=2, so summarization will run.
+    cat > "$LESSONS_FILE" << 'EOF'
+# Lessons
+
+## Patterns (condensed from oldest 2 lessons)
+
+*The following patterns were extracted from the first 2 lessons:*
+
+- existing preserved pattern
+
+---
+
+## Lesson 3: 2024-01-01
+
+**Phase**: build
+**Observation**: error three
+**Action**: fix three
+**Rule**: rule three
+
+---
+
+## Lesson 4: 2024-01-01
+
+**Phase**: build
+**Observation**: error four
+**Action**: fix four
+**Rule**: rule four
+
+---
+
+## Lesson 5: 2024-01-01
+
+**Phase**: build
+**Observation**: error five
+**Action**: fix five
+**Rule**: rule five
+
+---
+EOF
+
+    _summarize_old_lessons
+
+    # Preserved bullet rule from prior condensation cycle must still be present
+    grep -q "existing preserved pattern" "$LESSONS_FILE"
+    # Rules from lessons 3 and 4 appear as bullets in the new Patterns section
+    grep -q "rule three" "$LESSONS_FILE"
+    grep -q "rule four" "$LESSONS_FILE"
+    # Lesson 5 remains as an active lesson entry
+    grep -q "^## Lesson 5:" "$LESSONS_FILE"
+    # Lessons 3 and 4 no longer appear as standalone lesson headers
+    ! grep -q "^## Lesson 3:" "$LESSONS_FILE"
+    ! grep -q "^## Lesson 4:" "$LESSONS_FILE"
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Circuit breaker integration (Fix coverage items 2 & 3)
+# Decision: bats function-override approach — process_task_isolated is too
+# entangled to extract a testable helper without invasive refactoring.
+# ─────────────────────────────────────────────────────────────────────────────
+
+@test "circuit breaker: marks task blocked after two consecutive build failures and re-plan" {
+    mkdir -p .buildcrew .claude
+    echo "- [ ] test task" > BACKLOG.md
+    SKIP_SPEC=true
+    STRICT_MODE=false
+    HUMAN_REVIEW=false
+    # Pre-mark research and review as completed so they're skipped via phase_completed
+    __RESUME_PHASES="research review"
+
+    # Temp file persists across the subshell created by bats `run`
+    local blocked_file
+    blocked_file=$(mktemp)
+
+    archive_task_artifacts() { :; }
+    clear_task_progress()    { :; }
+    save_task_progress()     { :; }
+    append_lesson()          { :; }
+    handle_human_review()    { return 0; }
+    mark_task_blocked()      { echo "$*" > "$blocked_file"; }
+    # Always fail: both build and test return needs_rebuild
+    run_phase_group() {
+        mkdir -p .claude
+        echo '{"verdict":"needs_rebuild","details":"stub failure"}' > "$PHASE_RESULT_FILE"
+        return 0
+    }
+
+    run process_task_isolated "test task"
+    [ "$status" -eq 1 ]
+    [ -s "$blocked_file" ]
+    rm -f "$blocked_file"
+}
+
+@test "outcome strict mode: marks task blocked after two consecutive partial failures" {
+    mkdir -p .buildcrew ".claude/skills/buildcrew-outcome"
+    echo "# Spec" > .claude/spec.md
+    echo "- [ ] test task" > BACKLOG.md
+    SKIP_SPEC=false
+    STRICT_MODE=true
+    HUMAN_REVIEW=false
+    # Skip research, review, and build — go directly to the outcome phase
+    __RESUME_PHASES="research review build"
+
+    local blocked_file
+    blocked_file=$(mktemp)
+
+    archive_task_artifacts() { :; }
+    clear_task_progress()    { :; }
+    save_task_progress()     { :; }
+    append_lesson()          { :; }
+    handle_human_review()    { return 0; }
+    mark_task_blocked()      { echo "$*" > "$blocked_file"; }
+    # Outcome always returns partial; rebuild calls (build/test) return approved
+    run_phase_group() {
+        local phase="$1"
+        mkdir -p .claude
+        case "$phase" in
+            outcome)
+                echo '{"verdict":"partial","details":"stub partial"}' > "$PHASE_RESULT_FILE" ;;
+            *)
+                echo '{"verdict":"approved","details":"stub approved"}' > "$PHASE_RESULT_FILE" ;;
+        esac
+        return 0
+    }
+
+    run process_task_isolated "test task"
+    [ "$status" -eq 1 ]
+    [ -s "$blocked_file" ]
+    rm -f "$blocked_file"
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# cmd_lessons prune: non-interactive terminal (Fix coverage item 4)
+# ─────────────────────────────────────────────────────────────────────────────
+
+@test "cmd_lessons prune: exits 1 and prints warning in non-interactive terminal" {
+    mkdir -p .buildcrew
+    # Lessons file must exist to reach the TTY check
+    echo "## Lesson 1: 2024-01-01" > .buildcrew/lessons.md
+
+    run "$BUILDCREW_ROOT/bin/buildcrew" lessons prune < /dev/null
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"Non-interactive terminal"* ]]
+}

@@ -713,7 +713,7 @@ _summarize_old_lessons() {
     # Get existing patterns section (if any) or just the header
     local existing_patterns=""
     if grep -q '^## Patterns' "$LESSONS_FILE" 2>/dev/null; then
-        existing_patterns=$(awk '/^## Patterns/,/^## Lesson [0-9]/' "$LESSONS_FILE" 2>/dev/null | head -n -1)
+        existing_patterns=$(awk '/^## Patterns/,/^## Lesson [0-9]/' "$LESSONS_FILE" 2>/dev/null | sed '$d')
     fi
 
     # Get all lesson entries
@@ -895,6 +895,7 @@ process_task_isolated() {
     local __replan_count=0           # circuit breaker: how many times we've re-planned
     local __need_replan=false        # circuit breaker: set true to restart from research
     local __replan_context=""        # circuit breaker: failure context for re-plan prompt
+    local build_attempt=0            # tracks total build attempts across build and outcome phases
 
     # Resume or fresh start
     if [[ "$RESUME_MODE" == "true" ]] && load_task_progress; then
@@ -1094,7 +1095,6 @@ process_task_isolated() {
     if phase_completed "build"; then
         print_info "Skipping phase: build+test (completed in previous run)"
     else
-        local build_attempt=0
         local consecutive_build_failures=0
         while true; do
             ((build_attempt++))
@@ -1163,7 +1163,9 @@ process_task_isolated() {
     fi
 
     # --- Phase 4.5: Outcome Verification (validates against spec acceptance criteria) ---
-    if [[ -d ".claude/skills/buildcrew-outcome" ]] && [[ "$SKIP_SPEC" != "true" ]] && [[ -f ".claude/spec.md" ]]; then
+    if phase_completed "outcome"; then
+        print_info "Skipping phase: outcome (completed in previous run)"
+    elif [[ -d ".claude/skills/buildcrew-outcome" ]] && [[ "$SKIP_SPEC" != "true" ]] && [[ -f ".claude/spec.md" ]]; then
         local outcome_attempt=0
         local consecutive_outcome_failures=0
         while true; do
@@ -1218,6 +1220,7 @@ process_task_isolated() {
                             "Acceptance criteria partially met on attempt $outcome_attempt: $partial_details" \
                             "Rebuilt with targeted fix for failing criteria" \
                             "Partial acceptance at outcome stage means the implementation is incomplete — re-read the specific failing criteria in the spec"
+                        ((build_attempt++))
                         run_phase_group "build" "$task" "OUTCOME FIX: $partial_details | $__spec_context" || { clear_task_progress; return 1; }
                         run_phase_group "test" "$task" "$__spec_context" || { clear_task_progress; return 1; }
                         continue
@@ -1259,6 +1262,7 @@ process_task_isolated() {
                         "Acceptance criteria failed: $rebuild_ctx" \
                         "Rebuilt with targeted fix for failing criteria" \
                         "Always run the feature against its acceptance criteria before consider it done"
+                    ((build_attempt++))
                     run_phase_group "build" "$task" "OUTCOME FIX: $rebuild_ctx | $__spec_context" || { clear_task_progress; return 1; }
                     run_phase_group "test" "$task" "$__spec_context" || { clear_task_progress; return 1; }
                     continue ;;
@@ -1272,6 +1276,9 @@ process_task_isolated() {
         if [[ "$__need_replan" == "true" ]]; then
             continue  # restart outer while loop
         fi
+
+        __completed_phases="${__completed_phases:+$__completed_phases }outcome"
+        save_task_progress "$task" "$__completed_phases" "$__INVOCATION_COUNT"
     fi
 
     # --- Phase 5: Verify + Commit (never skipped — always re-verify) ---

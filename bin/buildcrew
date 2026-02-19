@@ -43,25 +43,30 @@ print_help() {
     echo "    buildcrew <command> [options]"
     echo ""
     echo -e "${BOLD}COMMANDS:${NC}"
-    echo "    init        Initialize BuildCrew in current project"
-    echo "    run         Execute workflow on BACKLOG.md"
-    echo "    status      Show backlog stats and last workflow result"
-    echo "    stop        Stop workflow after current task completes"
-    echo "    reset       Clear blocked tasks and clean up artifacts"
-    echo "    plugins     Show recommended plugins for your project"
-    echo "    update      Check for and install updates"
-    echo "    version     Show version information"
-    echo "    uninstall   Remove BuildCrew from system"
-    echo "    help        Show this help message"
+    echo "    init             Initialize BuildCrew in current project"
+    echo "    run              Execute workflow on BACKLOG.md"
+    echo "    status           Show backlog stats and last workflow result"
+    echo "    stop             Stop workflow after current task completes"
+    echo "    reset            Clear blocked tasks and clean up artifacts"
+    echo "    lessons          List recorded lessons"
+    echo "    lessons promote  Graduate a lesson to permanent project rules"
+    echo "    lessons prune    Interactively remove stale lessons"
+    echo "    plugins          Show recommended plugins for your project"
+    echo "    update           Check for and install updates"
+    echo "    version          Show version information"
+    echo "    uninstall        Remove BuildCrew from system"
+    echo "    help             Show this help message"
     echo ""
     echo -e "${BOLD}OPTIONS:${NC}"
-    echo "    --single    Process only one task (with 'run')"
-    echo "    --dry-run   Preview without executing (with 'run')"
-    echo "    --review    Pause for human review at plan checkpoints (with 'run')"
-    echo "    --branch    Create a feature branch per task with optional PR (with 'run')"
-    echo "    --resume    Resume an interrupted task from where it left off (with 'run')"
-    echo "    --task N    Target a specific task by name or number (with 'run')"
-    echo "    --teams     Use agent teams mode — experimental (with 'run')"
+    echo "    --single      Process only one task (with 'run')"
+    echo "    --dry-run     Preview without executing (with 'run')"
+    echo "    --review      Pause for human review at plan checkpoints (with 'run')"
+    echo "    --branch      Create a feature branch per task with optional PR (with 'run')"
+    echo "    --resume      Resume an interrupted task from where it left off (with 'run')"
+    echo "    --task N      Target a specific task by name or number (with 'run')"
+    echo "    --teams       Use agent teams mode — experimental (with 'run')"
+    echo "    --skip-spec   Skip the specification refinement phase (with 'run')"
+    echo "    --strict      Require ALL acceptance criteria to pass before commit (with 'run')"
     echo ""
     echo -e "${BOLD}GETTING STARTED:${NC}"
     echo -e "    1. Run ${CYAN}buildcrew init${NC} in your project"
@@ -118,6 +123,57 @@ Delete phases you don't need, or add new ones.
 
 ---
 
+## Default Phase Structure (as of v1.11.0)
+
+The default workflow runs these phases in order:
+
+### Phase 0: SPEC (optional)
+agent: product-manager
+description: Convert raw backlog item into structured spec with testable acceptance criteria
+output: .claude/spec.md
+skip with: buildcrew run --skip-spec
+
+### Phase 1: RESEARCH + PLAN
+agent: none
+description: Gather context, create implementation plan
+output: .claude/research.md, .claude/current-plan.md
+
+### Phase 2: PLAN_REVIEW (adversarial, 3-pass)
+agents: principal-engineer, product-manager
+description: Adversarial 3-pass review — find the most serious flaw
+output: .claude/plan-review.md
+gate: overall verdict == "APPROVED"
+
+### Phase 3: BUILD
+agent: feature-engineer
+description: Implement the plan
+output: working code
+
+### Phase 4: CODE_REVIEW + REFACTOR + TEST
+agents: principal-engineer, qa-engineer
+description: Adversarial code review + elegance check + test suite
+output: .claude/code-review.md, .claude/test-report.md
+
+### Phase 4.5: OUTCOME_VERIFY
+agent: qa-engineer
+description: Validate each acceptance criterion from the spec against the actual implementation
+output: .claude/outcome-report.md
+note: Only runs if .claude/spec.md exists (i.e., spec phase was not skipped)
+strict mode: buildcrew run --strict (blocks commit if any criteria fail)
+
+### Phase 5: VERIFY + COMMIT
+agents: security-engineer, none
+description: Security audit + final gate + git commit
+output: .claude/security-audit.md, .claude/verify-report.md
+gate: all checks pass
+
+---
+
+## Minimal Custom Workflow Example
+
+Paste this into .buildcrew/workflow.md to override the default:
+
+```markdown
 ## Phases
 
 ### Phase 1: PLAN
@@ -135,26 +191,28 @@ description: Write and run tests
 ### Phase 4: COMMIT
 agent: none
 description: Create git commit
+```
 
 ---
 
 ## Available Agents
 
-- principal-engineer: Architecture & code review
+- principal-engineer: Architecture & adversarial code review
 - feature-engineer: Pragmatic implementation
 - security-engineer: Security audits
-- qa-engineer: Testing
-- product-manager: Product discovery
+- qa-engineer: Testing and outcome verification
+- product-manager: Discovery, spec writing, plan review
 - ux-designer: Design specs
 
 ---
 
 ## Customization Tips
 
-1. Remove PLAN_REVIEW and CODE_REVIEW for faster iteration
-2. Add a DEPLOY phase after COMMIT for CI/CD
-3. Change agents to match your team's needs
-4. Add gate conditions to enforce quality
+1. Use --skip-spec for tasks that already have detailed specs
+2. Use --strict to enforce all acceptance criteria before commit
+3. Remove PLAN_REVIEW and CODE_REVIEW for faster iteration on simple tasks
+4. Add a DEPLOY phase after COMMIT for CI/CD integration
+5. Run `buildcrew lessons` to review what BuildCrew has learned from past failures
 
 See ~/.buildcrew/workflows/default-workflow.md for the full default workflow.
 EOF
@@ -638,6 +696,203 @@ cmd_plugins() {
     check_plugins
 }
 
+cmd_lessons() {
+    local subcommand="${1:-}"
+    local lessons_file=".buildcrew/lessons.md"
+
+    if [[ ! -f "$lessons_file" ]]; then
+        if [[ -z "$subcommand" ]]; then
+            echo -e "${CYAN}No lessons recorded yet.${NC}"
+            echo "Lessons are automatically written when BuildCrew encounters and resolves failures."
+            return
+        fi
+    fi
+
+    case "$subcommand" in
+        "")
+            # List all lessons
+            echo -e "${BOLD}BuildCrew Lessons${NC}"
+            echo ""
+            if [[ ! -f "$lessons_file" ]]; then
+                echo -e "${CYAN}No lessons recorded yet.${NC}"
+                return
+            fi
+
+            # Check once for condensed patterns section — used by both display block and total line
+            local has_patterns=false
+            if grep -q '^## Patterns' "$lessons_file" 2>/dev/null; then
+                has_patterns=true
+            fi
+
+            # Display condensed patterns section if present
+            if [[ "$has_patterns" == "true" ]]; then
+                echo -e "  ${BOLD}Condensed Patterns${NC} (older lessons summarized)"
+                echo ""
+                # Print bullet rules from the Patterns section
+                awk '/^## Patterns/,/^## Lesson [0-9]/{
+                    if (/^- /) print "  " $0
+                }' "$lessons_file"
+                echo ""
+                echo -e "  --- Active Lessons ---"
+                echo ""
+            fi
+
+            # Extract and display lesson headers with their phase and rule
+            local lesson_count=0
+            local in_lesson=false
+            local current_num=""
+            local current_phase=""
+            local current_rule=""
+            while IFS= read -r line; do
+                if [[ "$line" =~ ^##\ Lesson\ ([0-9]+): ]]; then
+                    in_lesson=true
+                    current_num="${BASH_REMATCH[1]}"
+                    current_phase=""
+                    current_rule=""
+                    ((lesson_count++))
+                elif [[ "$in_lesson" == "true" ]]; then
+                    if [[ "$line" =~ ^\*\*Phase\*\*:\ (.+) ]]; then
+                        current_phase="${BASH_REMATCH[1]}"
+                    elif [[ "$line" =~ ^\*\*Rule\*\*:\ (.+) ]]; then
+                        current_rule="${BASH_REMATCH[1]}"
+                    elif [[ "$line" == "---" ]]; then
+                        echo -e "  ${BOLD}[$current_num]${NC} [${CYAN}${current_phase}${NC}] $current_rule"
+                        in_lesson=false
+                    fi
+                fi
+            done < "$lessons_file"
+            echo ""
+            if [[ "$has_patterns" == "true" ]]; then
+                echo -e "  Total: ${lesson_count} lesson(s) (plus older entries condensed into Patterns section above)"
+            else
+                echo -e "  Total: ${lesson_count} lesson(s)"
+            fi
+            echo ""
+            echo -e "  ${BOLD}buildcrew lessons promote N${NC}   Graduate lesson N to project rules"
+            echo -e "  ${BOLD}buildcrew lessons prune${NC}        Interactively remove stale lessons"
+            ;;
+
+        promote)
+            local lesson_num="${2:-}"
+            if [[ -z "$lesson_num" ]] || ! [[ "$lesson_num" =~ ^[0-9]+$ ]]; then
+                echo -e "${RED}Error:${NC} Please provide a lesson number to promote."
+                echo "Usage: buildcrew lessons promote <number>"
+                exit 1
+            fi
+            if [[ ! -f "$lessons_file" ]]; then
+                echo -e "${RED}Error:${NC} No lessons file found."
+                exit 1
+            fi
+
+            # Extract the lesson
+            local lesson_rule=""
+            local lesson_phase=""
+            local in_target=false
+            while IFS= read -r line; do
+                if [[ "$line" =~ ^##\ Lesson\ ${lesson_num}: ]]; then
+                    in_target=true
+                elif [[ "$in_target" == "true" ]]; then
+                    if [[ "$line" =~ ^\*\*Phase\*\*:\ (.+) ]]; then
+                        lesson_phase="${BASH_REMATCH[1]}"
+                    elif [[ "$line" =~ ^\*\*Rule\*\*:\ (.+) ]]; then
+                        lesson_rule="${BASH_REMATCH[1]}"
+                    elif [[ "$line" == "---" ]]; then
+                        break
+                    fi
+                fi
+            done < "$lessons_file"
+
+            if [[ -z "$lesson_rule" ]]; then
+                echo -e "${RED}Error:${NC} Lesson $lesson_num not found."
+                exit 1
+            fi
+
+            # Append to project-rules.md
+            local rules_file=".buildcrew/rules/project-rules.md"
+            mkdir -p .buildcrew/rules
+            if [[ ! -f "$rules_file" ]]; then
+                cat > "$rules_file" << 'RULES_HEADER'
+# Project Rules
+
+Rules promoted from BuildCrew lessons. These become permanent team standards.
+
+---
+
+RULES_HEADER
+            fi
+
+            cat >> "$rules_file" << EOF
+
+## Lesson-Promoted Rule (from Lesson ${lesson_num} — ${lesson_phase})
+- ${lesson_rule}
+EOF
+            echo -e "${GREEN}✓${NC} Lesson $lesson_num promoted to $rules_file"
+            echo "  Rule: $lesson_rule"
+            ;;
+
+        prune)
+            if [[ ! -f "$lessons_file" ]]; then
+                echo -e "${CYAN}No lessons to prune.${NC}"
+                return
+            fi
+            if [[ ! -t 0 ]]; then
+                echo -e "${YELLOW}⚠${NC} Non-interactive terminal — cannot prune interactively."
+                exit 1
+            fi
+
+            echo -e "${BOLD}Pruning Lessons${NC} (press Enter to keep, 'd' to delete)"
+            echo ""
+
+            local tmp_file
+            tmp_file=$(mktemp)
+            local in_lesson=false
+            local current_block=""
+            local current_num=""
+            local kept=0
+            local pruned=0
+
+            # Copy the header (before first lesson)
+            awk '/^## Lesson [0-9]/{exit} {print}' "$lessons_file" > "$tmp_file"
+
+            # Process each lesson block
+            while IFS= read -r line; do
+                if [[ "$line" =~ ^##\ Lesson\ ([0-9]+): ]]; then
+                    current_num="${BASH_REMATCH[1]}"
+                    current_block="$line"$'\n'
+                    in_lesson=true
+                elif [[ "$in_lesson" == "true" ]]; then
+                    current_block+="$line"$'\n'
+                    if [[ "$line" == "---" ]]; then
+                        # Show the lesson and ask
+                        echo "$current_block"
+                        echo -n "  Keep lesson $current_num? [Enter=keep, d=delete]: "
+                        read -r prune_response
+                        if [[ "$prune_response" == "d" || "$prune_response" == "D" ]]; then
+                            echo -e "  ${YELLOW}Deleted${NC} lesson $current_num"
+                            ((pruned++))
+                        else
+                            echo "$current_block" >> "$tmp_file"
+                            ((kept++))
+                        fi
+                        in_lesson=false
+                        current_block=""
+                        echo ""
+                    fi
+                fi
+            done < "$lessons_file"
+
+            mv "$tmp_file" "$lessons_file"
+            echo -e "${GREEN}✓${NC} Pruning complete: kept $kept, removed $pruned lesson(s)"
+            ;;
+
+        *)
+            echo -e "${RED}Error:${NC} Unknown lessons subcommand '$subcommand'"
+            echo "Usage: buildcrew lessons [promote <N> | prune]"
+            exit 1
+            ;;
+    esac
+}
+
 cmd_stop() {
     mkdir -p .buildcrew
     touch .buildcrew/.stop-workflow
@@ -885,6 +1140,10 @@ case "${1:-}" in
         ;;
     reset)
         cmd_reset
+        ;;
+    lessons)
+        shift
+        cmd_lessons "$@"
         ;;
     plugins)
         shift
