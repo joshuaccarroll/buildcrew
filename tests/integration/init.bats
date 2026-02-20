@@ -103,3 +103,27 @@ teardown() {
     [ "$status" -eq 0 ]
     [[ "$output" == *"BuildCrew initialized"* ]]
 }
+
+@test "init: links individual skills when .claude/skills is a real directory" {
+    mkdir -p .claude/skills
+    run "$BUILDCREW_HOME/bin/buildcrew" init
+    [ "$status" -eq 0 ]
+    # At least one phase-isolated skill subdirectory should exist as a symlink
+    [ -L ".claude/skills/buildcrew-research" ] || [ -L ".claude/skills/buildcrew-build" ]
+}
+
+@test "init: does not overwrite real subdirectories inside .claude/skills" {
+    mkdir -p .claude/skills/buildcrew-research
+    echo "user content" > .claude/skills/buildcrew-research/custom.md
+    run "$BUILDCREW_HOME/bin/buildcrew" init
+    [ "$status" -eq 0 ]
+    # Real directory must be preserved
+    [ -d ".claude/skills/buildcrew-research" ] && [ ! -L ".claude/skills/buildcrew-research" ]
+    grep -q "user content" ".claude/skills/buildcrew-research/custom.md"
+}
+
+@test "init: creates whole-tree symlink when .claude/skills does not exist" {
+    run "$BUILDCREW_HOME/bin/buildcrew" init
+    [ "$status" -eq 0 ]
+    [ -L ".claude/skills" ]
+}

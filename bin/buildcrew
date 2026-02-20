@@ -80,6 +80,35 @@ print_help() {
     echo ""
 }
 
+_ensure_skill_symlinks() {
+    local skills_dir="$BUILDCREW_HOME/skills"
+    local target_dir=".claude/skills"
+    local skill_path skill_name link_target
+
+    for skill_path in "$skills_dir"/*/; do
+        [ -d "$skill_path" ] || continue
+        skill_name="$(basename "$skill_path")"
+        local dest="$target_dir/$skill_name"
+
+        if [ -d "$dest" ] && [ ! -L "$dest" ]; then
+            # Real directory — preserve user content, skip
+            continue
+        elif [ -L "$dest" ]; then
+            link_target="$(readlink "$dest")"
+            if [ "$link_target" = "$skill_path" ] || [ "$link_target" = "${skill_path%/}" ]; then
+                # Already points to correct target
+                continue
+            else
+                # Stale symlink — replace it
+                rm -f "$dest"
+            fi
+        fi
+
+        ln -s "$skill_path" "$dest"
+        echo -e "  ${GREEN}✓${NC} Linked skill: $skill_name"
+    done
+}
+
 cmd_init() {
     echo -e "${BOLD}Initializing BuildCrew in current project...${NC}"
     echo ""
@@ -107,8 +136,11 @@ cmd_init() {
     if [ ! -e ".claude/skills" ]; then
         ln -s "$BUILDCREW_HOME/skills" ".claude/skills"
         echo -e "  ${GREEN}✓${NC} Linked skills"
-    else
+    elif [ -L ".claude/skills" ]; then
         echo -e "  ${YELLOW}○${NC} .claude/skills exists"
+    else
+        # Real directory — link individual skill subdirectories
+        _ensure_skill_symlinks
     fi
 
     # Create .buildcrew directory for project-specific overrides
@@ -728,7 +760,8 @@ refresh_project_symlinks() {
         ln -s "$BUILDCREW_HOME/skills" ".claude/skills"
         echo -e "  ${GREEN}✓${NC} Linked skills"
     else
-        echo -e "  ${YELLOW}○${NC} .claude/skills is a local directory (not a symlink) — skipped"
+        # Real directory — link individual skill subdirectories
+        _ensure_skill_symlinks
     fi
 
     # Update buildcrew-link marker
