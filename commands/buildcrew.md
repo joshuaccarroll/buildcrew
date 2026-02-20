@@ -54,10 +54,10 @@ Use the Task tool to launch the `ux-designer` agent.
 Start the interactive design discovery process.
 
 ### If persona is `norms`:
-Execute the `buildcrew-norms` skill to analyze (or re-analyze) the current codebase.
-This generates `.buildcrew/norms/` with team coding conventions derived from the codebase and git history.
-No Task sub-agent needed -- invoke the skill directly.
-If `.buildcrew/norms/NORMS.md` already exists, warn the user it will be overwritten, then proceed.
+Generate team coding conventions from codebase analysis. This creates `.buildcrew/norms/`.
+
+1. If `.buildcrew/norms/NORMS.md` already exists, warn the user it will be overwritten and ask to confirm before proceeding. If declined: respond with "Norms analysis skipped." and **stop -- do not ask follow-up questions, do not suggest alternatives.**
+2. Invoke the `buildcrew-norms` skill directly (no Task sub-agent needed).
 
 ## Example Usage
 

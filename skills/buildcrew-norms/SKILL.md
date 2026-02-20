@@ -447,3 +447,16 @@ while iteration < 5:
 ## Completion
 
 When all `.buildcrew/norms/*.md` files are written and the NORMS.md review loop has finished, the skill is complete. Do not write a phase-result.json -- the caller checks for the existence of `.buildcrew/norms/NORMS.md` to determine success.
+
+---
+
+## Cancellation Handling
+
+If the user interrupts, cancels, or asks to stop at any point during norms analysis:
+- Stop all in-progress work immediately
+- Respond with: "Norms analysis cancelled."
+- Do NOT ask "What should Claude do instead?" or suggest alternative actions
+- Do NOT clean up partial files (a partial `.buildcrew/norms/NORMS.md` may remain; the user can re-run `/buildcrew norms` to regenerate cleanly)
+- Do not continue with any remaining skill phases
+
+**Limitation**: If the skill is interrupted before its content loads (during "Initializing..."), these instructions will not be in context and Claude Code's default interrupt behavior will apply. The primary mitigation is the `buildcrew` workflow skill (`skills/buildcrew/SKILL.md`), which explicitly prohibits invoking `buildcrew-norms` during workflow execution.
