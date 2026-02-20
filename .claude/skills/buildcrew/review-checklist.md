@@ -1,6 +1,6 @@
 # Code Review Checklist
 
-Use this checklist during Phase 5 (CODE_REVIEW) to verify code quality.
+Use this checklist during the code-review phase to verify code quality.
 
 ---
 

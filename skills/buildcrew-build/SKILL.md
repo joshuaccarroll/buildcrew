@@ -6,9 +6,9 @@ allowed-tools: Read, Write, Edit, Glob, Grep, Bash, Task, Skill
 
 # BuildCrew — Build
 
-`[Phase 4/10: BUILD | Input: .claude/current-plan.md | Output: working code | Next: CODE_REVIEW]`
+`[Phase: build | Input: .claude/current-plan.md | Output: working code | Next: code-review]`
 
-You are executing phase 4 of the BuildCrew autonomous development workflow.
+You are executing the build phase of the BuildCrew autonomous development workflow.
 
 ## Your Task
 
@@ -19,7 +19,7 @@ The task was provided in the prompt. The approved implementation plan is in `.cl
 
 ---
 
-## Phase 4: BUILD (Feature Engineer)
+## BUILD (Feature Engineer)
 
 **Goal**: Implement the changes according to the approved plan.
 

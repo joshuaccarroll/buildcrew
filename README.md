@@ -78,7 +78,7 @@ That's it. If you don't have a backlog yet, BuildCrew launches the Product Manag
 - Challenges scope and finds the real problem
 - Pushes back on over-complication
 - Creates phased implementation plans
-- Reviews plans from the user's perspective (Phase 3, Pass 2)
+- Reviews plans from the user's perspective (plan-review phase, Pass 2)
 - **Invoked via**: `/build` or `/buildcrew product-manager`
 
 ### UX Designer
@@ -184,13 +184,13 @@ cp .buildcrew/workflow.md.example .buildcrew/workflow.md
 # Minimal workflow - just build, test, commit
 ## Phases
 
-### Phase 1: BUILD
+### BUILD
 agent: feature-engineer
 
-### Phase 2: TEST
+### TEST
 agent: qa-engineer
 
-### Phase 3: COMMIT
+### COMMIT
 agent: none
 ```
 
@@ -264,7 +264,7 @@ buildcrew uninstall          # Remove BuildCrew
 | `--dry-run` | Preview what would happen without executing |
 | `--review` | Pause after plan creation and after plan review for human inspection. Press Enter to continue, `s` to skip, `q` to quit. |
 | `--branch` | Create a `buildcrew/<slug>` feature branch per task. Pushes to remote and creates a PR via `gh` if available. Each task branches independently from the base branch. |
-| `--skip-spec` | Skip the Specification Refinement phase (Phase 0). Use when the backlog item already contains a detailed spec with acceptance criteria. |
+| `--skip-spec` | Skip the spec phase. Use when the backlog item already contains a detailed spec with acceptance criteria. |
 | `--strict` | Require ALL acceptance criteria to pass during Outcome Verification before the commit is allowed. Without `--strict`, unmet criteria trigger a warning but don't block the commit. |
 
 Flags can be combined: `buildcrew run --single --review --branch`
@@ -294,7 +294,7 @@ If any phase fails its quality gate **twice consecutively**, BuildCrew stops gri
 1. Logs what was tried and why it failed
 2. Appends a lesson to `.buildcrew/lessons.md`
 3. Restarts from Research + Planning with the failure as context
-4. Outputs: `[CIRCUIT BREAKER] Approach failed twice at Phase X. Re-planning from scratch with failure context.`
+4. Outputs: `[CIRCUIT BREAKER] Approach failed twice at <phase>. Re-planning from scratch with failure context.`
 
 The re-plan gets **one attempt**. If it hits the circuit breaker again, the task is blocked and reported to the user.
 

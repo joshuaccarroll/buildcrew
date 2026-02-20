@@ -126,41 +126,41 @@ Delete phases you don't need, or add new ones.
 
 The default workflow runs these phases in order:
 
-### Phase 0: SPEC (optional)
+### SPEC (optional)
 agent: product-manager
 description: Convert raw backlog item into structured spec with testable acceptance criteria
 output: .claude/spec.md
 skip with: buildcrew run --skip-spec
 
-### Phase 1: RESEARCH + PLAN
+### RESEARCH + PLAN
 agent: none
 description: Gather context, create implementation plan
 output: .claude/research.md, .claude/current-plan.md
 
-### Phase 2: PLAN_REVIEW (adversarial, 3-pass)
+### PLAN-REVIEW (adversarial, 3-pass)
 agents: principal-engineer, product-manager
 description: Adversarial 3-pass review — find the most serious flaw
 output: .claude/plan-review.md
 gate: overall verdict == "APPROVED"
 
-### Phase 3: BUILD
+### BUILD
 agent: feature-engineer
 description: Implement the plan
 output: working code
 
-### Phase 4: CODE_REVIEW + REFACTOR + TEST
+### CODE-REVIEW + REFACTOR + TEST
 agents: principal-engineer, qa-engineer
 description: Adversarial code review + elegance check + test suite
 output: .claude/code-review.md, .claude/test-report.md
 
-### Phase 4.5: OUTCOME_VERIFY
+### OUTCOME
 agent: qa-engineer
 description: Validate each acceptance criterion from the spec against the actual implementation
 output: .claude/outcome-report.md
 note: Only runs if .claude/spec.md exists (i.e., spec phase was not skipped)
 strict mode: buildcrew run --strict (blocks commit if any criteria fail)
 
-### Phase 5: VERIFY + COMMIT
+### VERIFY + COMMIT
 agents: security-engineer, none
 description: Security audit + final gate + git commit
 output: .claude/security-audit.md, .claude/verify-report.md
@@ -175,19 +175,19 @@ Paste this into .buildcrew/workflow.md to override the default:
 ```markdown
 ## Phases
 
-### Phase 1: PLAN
+### PLAN
 agent: none
 description: Create implementation plan
 
-### Phase 2: BUILD
+### BUILD
 agent: feature-engineer
 description: Implement the feature
 
-### Phase 3: TEST
+### TEST
 agent: qa-engineer
 description: Write and run tests
 
-### Phase 4: COMMIT
+### COMMIT
 agent: none
 description: Create git commit
 ```

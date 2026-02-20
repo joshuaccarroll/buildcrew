@@ -6,9 +6,9 @@ allowed-tools: Read, Write, Edit, Glob, Grep, Bash, Task
 
 # BuildCrew — Specification Refinement
 
-`[Phase 0/10: SPEC | Input: task description | Output: .claude/spec.md | Next: RESEARCH]`
+`[Phase: spec | Input: task description | Output: .claude/spec.md | Next: RESEARCH]`
 
-You are executing Phase 0 of the BuildCrew autonomous development workflow.
+You are executing the spec phase of the BuildCrew autonomous development workflow.
 
 ## Your Task
 
@@ -16,7 +16,7 @@ The task was provided in the prompt. Your job is to convert this raw backlog ite
 
 ---
 
-## Phase 0: SPECIFICATION REFINEMENT (Product Manager)
+## SPEC: Specification Refinement (Product Manager)
 
 **Goal**: Transform a raw backlog item into a precise, testable specification that every subsequent phase can anchor to.
 

@@ -72,7 +72,7 @@ while iteration < 5:
 
 ---
 
-## Phase 1: RESEARCH
+## RESEARCH
 
 **Goal**: Gather external and local context relevant to the task before planning.
 
@@ -80,7 +80,7 @@ while iteration < 5:
 
 1. **Parse the task**: Identify research topics — APIs, libraries, frameworks, patterns, integrations, domain concepts, or external services mentioned or implied by the task
 2. **Assess research depth**:
-   - **Light research** (internal tasks — refactoring, renaming, config changes, bug fixes with no new external dependencies): Skip web research. Explore the local codebase only and write a brief `.claude/research.md` with local context, then proceed to Phase 2.
+   - **Light research** (internal tasks — refactoring, renaming, config changes, bug fixes with no new external dependencies): Skip web research. Explore the local codebase only and write a brief `.claude/research.md` with local context, then proceed to the plan phase.
    - **Full research** (tasks involving external APIs, new libraries, unfamiliar patterns, or integration work): Proceed with steps 4-6.
 4. **Search the web**: Use WebSearch to look for:
    - Official API documentation and getting-started guides
@@ -162,7 +162,7 @@ After writing the research document, run the **Document Review Protocol** on `.c
 
 ---
 
-## Phase 2: PLAN
+## PLAN
 
 **Goal**: Understand the task and create a detailed implementation plan.
 
@@ -257,7 +257,7 @@ After the plan is finalized, create or update the project `README.md`:
 
 ---
 
-## Phase 3: PLAN REVIEW (3-Pass Review)
+## PLAN-REVIEW: Adversarial 3-Pass Review
 
 **Goal**: Review the plan through multiple lenses before any code is written. This phase uses 3 sequential review passes to catch technical issues, user-facing gaps, and ensure convergence.
 
@@ -400,7 +400,7 @@ If any pass returns NEEDS_REVISION:
 
 ---
 
-## Phase 4: BUILD (Feature Engineer)
+## BUILD (Feature Engineer)
 
 **Goal**: Implement the changes according to the approved plan.
 
@@ -444,7 +444,7 @@ After implementing changes, update `README.md` to reflect the actual implementat
 
 ---
 
-## Phase 5: CODE REVIEW (Principal Engineer)
+## CODE-REVIEW (Principal Engineer)
 
 **Goal**: Review the implemented code through the lens of a Principal Engineer.
 
@@ -541,7 +541,7 @@ Issue NEEDS_REFACTOR when:
 
 ---
 
-## Phase 6: REFACTOR / REBUILD
+## REFACTOR / REBUILD
 
 **Goal**: Fix issues found during code review, or rebuild if repair isn't converging.
 
@@ -555,7 +555,7 @@ Run if Code Review verdict was "NEEDS_REFACTOR":
 4. **Make targeted changes**: Fix only the violations, don't expand scope
 5. **Verify fixes**: Re-check each fix against the principle it violated
 
-After refactoring, return to **Phase 5: CODE REVIEW** and re-review.
+After refactoring, return to **code-review** and re-review.
 
 #### Auto-Escalation to NEEDS_REBUILD
 
@@ -574,16 +574,16 @@ Maximum 3 refactor iterations. If iteration 2 shows no improvement in blocking i
 Run if Code Review verdict was "NEEDS_REBUILD" or auto-escalated from refactor:
 
 1. **Discard current implementation**: The code from this attempt is abandoned
-2. **Preserve the approved plan**: The plan from Phase 3 remains the source of truth
-3. **Restart Phase 4 (BUILD)** with additional context:
+2. **Preserve the approved plan**: The plan from plan-review remains the source of truth
+3. **Restart build** with additional context:
    - Include the rejection reason from the code review
    - List specific pitfalls to avoid: "Previous attempt failed because [reason]. Avoid [pitfalls]."
 4. **Maximum 1 rebuild attempt**: If the rebuilt code also fails code review → task is BLOCKED
 
 ```
-Phase 5 → NEEDS_REBUILD → Phase 4 (BUILD, attempt 2, with rejection context)
-  → Phase 5 (Code Review, attempt 2)
-    → If APPROVED → continue to Phase 7
+code-review → NEEDS_REBUILD → build (attempt 2, with rejection context)
+  → code-review (attempt 2)
+    → If APPROVED → continue to test
     → If NOT APPROVED → task BLOCKED
 ```
 
@@ -591,7 +591,7 @@ After completing any refactor or rebuild, if user-facing behavior or setup steps
 
 ---
 
-## Phase 7: TEST (Senior QA Engineer)
+## TEST (Senior QA Engineer)
 
 **Goal**: Verify the implementation through comprehensive testing.
 
@@ -792,7 +792,7 @@ Write results to `.claude/test-report.md`:
 
 ---
 
-## Phase 8: VERIFY (Blocking Gate)
+## VERIFY (Blocking Gate)
 
 **Goal**: Comprehensive verification that all quality gates pass before committing.
 
@@ -807,17 +807,17 @@ All items must be checked and pass:
 - [ ] Coverage meets project threshold (if configured)
 - [ ] No skipped tests without justification
 
-**If tests fail**: Return to Phase 4 BUILD, fix the issue, then re-run through Phase 7 TEST.
+**If tests fail**: Return to build, fix the issue, then re-run through test.
 
 #### 2. Code Review Verification
-- [ ] Code review completed (Phase 5)
+- [ ] Code review completed (code-review phase)
 - [ ] No unresolved Critical issues (BLOCKING)
 - [ ] No unresolved Major concerns (BLOCKING)
 - [ ] Advisory findings (Minor Suggestions) are permitted — they do NOT block verification
 
 **Note**: The gate checks for absence of unresolved blocking findings, not just an "APPROVED" verdict string. Advisory findings are acceptable.
 
-**If blocking findings remain**: Return to Phase 6 REFACTOR, address Critical and Major issues, re-review.
+**If blocking findings remain**: Return to refactor, address Critical and Major issues, re-review.
 
 #### 3. Security Audit (Security Engineer)
 
@@ -914,7 +914,7 @@ To prevent infinite loops:
 
 ---
 
-## Phase 9: COMMIT
+## COMMIT
 
 **Goal**: Create a meaningful commit with all changes.
 
@@ -945,7 +945,7 @@ Task: [original task description]
 
 ---
 
-## Phase 10: SIGNAL COMPLETION
+## SIGNAL
 
 **Goal**: Signal to the orchestrator that this task is complete.
 

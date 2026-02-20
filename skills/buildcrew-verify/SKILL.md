@@ -6,9 +6,9 @@ allowed-tools: Read, Write, Edit, Glob, Grep, Bash, Task
 
 # BuildCrew — Verify + Commit + Signal
 
-`[Phases 8-10/10: VERIFY + COMMIT + SIGNAL | Input: all .claude/ artifacts, built code | Output: .claude/verify-report.md, git commit, .claude/workflow-status.json | Next: done]`
+`[Phases: verify, commit, signal | Input: all .claude/ artifacts, built code | Output: .claude/verify-report.md, git commit, .claude/workflow-status.json | Next: done]`
 
-You are executing phases 8-10 of the BuildCrew autonomous development workflow.
+You are executing the verify, commit, and signal phases of the BuildCrew autonomous development workflow.
 
 ## Your Task
 
@@ -16,7 +16,7 @@ The task was provided in the prompt. All prior artifacts are available in `.clau
 
 ---
 
-## Phase 8: VERIFY (Blocking Gate)
+## VERIFY (Blocking Gate)
 
 **Goal**: Comprehensive verification that all quality gates pass before committing.
 
@@ -126,7 +126,7 @@ Write verification status to `.claude/verify-report.md`:
 
 ---
 
-## Phase 9: COMMIT
+## COMMIT
 
 **Goal**: Create a meaningful commit with all changes.
 
@@ -158,7 +158,7 @@ Task: [original task description]
 
 ---
 
-## Phase 10: SIGNAL COMPLETION
+## SIGNAL
 
 **Goal**: Signal to the orchestrator that this task is complete.
 

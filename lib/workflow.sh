@@ -8,13 +8,13 @@
 # It reads tasks from BACKLOG.md and processes each one through phase groups:
 #
 # Phase-isolated mode (up to 7 separate Claude invocations):
-#   0. Spec (optional, skipped with --skip-spec)
-#   1. Research + Plan
-#   2. Plan Review (3-pass)
-#   3. Build
-#   4. Code Review + Refactor + Test
-#   4.5. Outcome Verification (validates against spec acceptance criteria)
-#   5. Verify + Security Audit + Commit + Signal
+#   spec (optional, skipped with --skip-spec)
+#   research + plan
+#   plan-review (3-pass)
+#   build
+#   code-review + refactor + test
+#   outcome (validates against spec acceptance criteria)
+#   verify + security audit + commit + signal
 #
 # Usage:
 #   buildcrew run              # Run in foreground (visible terminal)
@@ -582,6 +582,7 @@ CURRENT_TASK_FILE=".buildcrew/.current-task"
 LESSONS_FILE=".buildcrew/lessons.md"
 ARTIFACT_FILES=(
     .claude/spec.md .claude/research.md .claude/current-plan.md .claude/plan-review.md
+    .claude/review-pass1-pe.md .claude/review-pass2-pm.md
     .claude/code-review.md .claude/test-report.md .claude/outcome-report.md
     .claude/security-audit.md .claude/verify-report.md .claude/current-test-plan.md
 )
@@ -934,7 +935,7 @@ process_task_isolated() {
         fi
         __need_replan=false
 
-    # --- Phase 0: Spec (optional, skipped with --skip-spec) ---
+    # --- spec (optional, skipped with --skip-spec) ---
     local __spec_context=""
     local needs_human_review=false
     local hr_reason=""
@@ -965,7 +966,7 @@ process_task_isolated() {
         save_task_progress "$task" "$__completed_phases" "$__INVOCATION_COUNT"
     fi
 
-    # --- Phase 1: Research + Plan ---
+    # --- research + plan ---
     if phase_completed "research"; then
         print_info "Skipping phase: research (completed in previous run)"
     else
@@ -1001,7 +1002,7 @@ process_task_isolated() {
         fi
     fi
 
-    # --- Phase 2: Plan Review (max 3 external cycles, circuit breaker at 2 consecutive failures) ---
+    # --- plan-review (max 3 external cycles, circuit breaker at 2 consecutive failures) ---
     if phase_completed "review"; then
         print_info "Skipping phase: review (completed in previous run)"
     else
@@ -1082,7 +1083,7 @@ process_task_isolated() {
         save_task_progress "$task" "$__completed_phases" "$__INVOCATION_COUNT"
     fi
 
-    # --- Phase 3 + 4: Build → Code Review/Test (with rebuild loop, circuit breaker) ---
+    # --- build → code-review/test (with rebuild loop, circuit breaker) ---
     if phase_completed "build"; then
         print_info "Skipping phase: build+test (completed in previous run)"
     else
@@ -1153,7 +1154,7 @@ process_task_isolated() {
         save_task_progress "$task" "$__completed_phases" "$__INVOCATION_COUNT"
     fi
 
-    # --- Phase 4.5: Outcome Verification (validates against spec acceptance criteria) ---
+    # --- outcome (validates against spec acceptance criteria) ---
     if phase_completed "outcome"; then
         print_info "Skipping phase: outcome (completed in previous run)"
     elif [[ -d ".claude/skills/buildcrew-outcome" ]] && [[ "$SKIP_SPEC" != "true" ]] && [[ -f ".claude/spec.md" ]]; then
@@ -1272,7 +1273,7 @@ process_task_isolated() {
         save_task_progress "$task" "$__completed_phases" "$__INVOCATION_COUNT"
     fi
 
-    # --- Phase 5: Verify + Commit (never skipped — always re-verify) ---
+    # --- verify + commit (never skipped — always re-verify) ---
     local verify_attempt=0
     local consecutive_verify_failures=0
     while true; do

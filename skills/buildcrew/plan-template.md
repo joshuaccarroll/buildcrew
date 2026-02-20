@@ -1,6 +1,6 @@
 # Implementation Plan Template
 
-Use this template when creating plans in Phase 1 of the workflow.
+Use this template when creating plans in the plan phase of the workflow.
 
 ---
 

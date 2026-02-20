@@ -6,7 +6,7 @@ allowed-tools: Read, Write, Edit, Glob, Grep, Bash, Task
 
 # BuildCrew — Outcome Verification
 
-`[Phase 4.5/10: OUTCOME_VERIFY | Input: .claude/spec.md, built code | Output: .claude/outcome-report.md | Next: VERIFY]`
+`[Phase: outcome | Input: .claude/spec.md, built code | Output: .claude/outcome-report.md | Next: verify]`
 
 You are executing the Outcome Verification phase of the BuildCrew autonomous development workflow.
 
@@ -16,11 +16,11 @@ The task was provided in the prompt. You are the **QA Engineer**. Your job is to
 
 ---
 
-## Phase 4.5: OUTCOME VERIFICATION (Senior QA Engineer)
+## OUTCOME: Verification (Senior QA Engineer)
 
 **Goal**: Validate the implementation against the acceptance criteria in the spec. This is outcome-focused verification, not code-quality verification. The question is: "Does this do what the spec said it would do?"
 
-> **Important**: This is NOT a test-suite pass/fail check. That happens in Phase 7 (TEST). This is about exercising the feature yourself and verifying each acceptance criterion is genuinely met.
+> **Important**: This is NOT a test-suite pass/fail check. That happens in the test phase. This is about exercising the feature yourself and verifying each acceptance criterion is genuinely met.
 
 ### Step 1: Read the Spec
 

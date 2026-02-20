@@ -6,9 +6,9 @@ allowed-tools: Read, Write, Edit, Glob, Grep, Bash, Task, WebSearch, WebFetch
 
 # BuildCrew — Research + Plan
 
-`[Phases 1-2/10: RESEARCH + PLAN | Input: task description | Output: .claude/research.md, .claude/current-plan.md | Next: PLAN_REVIEW]`
+`[Phases: research, plan | Input: task description | Output: .claude/research.md, .claude/current-plan.md | Next: plan-review]`
 
-You are executing phases 1-2 of the BuildCrew autonomous development workflow.
+You are executing the research and plan phases of the BuildCrew autonomous development workflow.
 
 ## Your Task
 
@@ -18,7 +18,7 @@ The task was provided in the prompt. Parse it and understand what needs to be bu
 
 ---
 
-## Phase 1: RESEARCH
+## RESEARCH
 
 **Goal**: Gather external and local context relevant to the task before planning.
 
@@ -26,7 +26,7 @@ The task was provided in the prompt. Parse it and understand what needs to be bu
 
 1. **Parse the task**: Identify research topics — APIs, libraries, frameworks, patterns, integrations, domain concepts, or external services mentioned or implied by the task
 2. **Assess research depth**:
-   - **Light research** (internal tasks — refactoring, renaming, config changes, bug fixes with no new external dependencies): Skip web research. Explore the local codebase only and write a brief `.claude/research.md` with local context, then proceed to Phase 2.
+   - **Light research** (internal tasks — refactoring, renaming, config changes, bug fixes with no new external dependencies): Skip web research. Explore the local codebase only and write a brief `.claude/research.md` with local context, then proceed to the plan phase.
    - **Full research** (tasks involving external APIs, new libraries, unfamiliar patterns, or integration work): Proceed with steps 4-6.
 
 ### Steps 4-5: Web Research (via Sub-Agent)
@@ -143,7 +143,7 @@ reference that file. Do not re-search or re-explore.
 
 ---
 
-## Phase 2: PLAN
+## PLAN
 
 **Goal**: Understand the task and create a detailed implementation plan.
 
@@ -226,39 +226,12 @@ Write your plan to `.claude/current-plan.md` using this structure:
 - [Any concerns or open questions]
 ```
 
-After writing the plan, run iterative sub-agent review on `.claude/current-plan.md`:
-
-```
-iteration = 0
-converged = false
-while iteration < 5:
-    Spawn a Task sub-agent (general-purpose type) with this prompt:
-
-    "Read .claude/current-plan.md. Review it critically as if you are seeing it for the first time.
-    Look for: gaps, missing details, unclear sections, over-engineering, incorrect assumptions,
-    missing edge cases, and areas that could be improved.
-
-    Make concrete improvements directly to the file. Be specific and substantive --
-    do not add filler or unnecessary content.
-
-    If the document is solid and no meaningful improvements can be made,
-    respond with exactly: CONVERGED
-
-    Do not explain what you reviewed. Either improve the file or respond CONVERGED."
-
-    if sub-agent output contains "CONVERGED":
-        converged = true
-        break
-    iteration += 1
-```
-
-After the review loop completes, assess whether human review is recommended based on these objective criteria (any = true):
+After writing the plan, assess whether human review is recommended based on these objective criteria (any = true):
 - Task description mentions "breaking change", "migration", or "deprecation"
 - Plan involves platform migration, replatforming, or infrastructure-first sequencing where ordering errors could waste the entire build
 - Plan modifies more than 10 files
 - Plan involves security-sensitive areas (auth, crypto, secrets, permissions)
 - Plan changes public APIs, CLI interfaces, or database schemas
-- The review sub-agents did NOT converge within 5 iterations (the `converged` flag is false after the loop)
 
 ---
 

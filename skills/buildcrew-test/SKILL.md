@@ -6,9 +6,9 @@ allowed-tools: Read, Write, Edit, Glob, Grep, Bash, Task
 
 # BuildCrew — Code Review + Refactor + Test
 
-`[Phases 5-7/10: CODE_REVIEW + REFACTOR + TEST | Input: built code, .claude/current-plan.md | Output: .claude/code-review.md, .claude/test-report.md | Next: VERIFY]`
+`[Phases: code-review, refactor, test | Input: built code, .claude/current-plan.md | Output: .claude/code-review.md, .claude/test-report.md | Next: verify]`
 
-You are executing phases 5-7 of the BuildCrew autonomous development workflow.
+You are executing the code-review, refactor, and test phases of the BuildCrew autonomous development workflow.
 
 ## Your Task
 
@@ -19,7 +19,7 @@ The task was provided in the prompt. The approved plan is in `.claude/current-pl
 
 ---
 
-## Phase 5: CODE REVIEW (Principal Engineer — Adversarial)
+## CODE-REVIEW (Principal Engineer — Adversarial)
 
 **Goal**: Find the most serious flaw in this implementation. Do not look for what's good — look for what's wrong.
 
@@ -129,7 +129,7 @@ Issue NEEDS_REFACTOR when:
 
 ---
 
-## Phase 6: REFACTOR / REBUILD
+## REFACTOR / REBUILD
 
 **Goal**: Fix issues found during code review, or rebuild if repair isn't converging.
 
@@ -152,7 +152,7 @@ When applying refactor fixes, you may encounter compilation/build errors trigger
 
 Escalate if the error suggests the refactor approach itself is wrong. ONE autonomous fix attempt per error — if it fails, stop and escalate.
 
-After refactoring, return to **Phase 5: CODE REVIEW** and re-review.
+After refactoring, return to **code-review** and re-review.
 
 #### Auto-Escalation to NEEDS_REBUILD
 
@@ -174,7 +174,7 @@ After completing any refactor or rebuild, if user-facing behavior or setup steps
 
 ---
 
-## Phase 7: TEST (Senior QA Engineer)
+## TEST (Senior QA Engineer)
 
 **Goal**: Verify the implementation through comprehensive testing.
 

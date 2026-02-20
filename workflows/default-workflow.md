@@ -8,7 +8,7 @@ This is the default workflow for BuildCrew. Projects can customize this by creat
 
 ## Phases
 
-### Phase 0: SPEC (optional)
+### SPEC (optional)
 **agent**: product-manager
 **description**: Convert raw backlog item into a structured specification with testable acceptance criteria
 **output**: .claude/spec.md
@@ -22,7 +22,7 @@ The Product Manager:
 
 ---
 
-### Phase 1: RESEARCH
+### RESEARCH
 **agent**: none
 **description**: Gather external and local context relevant to the task before planning
 **output**: .claude/research.md
@@ -37,7 +37,7 @@ Steps:
 
 ---
 
-### Phase 2: PLAN
+### PLAN
 **agent**: none
 **description**: Analyze task, explore codebase, create implementation plan
 **input**: .claude/research.md, .claude/spec.md (if present)
@@ -52,7 +52,7 @@ Steps:
 
 ---
 
-### Phase 3: PLAN_REVIEW (Adversarial 3-Pass)
+### PLAN-REVIEW (Adversarial 3-Pass)
 **agents**: principal-engineer, product-manager
 **description**: Adversarial 3-pass review — find the most serious flaw in the plan
 **input**: .claude/current-plan.md, .claude/spec.md (if present), .buildcrew/context/* (if present)
@@ -74,7 +74,7 @@ If REJECTED: Mark task as blocked
 
 ---
 
-### Phase 4: BUILD
+### BUILD
 **agent**: feature-engineer
 **description**: Implement the plan with focus on user value
 **input**: .claude/current-plan.md
@@ -89,7 +89,7 @@ The Feature Engineer:
 
 ---
 
-### Phase 5: CODE_REVIEW (Adversarial)
+### CODE-REVIEW (Adversarial)
 **agent**: principal-engineer
 **description**: Adversarial code review — find the most serious flaw in the implementation
 **output**: .claude/code-review.md
@@ -105,25 +105,25 @@ The Principal Engineer:
 
 Verdicts: APPROVED, NEEDS_REFACTOR, or NEEDS_REBUILD
 - If NEEDS_REFACTOR: Continue to refactor + re-review (max 3 cycles)
-- If NEEDS_REBUILD: Return to Phase 4 (BUILD) with rejection context
-- If APPROVED: Proceed to Phase 7 (TEST)
+- If NEEDS_REBUILD: Return to build with rejection context
+- If APPROVED: Proceed to test
 
 ---
 
-### Phase 6: REFACTOR / REBUILD
+### REFACTOR / REBUILD
 **agent**: none
 **condition**: code_review.verdict == "NEEDS_REFACTOR" or "NEEDS_REBUILD"
 **description**: Address issues from code review, or rebuild if repair isn't converging
 
-**NEEDS_REFACTOR**: Fix blocking issues, return to Phase 5. Max 3 refactor cycles.
+**NEEDS_REFACTOR**: Fix blocking issues, return to code-review. Max 3 refactor cycles.
 Auto-escalation: if iteration 2 shows no improvement in blocking issue count → NEEDS_REBUILD.
 
-**NEEDS_REBUILD**: Discard implementation, preserve approved plan, restart Phase 4 with rejection context.
+**NEEDS_REBUILD**: Discard implementation, preserve approved plan, restart build with rejection context.
 **circuit breaker**: if build/test fails 2 consecutive times → re-plan from scratch
 
 ---
 
-### Phase 7: TEST
+### TEST
 **agent**: qa-engineer
 **description**: Create test plan, write tests, run test suite
 **output**: .claude/test-report.md
@@ -138,7 +138,7 @@ The QA Engineer:
 
 ---
 
-### Phase 7.5: OUTCOME_VERIFY (optional, requires spec)
+### OUTCOME (optional, requires spec)
 **agent**: qa-engineer
 **description**: Validate each acceptance criterion from the spec against the actual implementation
 **input**: .claude/spec.md (acceptance criteria), built code
@@ -155,14 +155,14 @@ The QA Engineer:
 4. Produces a pass/fail report keyed to each acceptance criterion
 5. Attempts autonomous fix for mechanically failing criteria (one attempt)
 
-On failure: loops back to Phase 4 (BUILD) with specific failing criteria feedback.
+On failure: loops back to build with specific failing criteria feedback.
 
 **--strict mode** (`buildcrew run --strict`): ALL criteria must pass before commit is allowed.
 Without `--strict`: warn but allow commit with unmet criteria.
 
 ---
 
-### Phase 8: VERIFY
+### VERIFY
 **agent**: security-engineer
 **description**: Security audit and final verification
 **output**: .claude/security-audit.md
@@ -175,11 +175,11 @@ Without `--strict`: warn but allow commit with unmet criteria.
 - [ ] No critical/high security vulnerabilities
 - [ ] No hardcoded secrets
 
-If any check fails: Return to Phase 4 (BUILD) with findings
+If any check fails: Return to build with findings
 
 ---
 
-### Phase 9: COMMIT
+### COMMIT
 **agent**: none
 **description**: Create git commit for the changes
 
@@ -190,7 +190,7 @@ Create a conventional commit:
 
 ---
 
-### Phase 10: SIGNAL
+### SIGNAL
 **agent**: none
 **description**: Write completion status for orchestrator
 **output**: .claude/workflow-status.json
@@ -202,8 +202,8 @@ Create a conventional commit:
 When any phase fails its quality gate **twice consecutively**:
 1. BuildCrew stops the current phase
 2. Appends a lesson to `.buildcrew/lessons.md`
-3. Outputs: `[CIRCUIT BREAKER] Approach failed twice at Phase X. Re-planning from scratch with failure context.`
-4. Restarts from Phase 1 (Research + Planning) with failure summary as context
+3. Outputs: `[CIRCUIT BREAKER] Approach failed twice at <phase>. Re-planning from scratch with failure context.`
+4. Restarts from research + plan with failure summary as context
 5. The re-plan gets ONE attempt. If it also hits the circuit breaker, the task is marked blocked.
 
 ---
@@ -244,15 +244,15 @@ To customize this workflow for your project:
 ```markdown
 ## Phases
 
-### Phase 1: BUILD
+### BUILD
 agent: feature-engineer
 description: Build the feature
 
-### Phase 2: TEST
+### TEST
 agent: qa-engineer
 description: Test it
 
-### Phase 3: COMMIT
+### COMMIT
 agent: none
 description: Commit changes
 ```
