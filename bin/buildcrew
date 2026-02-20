@@ -705,6 +705,41 @@ EOF
     echo ""
 }
 
+refresh_project_symlinks() {
+    if [ ! -f ".claude/.buildcrew-link" ]; then
+        echo "  Tip: Run 'buildcrew init' in your project to link new skills."
+        return
+    fi
+
+    echo "Refreshing project symlinks..."
+
+    # Refresh commands symlink
+    if [ -L ".claude/commands" ]; then
+        rm -f ".claude/commands"
+    fi
+    if [ ! -e ".claude/commands" ]; then
+        ln -s "$BUILDCREW_HOME/commands" ".claude/commands"
+        echo -e "  ${GREEN}✓${NC} Linked commands"
+    else
+        echo -e "  ${YELLOW}○${NC} .claude/commands is a local directory (not a symlink) — skipped"
+    fi
+
+    # Refresh skills symlink
+    if [ -L ".claude/skills" ]; then
+        rm -f ".claude/skills"
+    fi
+    if [ ! -e ".claude/skills" ]; then
+        ln -s "$BUILDCREW_HOME/skills" ".claude/skills"
+        echo -e "  ${GREEN}✓${NC} Linked skills"
+    else
+        echo -e "  ${YELLOW}○${NC} .claude/skills is a local directory (not a symlink) — skipped"
+    fi
+
+    # Update buildcrew-link marker
+    echo "BUILDCREW_HOME=$BUILDCREW_HOME" > .claude/.buildcrew-link
+    echo -e "  ${GREEN}✓${NC} Project symlinks refreshed"
+}
+
 cmd_plugins() {
     print_logo
     echo -e "${BOLD}Plugin Recommendations${NC}"
@@ -1089,10 +1124,15 @@ cmd_update() {
         rm -rf "$tmp_dir"
 
         echo ""
+        refresh_project_symlinks
+
+        echo ""
         echo -e "${GREEN}✓${NC} Updated to v$latest"
 
-        # Exit immediately — install.sh replaced the script on disk,
-        # so bash must not read further from the now-stale file descriptor.
+        # Exit immediately — do not fall through into post-update script logic.
+        # Safe to execute code after install.sh replaces the script on disk because
+        # the entire script is wrapped in { ... } (lines 7-1188), which forces bash
+        # to read and parse the full file into memory before executing any of it.
         exit 0
     else
         echo "Update cancelled."
