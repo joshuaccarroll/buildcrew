@@ -55,6 +55,12 @@ print_info() {
     echo -e "${CYAN}ℹ $1${NC}"
 }
 
+print_debug() {
+    if [[ "${VERBOSE:-false}" == "true" ]]; then
+        echo -e "${CYAN}  [debug] $1${NC}"
+    fi
+}
+
 error() {
     print_error "$1"
     exit 1

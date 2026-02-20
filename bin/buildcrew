@@ -67,6 +67,8 @@ print_help() {
     echo "    --skip-spec   Skip the specification refinement phase (with 'run')"
     echo "    --strict      Require ALL acceptance criteria to pass before commit (with 'run')"
     echo "    --max-invocations N  Max Claude invocations per run (default: 15, with 'run')"
+    echo "    --verbose     Show orchestrator decisions, phase verdicts, and invocation counts"
+    echo "    --debug       Alias for --verbose"
     echo ""
     echo -e "${BOLD}GETTING STARTED:${NC}"
     echo -e "    1. Run ${CYAN}buildcrew init${NC} in your project"

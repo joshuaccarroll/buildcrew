@@ -122,6 +122,7 @@ HAS_REMOTE=false
 GH_AVAILABLE=false
 SKIP_SPEC=false
 STRICT_MODE=false
+VERBOSE=false
 
 parse_args() {
     while [[ $# -gt 0 ]]; do
@@ -162,6 +163,10 @@ parse_args() {
                 STRICT_MODE=true
                 shift
                 ;;
+            --verbose|--debug)
+                VERBOSE=true
+                shift
+                ;;
             --max-invocations)
                 if [[ -z "${2:-}" ]] || ! [[ "$2" =~ ^[1-9][0-9]*$ ]] || [[ ${#2} -gt 5 ]]; then
                     echo "Error: --max-invocations requires a positive integer (1-99999, no leading zeros)"
@@ -183,6 +188,8 @@ parse_args() {
                 echo "  --skip-spec  Skip the specification refinement phase (for tasks with detailed specs already)"
                 echo "  --strict     Require ALL acceptance criteria to pass before commit (outcome phase)"
                 echo "  --max-invocations N  Set maximum Claude invocations per run (default: 15)"
+                echo "  --verbose    Show orchestrator decisions, phase verdicts, and invocation counts"
+                echo "  --debug      Alias for --verbose"
                 echo "  --help, -h   Show this help message"
                 exit 0
                 ;;
@@ -844,6 +851,7 @@ run_phase_group() {
         return 1
     fi
 
+    print_debug "Invocation budget: $__INVOCATION_COUNT/$MAX_INVOCATIONS used"
     rm -f "$PHASE_RESULT_FILE"
 
     print_info "Phase: $phase (max $max_turns turns)"
@@ -864,6 +872,7 @@ run_phase_group() {
     start_file_monitor "$PHASE_RESULT_FILE" "claude.*buildcrew-$phase"
 
     __INVOCATION_COUNT=$(( __INVOCATION_COUNT + 1 ))
+    print_debug "Invoking claude for phase: $phase (invocation $__INVOCATION_COUNT/$MAX_INVOCATIONS, max_turns=$max_turns)"
     claude -p "$prompt" --max-turns "$max_turns" || true
 
     stop_file_monitor
@@ -882,6 +891,7 @@ run_phase_group() {
         start_file_monitor "$PHASE_RESULT_FILE" "claude.*buildcrew-$phase"
 
         __INVOCATION_COUNT=$(( __INVOCATION_COUNT + 1 ))
+        print_debug "Phase $phase produced no result file — retrying (invocation $__INVOCATION_COUNT/$MAX_INVOCATIONS)"
         claude -p "$prompt" --max-turns "$max_turns" || true
 
         stop_file_monitor
@@ -894,6 +904,9 @@ run_phase_group() {
 
     local verdict
     verdict=$(jq -r '.verdict // "unknown"' "$PHASE_RESULT_FILE")
+    if [[ "$VERBOSE" == "true" ]]; then
+        print_debug "Phase result: verdict=$verdict, details=$(jq -r '.details // "none"' "$PHASE_RESULT_FILE")"
+    fi
     print_success "Phase $phase complete — verdict: $verdict"
 }
 
@@ -945,6 +958,7 @@ process_task_isolated() {
             __completed_phases="$__RESUME_PHASES"
             __is_resuming=true
             print_info "Resuming task (invocation count: $__INVOCATION_COUNT)"
+            print_debug "Resume state: completed_phases=[$__completed_phases], invocations=$__INVOCATION_COUNT"
         else
             print_warning "Progress file is for a different task — starting fresh"
             clear_task_progress
@@ -981,6 +995,9 @@ process_task_isolated() {
             mark_task_blocked "$task" "Safety: outer loop exceeded 2 iterations"
             return 1
         fi
+        if (( __outer_iterations > 1 )); then
+            print_debug "Outer loop iteration $__outer_iterations (re-planning)"
+        fi
         __need_replan=false
 
     # --- spec (optional, skipped with --skip-spec) ---
@@ -1003,6 +1020,7 @@ process_task_isolated() {
         if [[ "$spec_verdict" == "vague" ]]; then
             local vague_reason
             vague_reason=$(jq -r '.details // "Task too vague"' "$PHASE_RESULT_FILE")
+            print_debug "Spec verdict: vague — marking task blocked"
             mark_task_blocked "$task" "$vague_reason"
             clear_task_progress
             print_warning "Task flagged as too vague to spec. See .claude/spec.md for details."
@@ -1101,6 +1119,7 @@ process_task_isolated() {
                         local failure_summary
                         failure_summary=$(jq -r '.details // "Plan failed to converge after 2 revision cycles"' "$PHASE_RESULT_FILE")
                         print_warning "[CIRCUIT BREAKER] Approach failed twice at Plan Review phase. Re-planning from scratch with failure context."
+                        print_debug "Circuit breaker: consecutive_failures=$consecutive_review_failures, replan_count=$__replan_count"
                         append_lesson "review" \
                             "Plan failed to converge after $plan_review_cycle cycles: $failure_summary" \
                             "Triggered circuit breaker and re-planned from scratch" \
@@ -1113,6 +1132,7 @@ process_task_isolated() {
                         fi
                         ((__replan_count++))
                         __replan_context="CIRCUIT BREAKER: Plan review failed twice. Previous approach: $failure_summary. Try a fundamentally different approach."
+                        print_debug "Re-plan context: $__replan_context"
                         __need_replan=true
                         __completed_phases=""
                         clear_task_progress
@@ -1138,6 +1158,7 @@ process_task_isolated() {
         local consecutive_build_failures=0
         while true; do
             ((build_attempt++))
+            print_debug "Build attempt $build_attempt"
 
             local build_context=""
             if [[ -n "$__spec_context" ]]; then
@@ -1166,6 +1187,7 @@ process_task_isolated() {
                         local failure_summary
                         failure_summary=$(jq -r '.details // "Build/test failed twice"' "$PHASE_RESULT_FILE")
                         print_warning "[CIRCUIT BREAKER] Approach failed twice at Build/Test phase. Re-planning from scratch with failure context."
+                        print_debug "Circuit breaker: consecutive_failures=$consecutive_build_failures, replan_count=$__replan_count"
                         append_lesson "build" \
                             "Build/test failed after $build_attempt attempts: $failure_summary" \
                             "Triggered circuit breaker and re-planned from scratch" \
@@ -1178,6 +1200,7 @@ process_task_isolated() {
                         fi
                         ((__replan_count++))
                         __replan_context="CIRCUIT BREAKER: Build/test failed twice. Previous failure: $failure_summary. The implementation approach needs to change — re-plan with a different strategy."
+                        print_debug "Re-plan context: $__replan_context"
                         __need_replan=true
                         __completed_phases=""
                         clear_task_progress
@@ -1238,6 +1261,7 @@ process_task_isolated() {
                             local failure_summary
                             failure_summary=$(jq -r '.details // "Outcome verification failed twice"' "$PHASE_RESULT_FILE")
                             print_warning "[CIRCUIT BREAKER] Approach failed twice at Outcome Verification. Re-planning from scratch."
+                            print_debug "Circuit breaker: consecutive_failures=$consecutive_outcome_failures, replan_count=$__replan_count"
                             append_lesson "outcome" \
                                 "Acceptance criteria not met after $outcome_attempt attempts: $failure_summary" \
                                 "Triggered circuit breaker and re-planned from scratch" \
@@ -1250,6 +1274,7 @@ process_task_isolated() {
                             fi
                             ((__replan_count++))
                             __replan_context="CIRCUIT BREAKER: Outcome verification failed twice. Unmet criteria: $failure_summary. Re-read the spec in .claude/spec.md and plan differently."
+                            print_debug "Re-plan context: $__replan_context"
                             __need_replan=true
                             __completed_phases=""
                             clear_task_progress
@@ -1269,6 +1294,7 @@ process_task_isolated() {
                         partial_details=$(jq -r '.details // "Some acceptance criteria not met"' "$PHASE_RESULT_FILE")
                         print_warning "Outcome verification: some acceptance criteria not fully met. Proceeding without --strict."
                         print_warning "Details: $partial_details"
+                        print_debug "Outcome partial — proceeding (strict=$STRICT_MODE)"
                         break
                     fi
                     ;;
@@ -1278,6 +1304,7 @@ process_task_isolated() {
                         local failure_summary
                         failure_summary=$(jq -r '.details // "Outcome verification failed twice"' "$PHASE_RESULT_FILE")
                         print_warning "[CIRCUIT BREAKER] Approach failed twice at Outcome Verification. Re-planning from scratch."
+                        print_debug "Circuit breaker: consecutive_failures=$consecutive_outcome_failures, replan_count=$__replan_count"
                         append_lesson "outcome" \
                             "Acceptance criteria failed after $outcome_attempt attempts: $failure_summary" \
                             "Triggered circuit breaker and re-planned from scratch" \
@@ -1290,6 +1317,7 @@ process_task_isolated() {
                         fi
                         ((__replan_count++))
                         __replan_context="CIRCUIT BREAKER: Outcome verification failed twice. Unmet criteria: $failure_summary. Re-read the spec in .claude/spec.md and plan differently."
+                        print_debug "Re-plan context: $__replan_context"
                         __need_replan=true
                         __completed_phases=""
                         clear_task_progress
@@ -1343,6 +1371,7 @@ process_task_isolated() {
 
                 if (( consecutive_verify_failures >= 2 )); then
                     print_warning "[CIRCUIT BREAKER] Approach failed twice at Verify phase ($failing). Re-planning from scratch."
+                    print_debug "Circuit breaker: consecutive_failures=$consecutive_verify_failures, replan_count=$__replan_count"
                     append_lesson "verify" \
                         "Verification blocked twice on '$failing': $failure_details" \
                         "Triggered circuit breaker and re-planned from scratch" \
@@ -1355,6 +1384,7 @@ process_task_isolated() {
                     fi
                     ((__replan_count++))
                     __replan_context="CIRCUIT BREAKER: Verification failed twice on '$failing': $failure_details. Plan a different approach that avoids this issue."
+                    print_debug "Re-plan context: $__replan_context"
                     __need_replan=true
                     __completed_phases=""
                     clear_task_progress
@@ -1365,6 +1395,7 @@ process_task_isolated() {
                     tests|security)
                         local rebuild_context
                         rebuild_context=$(build_verify_failure_context "$failing")
+                        print_debug "Verify rebuild context: $rebuild_context"
                         append_lesson "verify" \
                             "Verify blocked on '$failing': $failure_details" \
                             "Rebuilt with targeted fix for $failing issues" \
@@ -1434,7 +1465,10 @@ main() {
 
     # Auto-generate norms for brownfield projects on first run
     if [[ "$DRY_RUN" != "true" ]] && [[ ! -f ".buildcrew/norms/NORMS.md" ]] && has_existing_codebase; then
+        print_debug "Norms: running analysis (no existing NORMS.md)"
         run_norms_analysis
+    else
+        print_debug "Norms: skipping (already exists)"
     fi
 
     print_header "BuildCrew - Autonomous Development Pipeline"
@@ -1449,6 +1483,7 @@ main() {
     [[ "$SKIP_SPEC" != "true" ]] && [[ -d ".claude/skills/buildcrew-spec" ]] && _phase_count=$((_phase_count + 1))
     [[ -d ".claude/skills/buildcrew-outcome" ]] && _phase_count=$((_phase_count + 1))
     print_info "Mode: Phase-isolated ($_phase_count invocations per task)"
+    print_debug "Flags: skip_spec=$SKIP_SPEC strict=$STRICT_MODE review=$HUMAN_REVIEW branch=$GIT_BRANCH resume=$RESUME_MODE"
 
     # Git branch setup
     if [[ "$GIT_BRANCH" == "true" ]]; then
@@ -1637,6 +1672,7 @@ main() {
     echo -e "  ${YELLOW}Failed:${NC}    $failed"
     echo -e "  ${CYAN}Duration:${NC}  ${duration}s"
     echo ""
+    print_debug "Total invocations used: $__INVOCATION_COUNT"
 
     # Show remaining status
     local remaining

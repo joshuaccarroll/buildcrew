@@ -1039,3 +1039,66 @@ EOF
     load_buildcrew_config 2>/dev/null
     [ -z "${MAX_INVOCATIONS:-}" ]
 }
+
+# ─────────────────────────────────────────────────────────────────────────────
+# --verbose / --debug flag tests
+# ─────────────────────────────────────────────────────────────────────────────
+
+@test "parse_args: --verbose sets VERBOSE=true" {
+    parse_args --verbose
+    [ "$VERBOSE" = "true" ]
+}
+
+@test "parse_args: --debug sets VERBOSE=true" {
+    parse_args --debug
+    [ "$VERBOSE" = "true" ]
+}
+
+@test "parse_args: no args leaves VERBOSE=false" {
+    parse_args
+    [ "$VERBOSE" = "false" ]
+}
+
+@test "parse_args: --verbose combined with other flags" {
+    parse_args --verbose --dry-run --single
+    [ "$VERBOSE" = "true" ]
+    [ "$DRY_RUN" = "true" ]
+    [ "$SINGLE_TASK" = "true" ]
+}
+
+@test "parse_args: --help mentions --verbose" {
+    run parse_args --help
+    [[ "$output" == *"--verbose"* ]]
+}
+
+@test "parse_args: --help mentions --debug" {
+    run parse_args --help
+    [[ "$output" == *"--debug"* ]]
+}
+
+@test "print_debug outputs when VERBOSE=true" {
+    VERBOSE=true
+    run print_debug "hello from debug"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"[debug]"* ]]
+    [[ "$output" == *"hello from debug"* ]]
+}
+
+@test "print_debug is silent when VERBOSE=false" {
+    VERBOSE=false
+    run print_debug "should not appear"
+    [ "$status" -eq 0 ]
+    [ -z "$output" ]
+}
+
+@test "guarded print_debug skips expensive evaluation when VERBOSE=false" {
+    VERBOSE=false
+    local marker_file
+    marker_file=$(mktemp)
+    rm -f "$marker_file"
+    # Wrap in if/then/fi so the subshell is not entered when VERBOSE=false
+    if [[ "$VERBOSE" == "true" ]]; then
+        print_debug "result=$(touch "$marker_file"; echo evaluated)"
+    fi
+    [ ! -f "$marker_file" ]
+}
