@@ -67,6 +67,31 @@ If the context mentions **REBUILD AFTER VERIFY FAILURE**, this is a targeted fix
 - Consider loading states and edge cases users will hit
 - If `.buildcrew/norms/` exists, read `code-style.md` and `patterns.md` before writing code. Follow the team's established conventions for naming, imports, error handling, and utility usage.
 
+### Autonomous Error Handling (Scoped)
+
+When you encounter routine errors during the build, attempt to fix them directly rather than immediately escalating. This keeps the iteration loop fast.
+
+**Fix autonomously ONLY when ALL of these are true:**
+- The error is in code you wrote or modified during this build phase
+- The fix is localized to the same file or a closely related file you already touched
+- The error type is mechanical: syntax errors, type errors, import/require errors, missing return statements, wrong variable names
+
+**Fix procedure:**
+1. Read the error message carefully
+2. Identify the exact location (file, line)
+3. Confirm the file is one you modified this phase
+4. Apply the minimal fix
+5. Re-run the failing command to verify the fix worked
+6. ONE attempt only — if the fix fails, escalate immediately
+
+**Escalate to the review/iteration loop immediately when:**
+- The error suggests the approach itself is wrong (e.g., "cannot extend final class", "circular dependency", "interface not satisfied")
+- The fix would require changing files you did NOT modify during this build (framework files, dependencies, unrelated modules)
+- Your first autonomous fix attempt failed
+- The error is in test files (test fixes belong in the test phase)
+
+When escalating, write the phase result with the error details so the review phase has full context.
+
 ### Documentation Maintenance
 
 After implementing changes, update `README.md` to reflect the actual implementation:

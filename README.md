@@ -130,28 +130,35 @@ That's it. If you don't have a backlog yet, BuildCrew launches the Product Manag
 │                         BuildCrew Pipeline                         │
 ├───────────────────────────────────────────────────────────────────┤
 │                                                                    │
-│   RESEARCH ──► PLAN ──► PLAN REVIEW ──► BUILD ──► CODE REVIEW     │
-│                          (3-Pass:        (Feature)   (Principal)   │
-│                           PE→PM→PE)                                │
+│   SPEC ──► RESEARCH ──► PLAN ──► PLAN REVIEW ──► BUILD            │
+│   (PM)                            (3-Pass:        (Feature)        │
+│                                   adversarial)                     │
 │                                                                    │
-│   COMMIT ◄── VERIFY ◄── TEST ◄── REFACTOR / REBUILD               │
-│              (Security    (QA)     (REBUILD → BUILD)               │
-│               blocks!)                                             │
+│   COMMIT ◄── VERIFY ◄── OUTCOME ◄── CODE REVIEW ◄── TEST          │
+│              (Security   (Acceptance  (adversarial    (QA)          │
+│               blocks!)    criteria)   + elegance)                  │
 │                                                                    │
 └───────────────────────────────────────────────────────────────────┘
 ```
 
-Each task runs through **5 isolated Claude invocations** (phase-isolated mode), keeping context focused per phase:
+Each task runs through **up to 7 isolated Claude invocations** (phase-isolated mode), keeping context focused per phase:
 
-| Invocation | Phases |
-|------------|--------|
-| 1 | Research + Plan |
-| 2 | Plan Review (3-pass) |
-| 3 | Build |
-| 4 | Code Review + Refactor + Test |
-| 5 | Verify (incl. Security Audit) + Commit |
+| Invocation | Phase | Description |
+|------------|-------|-------------|
+| 0 | Spec | PM converts raw backlog item to testable acceptance criteria (skip with `--skip-spec`) |
+| 1 | Research + Plan | Gather context, create implementation plan |
+| 2 | Plan Review (3-pass) | Adversarial review: find the most serious flaw |
+| 3 | Build | Feature Engineer implements the plan |
+| 4 | Code Review + Refactor + Test | Adversarial review + elegance check + tests |
+| 4.5 | Outcome Verification | QA validates each acceptance criterion from the spec |
+| 5 | Verify (incl. Security Audit) + Commit | Final gate; Security blocks commit |
 
 **Key features:**
+- **Specification first** - PM writes testable acceptance criteria before any code is planned
+- **Adversarial reviews** - reviewers are asked to find flaws, not to approve quickly
+- **Outcome verification** - QA validates acceptance criteria directly, not just test suite pass
+- **Circuit breaker** - if any phase fails twice consecutively, re-plan from scratch with failure context
+- **Lessons system** - failures are automatically recorded and injected into future runs
 - **Quality gates** at every phase
 - **Automatic iteration** when reviews find issues
 - **Blocking security** - no commit until vulnerabilities are fixed
@@ -231,19 +238,24 @@ These files are optional. When present, the orchestrator automatically injects t
 ## CLI Commands
 
 ```bash
-buildcrew              # Show help
-buildcrew init         # Link project to BuildCrew
-buildcrew run          # Run workflow on BACKLOG.md
-buildcrew run --single # Process one task and stop
-buildcrew run --dry-run # Preview without executing
-buildcrew run --review # Pause for human review at plan checkpoints
-buildcrew run --branch # Create a feature branch per task with PR
-buildcrew run --teams  # Use agent teams mode (experimental)
-buildcrew stop         # Stop after current task completes
-buildcrew plugins      # Show recommended plugins
-buildcrew update       # Update BuildCrew
-buildcrew version      # Show installed version
-buildcrew uninstall    # Remove BuildCrew
+buildcrew                    # Show help
+buildcrew init               # Link project to BuildCrew
+buildcrew run                # Run workflow on BACKLOG.md
+buildcrew run --single       # Process one task and stop
+buildcrew run --dry-run      # Preview without executing
+buildcrew run --review       # Pause for human review at plan checkpoints
+buildcrew run --branch       # Create a feature branch per task with PR
+buildcrew run --teams        # Use agent teams mode (experimental)
+buildcrew run --skip-spec    # Skip the spec phase (task already has detailed spec)
+buildcrew run --strict       # Require ALL acceptance criteria to pass before commit
+buildcrew stop               # Stop after current task completes
+buildcrew lessons            # List recorded lessons from past failures
+buildcrew lessons promote N  # Graduate lesson N to permanent project rules
+buildcrew lessons prune      # Interactively remove stale lessons
+buildcrew plugins            # Show recommended plugins
+buildcrew update             # Update BuildCrew
+buildcrew version            # Show installed version
+buildcrew uninstall          # Remove BuildCrew
 ```
 
 ### Run Options
@@ -255,8 +267,39 @@ buildcrew uninstall    # Remove BuildCrew
 | `--review` | Pause after plan creation and after plan review for human inspection. Press Enter to continue, `s` to skip, `q` to quit. Phase-isolated mode only. |
 | `--branch` | Create a `buildcrew/<slug>` feature branch per task. Pushes to remote and creates a PR via `gh` if available. Each task branches independently from the base branch. Phase-isolated mode only. |
 | `--teams` | Use Claude Code's experimental agent teams feature. A team lead coordinates specialist teammates instead of 5 sequential invocations. Requires `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1`. |
+| `--skip-spec` | Skip the Specification Refinement phase (Phase 0). Use when the backlog item already contains a detailed spec with acceptance criteria. |
+| `--strict` | Require ALL acceptance criteria to pass during Outcome Verification before the commit is allowed. Without `--strict`, unmet criteria trigger a warning but don't block the commit. |
 
 Flags can be combined: `buildcrew run --single --review --branch`
+
+---
+
+## The Lessons System
+
+BuildCrew learns from its mistakes across runs. After any failed iteration (review rejection, test failure, circuit breaker trigger), it automatically records a structured lesson in `.buildcrew/lessons.md`.
+
+Each lesson captures what went wrong, what fixed it, and a rule to prevent it next time. Lessons are **automatically injected into every phase's context** — just like `users.md` or `principles.md`.
+
+```bash
+buildcrew lessons              # List all recorded lessons
+buildcrew lessons promote 3    # Graduate lesson 3 to .buildcrew/rules/project-rules.md
+buildcrew lessons prune        # Interactively review and delete stale lessons
+```
+
+Lessons are capped at 100 entries. When exceeded, the oldest 50 are condensed into a summary "Patterns" section to keep context injection bounded.
+
+---
+
+## Circuit Breaker
+
+If any phase fails its quality gate **twice consecutively**, BuildCrew stops grinding and re-plans from scratch:
+
+1. Logs what was tried and why it failed
+2. Appends a lesson to `.buildcrew/lessons.md`
+3. Restarts from Research + Planning with the failure as context
+4. Outputs: `[CIRCUIT BREAKER] Approach failed twice at Phase X. Re-planning from scratch with failure context.`
+
+The re-plan gets **one attempt**. If it hits the circuit breaker again, the task is blocked and reported to the user.
 
 ---
 

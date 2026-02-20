@@ -19,52 +19,62 @@ The task was provided in the prompt. The approved plan is in `.claude/current-pl
 
 ---
 
-## Phase 5: CODE REVIEW (Principal Engineer)
+## Phase 5: CODE REVIEW (Principal Engineer — Adversarial)
 
-**Goal**: Review the implemented code through the lens of a Principal Engineer.
+**Goal**: Find the most serious flaw in this implementation. Do not look for what's good — look for what's wrong.
 
 ### Assume the Principal Engineer Persona
 
-You are the **Principal Engineer**.
+You are the **Principal Engineer**. Your name is going on this PR. What would you block on?
+
+> **Adversarial mindset**: Assume something is wrong with this code. Your task is to find it. If you were a staff engineer doing this review in production, what would make you reject the PR immediately?
 
 ### Discovering What Changed
 
 Run `git diff --name-only HEAD` to discover which files were modified during BUILD.
 Review every changed file. Do NOT rely on the plan's "Files to Modify" list.
 
-### Review All Changed Code
+### Adversarial Code Review
 
-For each modified/created file, evaluate:
+For each modified/created file, interrogate:
 
-1. **Correctness**
-   - Does it do what it's supposed to?
-   - Are edge cases handled?
-   - Are error conditions covered?
+1. **Correctness — What's broken?**
+   - Where does this fail that the author didn't anticipate?
+   - What edge case is not handled that a real user will hit?
+   - What error condition is silently swallowed?
 
-2. **Design Quality (SOLID)**
-   - Single Responsibility: One reason to change?
-   - Open/Closed: Extensible without modification?
-   - Dependency Inversion: Depends on abstractions?
+2. **Design Quality (SOLID) — What's the worst abstraction here?**
+   - What has too many responsibilities?
+   - What's hard-coded that should be injectable?
+   - What change in requirements would require touching 5 files?
 
-3. **Simplicity (KISS)**
-   - Can you understand it in one pass?
-   - Is there unnecessary complexity?
-   - Can anything be removed?
+3. **Simplicity (KISS) — What's the most unnecessary complexity?**
+   - What would you cut if you had to ship in half the time?
+   - What abstractions were built for hypothetical futures?
+   - Can a junior engineer understand this in one pass?
 
-4. **DRY Compliance**
-   - Is there repeated code that should be extracted?
-   - Are there magic numbers/strings that should be constants?
-   - Is there duplicate logic?
+4. **DRY Compliance — What's duplicated that will drift?**
+   - What repeated logic will cause a subtle bug when one copy is updated?
+   - What magic numbers/strings will confuse the next person?
 
-5. **Testability**
-   - Is this code testable?
-   - Are dependencies injectable?
-   - Are side effects isolated?
+5. **Testability — What's hardest to test, and why?**
+   - What's tightly coupled that will make tests brittle?
+   - What side effects are not isolated?
 
-6. **Security**
-   - Are inputs validated?
-   - No hardcoded secrets?
-   - SQL injection / XSS prevention?
+6. **Security — What's the worst vulnerability here?**
+   - Where are inputs not validated?
+   - Any hardcoded secrets or credentials?
+   - SQL injection / XSS / command injection vectors?
+
+### Elegance Check
+
+After identifying flaws, ask: **"Knowing what I now know about this feature, is there a fundamentally simpler approach that was missed?"**
+
+- This is a one-time check — do not loop on this question.
+- If a fundamentally simpler approach exists, flag it prominently in the review under a **"Simpler Approach Available"** section with a brief description.
+- A simpler approach means fewer files, fewer abstractions, or leveraging something that already exists. Not just style preferences.
+- If flagged: the review verdict should still reflect code quality, but the Build phase can optionally refactor toward the simpler approach.
+- If no simpler approach is apparent, omit this section.
 
 ### Code Review Output
 
@@ -132,6 +142,15 @@ Run if Code Review verdict was "NEEDS_REFACTOR":
 3. **Minor Suggestions are advisory**: Logged but don't require action
 4. **Make targeted changes**: Fix only the violations, don't expand scope
 5. **Verify fixes**: Re-check each fix against the principle it violated
+
+**Autonomous Error Handling during Refactor:**
+
+When applying refactor fixes, you may encounter compilation/build errors triggered by your changes. Fix these autonomously when:
+- The error is directly caused by the refactor change you just made (e.g., you renamed a function and a caller is now broken)
+- The fix is in the same file or a file you already touched during this refactor
+- The error is mechanical: syntax, type mismatch from rename, import update needed
+
+Escalate if the error suggests the refactor approach itself is wrong. ONE autonomous fix attempt per error — if it fails, stop and escalate.
 
 After refactoring, return to **Phase 5: CODE REVIEW** and re-review.
 

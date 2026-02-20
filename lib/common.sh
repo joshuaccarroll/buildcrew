@@ -92,7 +92,7 @@ count_tasks() {
 # Project context loading
 # ─────────────────────────────────────────────────────────────────────────────────
 
-# Loads project context from .buildcrew/context/*.md files.
+# Loads project context from .buildcrew/context/*.md files and lessons.
 # Echoes the context string to stdout. Returns empty string if no files exist.
 # All user-facing messages go to stderr (this is called via command substitution).
 load_project_context() {
@@ -105,6 +105,10 @@ load_project_context() {
     # Load norms index (if generated)
     if [[ -f ".buildcrew/norms/NORMS.md" ]]; then
         project_context+="$(cat ".buildcrew/norms/NORMS.md")"$'\n\n'
+    fi
+    # Load lessons (Change 2: Self-Improvement Loop)
+    if [[ -f ".buildcrew/lessons.md" ]]; then
+        project_context+="$(cat ".buildcrew/lessons.md")"$'\n\n'
     fi
     if [[ -n "$project_context" ]]; then
         local ctx_size=${#project_context}

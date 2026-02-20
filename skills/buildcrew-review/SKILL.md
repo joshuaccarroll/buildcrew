@@ -16,48 +16,45 @@ The task was provided in the prompt. The implementation plan is in `.claude/curr
 
 ---
 
-## Phase 3: PLAN REVIEW (3-Pass Review)
+## Phase 3: PLAN REVIEW (3-Pass Adversarial Review)
 
-**Goal**: Review the plan through multiple lenses before any code is written. This phase uses 3 sequential review passes to catch technical issues, user-facing gaps, and ensure convergence.
+**Goal**: Challenge the plan ruthlessly before any code is written. Your job is to find what's wrong with it — not to approve it quickly. This phase uses 3 adversarial review passes.
+
+> **Adversarial mindset**: Assume something is wrong with this plan. Your task is to find it. A plan that survives adversarial review is a plan worth building.
 
 ### Pass 1: Technical Review (Principal Engineer)
 
 **Assume the Principal Engineer Persona.**
 
-Evaluate `.claude/current-plan.md` against:
+**Your job is to find the most serious flaw in this plan.** Assume something is wrong. What is it? If you were a staff engineer whose name would be on this PR, what would you block on? Only pass if you'd stake your reputation on it.
 
-1. **Scope Assessment**
-   - Is this solving the actual problem?
-   - Is the scope appropriate (not over-engineered)?
-   - Are there hidden complexities not addressed?
+Interrogate `.claude/current-plan.md` against:
 
-2. **Architecture Fit**
-   - Does this align with existing architecture?
-   - Will this create technical debt?
-   - Are patterns and conventions being followed?
-   - If `.buildcrew/norms/` exists, read `patterns.md`. Does the plan follow established architectural patterns and use existing utilities?
+1. **Scope Assessment** — Is this actually solving the right problem, or just the stated problem?
+   - What's the most likely way this plan misunderstands the task?
+   - Is the scope appropriate, or are we over/under-building?
+   - What hidden complexities does this plan not address?
 
-3. **Simplicity Check**
-   - Is this the simplest approach that works?
-   - What can be removed from the plan?
-   - Are there unnecessary abstractions?
+2. **Architecture Fit** — What's the most serious architectural risk here?
+   - Does this align with existing architecture, or does it fight it?
+   - Will this create technical debt that will cost 3x to unwind?
+   - If `.buildcrew/norms/` exists, read `patterns.md`. What pattern does this plan violate?
 
-4. **Testability Assessment**
-   - Is the proposed design testable?
-   - Is the testing strategy adequate?
-   - Are edge cases considered?
+3. **Simplicity Check** — What's the most unnecessary thing in this plan?
+   - What would you cut if you had to ship in half the time?
+   - What abstractions are being added for hypothetical futures?
 
-5. **Red Flag Detection**
-   - Over-engineering for hypothetical futures?
-   - Poor separation of concerns?
-   - Missing error handling?
-   - Security considerations?
+4. **Testability Assessment** — What in this plan is untestable, and why?
+   - What edge cases are conspicuously absent?
+   - What will be hardest to verify actually works?
 
-6. **Step Ordering & Testability**
-   - Are steps ordered foundations-first? (infrastructure/platform before features)
-   - Does each step produce a verifiable state with a clear verification checkpoint?
-   - If this involves migration or replatforming, is there a zero-change migration step before feature work?
-   - Are human-required actions (API keys, accounts, DNS) sequenced as early as possible?
+5. **Red Flags** — What would make you reject this in a real code review?
+   - Over-engineering? Poor separation of concerns? Security holes?
+
+6. **Step Ordering** — What ordering mistake will bite us mid-build?
+   - Are foundations laid before features?
+   - Each step: does it produce a verifiable state?
+   - Human prerequisites (API keys, accounts, DNS) — are they early enough?
 
 **Pass 1 Verdict**: PASS / NEEDS_REVISION
 
@@ -69,32 +66,34 @@ If NEEDS_REVISION: Update `.claude/current-plan.md` with required changes before
 
 **Assume the Product Manager Persona.**
 
-Walk through the plan from the end user's perspective:
+**Your job is to find where this plan fails the user.** Assume the user will be confused or underserved. Where?
 
-1. **User Flow Walkthrough**
-   - "I'm a user who wants to [goal]. I open... I see... I click..."
-   - Walk through the complete user flow step by step
-   - Does the plan produce an experience that makes sense to the user?
+Walk through the plan from the end user's perspective with adversarial intent:
 
-2. **Acceptance Criteria Check**
+1. **User Flow Challenge**
+   - "I'm a user who wants [goal]." Now walk through the plan step by step.
+   - At what point does the user experience break down?
+   - What will confuse a user who hasn't read the code?
+
+2. **Acceptance Criteria Gap Hunt**
    - Does this plan actually solve the stated task from the end user's perspective?
-   - Are all acceptance criteria addressed?
+   - What acceptance criteria are missing or too vague to verify?
+   - If `.claude/spec.md` exists, read it — does the plan address every acceptance criterion?
    - Will the user know the feature exists and how to use it?
 
-3. **Edge Case Analysis**
-   - What edge cases will real users hit?
-   - What existing workflows might this break?
-   - What happens when things go wrong from the user's perspective?
+3. **Edge Case Reality Check**
+   - What edge cases will real users hit on day one?
+   - What existing workflows does this break?
+   - What happens when something goes wrong — does the user get a helpful error, or a stack trace?
 
-4. **Value Validation**
+4. **Value Challenge**
    - Is this the simplest thing that delivers value?
-   - Would a user actually want this, or is this engineering-driven?
-   - Does this align with project principles (if `.buildcrew/context/principles.md` exists)?
+   - What would a skeptical user say about this feature?
+   - Does this align with project principles (`.buildcrew/context/principles.md` if present)?
 
-5. **Human Prerequisites Check**
-   - Are all human-required actions identified? (account creation, API keys, DNS, external service setup)
-   - Are they listed in a dedicated "Human Prerequisites" section?
-   - Are they sequenced early enough that the human won't be blocked late in the build?
+5. **Human Prerequisites Audit**
+   - Are all human-required actions identified and sequenced early?
+   - What will block a human who tries to run this without reading the plan?
 
 **Pass 2 Verdict**: PASS / NEEDS_REVISION
 
@@ -106,15 +105,17 @@ If NEEDS_REVISION: Update `.claude/current-plan.md` to address user-facing gaps 
 
 **Assume the Principal Engineer Persona again.**
 
-Review the plan with all prior feedback incorporated:
+**Final adversarial check**: Has this plan been sufficiently interrogated, or are we approving it to move on?
 
-1. Are we solving the right problem the right way?
-2. Has PM feedback been properly addressed without introducing technical issues?
-3. Is the plan as good as it can get — simple, correct, user-focused, and testable?
-4. Were step ordering issues from Pass 1 addressed? (foundations first, verification checkpoints present, human prerequisites early)
-5. Final sanity check: anything missing or unnecessary?
+1. The hardest question: is this the right approach, or just an approach?
+2. Has PM feedback been addressed without creating new technical problems?
+3. Is there a fundamentally simpler way to deliver the same value that was overlooked?
+4. Step ordering: foundations first, verification checkpoints present, prerequisites early?
+5. What would you be embarrassed about if this shipped as-is?
 
 **Pass 3 Verdict**: APPROVED / NEEDS_REVISION / REJECTED
+
+Only issue APPROVED if you would genuinely stake your reputation on this plan proceeding to build.
 
 ---
 
