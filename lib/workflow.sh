@@ -40,6 +40,42 @@ set -euo pipefail
 __WORKFLOW_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$__WORKFLOW_DIR/common.sh"
 
+# Load project config safely (key=value only, no shell execution)
+load_buildcrew_config() {
+    local config_file=".buildcrew/config"
+    [[ -f "$config_file" ]] || return 0
+
+    local line key value
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        # Skip comments and blank lines
+        [[ "$line" =~ ^[[:space:]]*# ]] && continue
+        [[ "$line" =~ ^[[:space:]]*$ ]] && continue
+        # Match KEY=VALUE (no spaces around =, value unquoted or quoted)
+        if [[ "$line" =~ ^([A-Z_][A-Z0-9_]*)=(.*)$ ]]; then
+            key="${BASH_REMATCH[1]}"
+            value="${BASH_REMATCH[2]}"
+            # Strip surrounding quotes if present
+            value="${value#\"}"
+            value="${value%\"}"
+            value="${value#\'}"
+            value="${value%\'}"
+            case "$key" in
+                MAX_INVOCATIONS)
+                    # Only set if not already defined via env var (env var wins)
+                    if [[ -z "${MAX_INVOCATIONS+x}" ]]; then
+                        if [[ "$value" =~ ^[1-9][0-9]*$ ]] && [[ ${#value} -le 5 ]]; then
+                            MAX_INVOCATIONS="$value"
+                        else
+                            echo "Warning: invalid MAX_INVOCATIONS in .buildcrew/config: $value (ignored)" >&2
+                        fi
+                    fi
+                    ;;
+                # Add future config keys here
+            esac
+        fi
+    done < "$config_file"
+}
+
 # ─────────────────────────────────────────────────────────────────────────────────
 # Configuration
 # ─────────────────────────────────────────────────────────────────────────────────
@@ -49,6 +85,9 @@ STOP_FILE=".buildcrew/.stop-workflow"
 LOCKFILE=".buildcrew/.workflow-lock"
 MAX_TURNS=100
 PAUSE_BETWEEN_TASKS=5
+# 1. Load project config (only sets vars not already in environment)
+load_buildcrew_config
+# 2. Fall back to built-in default if nothing set it
 MAX_INVOCATIONS=${MAX_INVOCATIONS:-15}
 __INVOCATION_COUNT=0
 __RESUME_PHASES=""
@@ -123,6 +162,14 @@ parse_args() {
                 STRICT_MODE=true
                 shift
                 ;;
+            --max-invocations)
+                if [[ -z "${2:-}" ]] || ! [[ "$2" =~ ^[1-9][0-9]*$ ]] || [[ ${#2} -gt 5 ]]; then
+                    echo "Error: --max-invocations requires a positive integer (1-99999, no leading zeros)"
+                    exit 1
+                fi
+                MAX_INVOCATIONS="$2"
+                shift 2
+                ;;
             --help|-h)
                 echo "Usage: $0 [OPTIONS]"
                 echo ""
@@ -135,6 +182,7 @@ parse_args() {
                 echo "  --resume     Resume an interrupted task from where it left off"
                 echo "  --skip-spec  Skip the specification refinement phase (for tasks with detailed specs already)"
                 echo "  --strict     Require ALL acceptance criteria to pass before commit (outcome phase)"
+                echo "  --max-invocations N  Set maximum Claude invocations per run (default: 15)"
                 echo "  --help, -h   Show this help message"
                 exit 0
                 ;;

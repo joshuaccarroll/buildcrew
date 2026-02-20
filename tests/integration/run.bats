@@ -126,3 +126,19 @@ EOF
     [ "$status" -eq 1 ]
     [[ "$output" == *"Unknown option"* ]]
 }
+
+@test "run: --max-invocations flag is accepted" {
+    setup_phase_isolation
+    echo "- [ ] Test task" > BACKLOG.md
+    run "$BUILDCREW_HOME/lib/workflow.sh" --max-invocations 25 --dry-run --single
+    [ "$status" -eq 0 ]
+}
+
+@test "run: .buildcrew/config MAX_INVOCATIONS is loaded" {
+    setup_phase_isolation
+    echo "- [ ] Test task" > BACKLOG.md
+    mkdir -p .buildcrew
+    echo "MAX_INVOCATIONS=25" > .buildcrew/config
+    run "$BUILDCREW_HOME/lib/workflow.sh" --dry-run --single
+    [ "$status" -eq 0 ]
+}

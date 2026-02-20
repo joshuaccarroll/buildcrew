@@ -66,6 +66,7 @@ print_help() {
     echo "    --task N      Target a specific task by name or number (with 'run')"
     echo "    --skip-spec   Skip the specification refinement phase (with 'run')"
     echo "    --strict      Require ALL acceptance criteria to pass before commit (with 'run')"
+    echo "    --max-invocations N  Max Claude invocations per run (default: 15, with 'run')"
     echo ""
     echo -e "${BOLD}GETTING STARTED:${NC}"
     echo -e "    1. Run ${CYAN}buildcrew init${NC} in your project"
@@ -218,6 +219,20 @@ EOF
         echo -e "  ${GREEN}✓${NC} Created .buildcrew/workflow.md.example"
     else
         echo -e "  ${YELLOW}○${NC} Workflow example exists"
+    fi
+
+    # Create config.example if not present
+    if [ ! -f ".buildcrew/config.example" ]; then
+        cat > .buildcrew/config.example << 'EOF'
+# BuildCrew Project Configuration
+# Copy to .buildcrew/config to activate
+
+# Maximum Claude invocations per buildcrew run (default: 15)
+# MAX_INVOCATIONS=15
+EOF
+        echo -e "  ${GREEN}✓${NC} Created .buildcrew/config.example"
+    else
+        echo -e "  ${YELLOW}○${NC} Config example exists"
     fi
 
     # Create project-rules.md.example if not present

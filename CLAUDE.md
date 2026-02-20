@@ -39,6 +39,7 @@ An unknown verdict hits the catch-all and marks the task blocked:
 | `skills/buildcrew-*/SKILL.md` | Per-phase skill prompts |
 | `BACKLOG.md` | Task queue (`- [ ]` pending, `- [x]` done, `- [!]` blocked) |
 | `.buildcrew/lessons.md` | Failure lessons — injected into every phase's context |
+| `.buildcrew/config` | Optional project config (key=value) — overrides defaults for `MAX_INVOCATIONS` etc. |
 | `.buildcrew/` | Runtime state directory (created by workflow, not in git) — lock files, task progress, lessons, norms |
 
 ## Hard Rules
@@ -52,7 +53,7 @@ An unknown verdict hits the catch-all and marks the task blocked:
 - **Run `./test.sh`** after modifying `lib/`, `bin/`, or `tests/`.
 - **Bash 3.2 compatibility** (macOS default): avoid `declare -A`, `declare -n`, `mapfile`.
 - **Circuit breaker threshold = 2.** Consecutive failures at any phase trigger a full re-plan from research (max 1 re-plan per task).
-- **`MAX_INVOCATIONS` ceiling = 15.** Phases abort once this count is reached.
+- **`MAX_INVOCATIONS` ceiling defaults to 15.** Configurable via `.buildcrew/config`, env var, or `--max-invocations N` flag. Phases abort once this count is reached.
 
 ## Testing
 

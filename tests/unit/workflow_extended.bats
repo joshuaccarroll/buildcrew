@@ -951,3 +951,91 @@ EOF
     [ "$status" -eq 1 ]
     [[ "$output" == *"Non-interactive terminal"* ]]
 }
+
+# ─────────────────────────────────────────────────────────────────────────────
+# --max-invocations CLI flag tests
+# ─────────────────────────────────────────────────────────────────────────────
+
+@test "parse_args: --max-invocations flag sets MAX_INVOCATIONS" {
+    parse_args --max-invocations 25
+    [ "$MAX_INVOCATIONS" -eq 25 ]
+}
+
+@test "parse_args: --max-invocations overrides env var" {
+    MAX_INVOCATIONS=10
+    parse_args --max-invocations 25
+    [ "$MAX_INVOCATIONS" -eq 25 ]
+}
+
+@test "parse_args: --max-invocations without value exits with error" {
+    run parse_args --max-invocations
+    [ "$status" -ne 0 ]
+}
+
+@test "parse_args: --max-invocations with non-numeric value exits with error" {
+    run parse_args --max-invocations abc
+    [ "$status" -ne 0 ]
+}
+
+@test "parse_args: --max-invocations 0 exits with error" {
+    run parse_args --max-invocations 0
+    [ "$status" -ne 0 ]
+}
+
+@test "parse_args: --max-invocations with leading zeros exits with error" {
+    run parse_args --max-invocations 007
+    [ "$status" -ne 0 ]
+}
+
+@test "parse_args: --help mentions --max-invocations" {
+    run parse_args --help
+    [[ "$output" == *"--max-invocations"* ]]
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# load_buildcrew_config tests
+# ─────────────────────────────────────────────────────────────────────────────
+
+@test "load_buildcrew_config: sets MAX_INVOCATIONS from config file" {
+    unset MAX_INVOCATIONS
+    mkdir -p .buildcrew
+    echo "MAX_INVOCATIONS=20" > .buildcrew/config
+    load_buildcrew_config
+    [ "$MAX_INVOCATIONS" -eq 20 ]
+}
+
+@test "load_buildcrew_config: env var takes precedence over config file" {
+    mkdir -p .buildcrew
+    echo "MAX_INVOCATIONS=20" > .buildcrew/config
+    MAX_INVOCATIONS=30
+    load_buildcrew_config
+    [ "$MAX_INVOCATIONS" -eq 30 ]
+}
+
+@test "load_buildcrew_config: ignores comments and blank lines" {
+    unset MAX_INVOCATIONS
+    mkdir -p .buildcrew
+    printf '# This is a comment\n\nMAX_INVOCATIONS=20\n' > .buildcrew/config
+    load_buildcrew_config
+    [ "$MAX_INVOCATIONS" -eq 20 ]
+}
+
+@test "load_buildcrew_config: no-op when config file missing" {
+    run load_buildcrew_config
+    [ "$status" -eq 0 ]
+}
+
+@test "load_buildcrew_config: ignores unknown keys" {
+    mkdir -p .buildcrew
+    echo "UNKNOWN_KEY=foo" > .buildcrew/config
+    run load_buildcrew_config
+    [ "$status" -eq 0 ]
+}
+
+@test "load_buildcrew_config: rejects invalid value with warning" {
+    unset MAX_INVOCATIONS
+    mkdir -p .buildcrew
+    echo "MAX_INVOCATIONS=0" > .buildcrew/config
+    load_buildcrew_config 2>/dev/null
+    [ -z "${MAX_INVOCATIONS:-}" ]
+}
