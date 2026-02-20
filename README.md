@@ -164,7 +164,6 @@ Each task runs through **up to 7 isolated Claude invocations** (phase-isolated m
 - **Blocking security** - no commit until vulnerabilities are fixed
 - **Human review** (`--review`) - pause at plan checkpoints for human inspection before proceeding
 - **Feature branches** (`--branch`) - create a branch per task with automatic PR creation
-- **Agent teams** (`--teams`) - experimental mode using Claude Code's agent teams for parallel work
 - **Document Review Protocol** - sub-agent iterative review on all plans (up to 5 iterations or convergence)
 - **Customizable** - modify phases or remove them entirely
 
@@ -245,7 +244,6 @@ buildcrew run --single       # Process one task and stop
 buildcrew run --dry-run      # Preview without executing
 buildcrew run --review       # Pause for human review at plan checkpoints
 buildcrew run --branch       # Create a feature branch per task with PR
-buildcrew run --teams        # Use agent teams mode (experimental)
 buildcrew run --skip-spec    # Skip the spec phase (task already has detailed spec)
 buildcrew run --strict       # Require ALL acceptance criteria to pass before commit
 buildcrew stop               # Stop after current task completes
@@ -264,9 +262,8 @@ buildcrew uninstall          # Remove BuildCrew
 |------|-------------|
 | `--single` | Process one task then exit |
 | `--dry-run` | Preview what would happen without executing |
-| `--review` | Pause after plan creation and after plan review for human inspection. Press Enter to continue, `s` to skip, `q` to quit. Phase-isolated mode only. |
-| `--branch` | Create a `buildcrew/<slug>` feature branch per task. Pushes to remote and creates a PR via `gh` if available. Each task branches independently from the base branch. Phase-isolated mode only. |
-| `--teams` | Use Claude Code's experimental agent teams feature. A team lead coordinates specialist teammates instead of 5 sequential invocations. Requires `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1`. |
+| `--review` | Pause after plan creation and after plan review for human inspection. Press Enter to continue, `s` to skip, `q` to quit. |
+| `--branch` | Create a `buildcrew/<slug>` feature branch per task. Pushes to remote and creates a PR via `gh` if available. Each task branches independently from the base branch. |
 | `--skip-spec` | Skip the Specification Refinement phase (Phase 0). Use when the backlog item already contains a detailed spec with acceptance criteria. |
 | `--strict` | Require ALL acceptance criteria to pass during Outcome Verification before the commit is allowed. Without `--strict`, unmet criteria trigger a warning but don't block the commit. |
 

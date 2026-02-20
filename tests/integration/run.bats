@@ -33,6 +33,7 @@ teardown() {
 }
 
 @test "run: dry-run mode does not mutate backlog" {
+    setup_phase_isolation
     echo "- [ ] Test task" > BACKLOG.md
     run "$BUILDCREW_HOME/lib/workflow.sh" --dry-run --single
     [ "$status" -eq 0 ]
@@ -42,6 +43,7 @@ teardown() {
 }
 
 @test "run: single mode processes only one task" {
+    setup_phase_isolation
     cat > BACKLOG.md << 'EOF'
 - [ ] Task 1
 - [ ] Task 2
@@ -56,6 +58,7 @@ EOF
 }
 
 @test "run: shows backlog status" {
+    setup_phase_isolation
     cat > BACKLOG.md << 'EOF'
 - [ ] Pending 1
 - [ ] Pending 2
@@ -67,6 +70,7 @@ EOF
 }
 
 @test "run: displays workflow complete message" {
+    setup_phase_isolation
     echo "- [ ] Test task" > BACKLOG.md
     run "$BUILDCREW_HOME/lib/workflow.sh" --dry-run --single
     [[ "$output" == *"Workflow Complete"* ]]
@@ -79,29 +83,10 @@ EOF
 }
 
 @test "run: exits with 0 when all tasks processed" {
+    setup_phase_isolation
     echo "- [ ] Only task" > BACKLOG.md
     run "$BUILDCREW_HOME/lib/workflow.sh" --dry-run
     [ "$status" -eq 0 ]
-}
-
-# ─────────────────────────────────────────────────────────────────────────────
-# --teams mode tests
-# ─────────────────────────────────────────────────────────────────────────────
-
-@test "run: --teams without env var fails with error" {
-    unset CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS 2>/dev/null || true
-    echo "- [ ] Test task" > BACKLOG.md
-    run "$BUILDCREW_HOME/lib/workflow.sh" --teams --single
-    [ "$status" -ne 0 ]
-    [[ "$output" == *"CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS"* ]]
-}
-
-@test "run: --teams --dry-run --single succeeds with env var" {
-    export CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1
-    echo "- [ ] Test task" > BACKLOG.md
-    run "$BUILDCREW_HOME/lib/workflow.sh" --teams --dry-run --single
-    [ "$status" -eq 0 ]
-    [[ "$output" == *"agent teams"* ]]
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -109,15 +94,7 @@ EOF
 # ─────────────────────────────────────────────────────────────────────────────
 
 @test "run: --branch --dry-run with phase-isolation mentions branch name" {
-    # Set up phase-isolation structure
-    mkdir -p .claude/skills/buildcrew
-    echo "phase-isolation enabled" > .claude/skills/buildcrew/SKILL.md
-    mkdir -p .claude/skills/buildcrew-research
-    mkdir -p .claude/skills/buildcrew-review
-    mkdir -p .claude/skills/buildcrew-build
-    mkdir -p .claude/skills/buildcrew-test
-    mkdir -p .claude/skills/buildcrew-verify
-
+    setup_phase_isolation
     echo "- [ ] Test task" > BACKLOG.md
 
     # Initialize git repo (required for --branch)
@@ -133,12 +110,11 @@ EOF
     [[ "$output" == *"buildcrew/"* ]]
 }
 
-@test "run: --branch --dry-run without phase-isolation warns and disables" {
+@test "run: exits with error when phase-isolation is not installed" {
     echo "- [ ] Test task" > BACKLOG.md
-    run "$BUILDCREW_HOME/lib/workflow.sh" --branch --dry-run --single
-    [ "$status" -eq 0 ]
-    [[ "$output" == *"--branch requires phase-isolated mode"* ]]
-    [[ "$output" != *"buildcrew/"* ]]
+    run "$BUILDCREW_HOME/lib/workflow.sh" --dry-run --single
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"buildcrew init"* ]]
 }
 
 # ─────────────────────────────────────────────────────────────────────────────

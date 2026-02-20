@@ -167,18 +167,12 @@ teardown() {
     [ "$GIT_BRANCH" = "true" ]
 }
 
-@test "parse_args: --teams sets USE_TEAMS=true" {
-    parse_args --teams
-    [ "$USE_TEAMS" = "true" ]
-}
-
 @test "parse_args: multiple flags combined" {
-    parse_args --dry-run --single --review --branch --teams
+    parse_args --dry-run --single --review --branch
     [ "$DRY_RUN" = "true" ]
     [ "$SINGLE_TASK" = "true" ]
     [ "$HUMAN_REVIEW" = "true" ]
     [ "$GIT_BRANCH" = "true" ]
-    [ "$USE_TEAMS" = "true" ]
 }
 
 @test "parse_args: no args preserves defaults" {
@@ -187,7 +181,6 @@ teardown() {
     [ "$SINGLE_TASK" = "false" ]
     [ "$HUMAN_REVIEW" = "false" ]
     [ "$GIT_BRANCH" = "false" ]
-    [ "$USE_TEAMS" = "false" ]
 }
 
 @test "parse_args: --help exits 0" {

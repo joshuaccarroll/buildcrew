@@ -64,7 +64,6 @@ print_help() {
     echo "    --branch      Create a feature branch per task with optional PR (with 'run')"
     echo "    --resume      Resume an interrupted task from where it left off (with 'run')"
     echo "    --task N      Target a specific task by name or number (with 'run')"
-    echo "    --teams       Use agent teams mode — experimental (with 'run')"
     echo "    --skip-spec   Skip the specification refinement phase (with 'run')"
     echo "    --strict      Require ALL acceptance criteria to pass before commit (with 'run')"
     echo ""

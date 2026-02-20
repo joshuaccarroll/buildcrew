@@ -58,6 +58,17 @@ EOF
     export PATH="$TEST_DIR/bin:$PATH"
 }
 
+# Helper to create the phase-isolation directory structure required by workflow.sh
+setup_phase_isolation() {
+    mkdir -p .claude/skills/buildcrew
+    echo "phase-isolation enabled" > .claude/skills/buildcrew/SKILL.md
+    mkdir -p .claude/skills/buildcrew-research
+    mkdir -p .claude/skills/buildcrew-review
+    mkdir -p .claude/skills/buildcrew-build
+    mkdir -p .claude/skills/buildcrew-test
+    mkdir -p .claude/skills/buildcrew-verify
+}
+
 # Helper to create a test backlog
 create_backlog() {
     local content="$1"

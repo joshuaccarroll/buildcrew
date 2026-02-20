@@ -16,9 +16,6 @@
 #   4.5. Outcome Verification (validates against spec acceptance criteria)
 #   5. Verify + Security Audit + Commit + Signal
 #
-# Legacy mode (single Claude invocation with all phases):
-#   Plan → Plan Review → Build → Code Review → Test → Commit
-#
 # Usage:
 #   buildcrew run              # Run in foreground (visible terminal)
 #   buildcrew run --dry-run    # Show what would be done without executing
@@ -84,7 +81,6 @@ TARGET_TASK=""
 ORIGINAL_BRANCH=""
 HAS_REMOTE=false
 GH_AVAILABLE=false
-USE_TEAMS=false
 SKIP_SPEC=false
 STRICT_MODE=false
 
@@ -119,10 +115,6 @@ parse_args() {
                 TARGET_TASK="$2"
                 shift 2
                 ;;
-            --teams)
-                USE_TEAMS=true
-                shift
-                ;;
             --skip-spec)
                 SKIP_SPEC=true
                 shift
@@ -137,11 +129,10 @@ parse_args() {
                 echo "Options:"
                 echo "  --dry-run    Show what would be done without executing"
                 echo "  --single     Process only one task then exit"
-                echo "  --review     Pause for human review after plan and plan review (phase-isolated mode only)"
-                echo "  --branch     Create a feature branch per task with optional PR (phase-isolated mode only)"
+                echo "  --review     Pause for human review after plan and plan review"
+                echo "  --branch     Create a feature branch per task with optional PR"
                 echo "  --task NAME  Target a specific task by name or number (implies --single)"
-                echo "  --resume     Resume an interrupted task from where it left off (phase-isolated mode only)"
-                echo "  --teams      Use agent teams mode (experimental, requires CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1)"
+                echo "  --resume     Resume an interrupted task from where it left off"
                 echo "  --skip-spec  Skip the specification refinement phase (for tasks with detailed specs already)"
                 echo "  --strict     Require ALL acceptance criteria to pass before commit (outcome phase)"
                 echo "  --help, -h   Show this help message"
@@ -770,7 +761,7 @@ _summarize_old_lessons() {
 # ─────────────────────────────────────────────────────────────────────────────────
 
 # Detection checks TWO things:
-# 1. The legacy SKILL.md has the phase-isolation marker (confirming buildcrew is updated)
+# 1. The buildcrew SKILL.md has the phase-isolation marker (confirming buildcrew is updated)
 # 2. The phase-specific skill directories exist (confirming the split files are available)
 is_phase_isolation_available() {
     local skill_file
@@ -1370,64 +1361,6 @@ process_task_isolated() {
 }
 
 # ─────────────────────────────────────────────────────────────────────────────────
-# Legacy Mode: process_task_legacy (single Claude invocation, all phases)
-# ─────────────────────────────────────────────────────────────────────────────────
-
-process_task_legacy() {
-    local task="$1"
-
-    print_info "Running in legacy mode (single invocation)"
-
-    # Clear previous status file
-    rm -f "$STATUS_FILE"
-
-    # Run Claude with the workflow skill
-    print_info "Launching Claude Code..."
-
-    # Start file monitor
-    start_file_monitor "$STATUS_FILE" "claude.*Execute the buildcrew skill"
-
-    # Build prompt with optional project context
-    local prompt="Execute the buildcrew skill for this task: $task"
-    local project_context
-    project_context=$(load_project_context)
-    if [[ -n "$project_context" ]]; then
-        prompt="$prompt"$'\n\nProject Context:\n'"$project_context"
-    fi
-
-    # Run Claude (monitor will terminate it when status file appears)
-    claude -p "$prompt" \
-        --max-turns "$MAX_TURNS" || true
-
-    stop_file_monitor
-
-    # Check completion status
-    if parse_status_file "$STATUS_FILE"; then
-        case "$__STATUS_RESULT" in
-            complete)
-                mark_task_complete "$task"
-                print_success "Completed: $task"
-                print_info "Summary: $__STATUS_SUMMARY"
-                ;;
-            blocked)
-                mark_task_blocked "$task" "$__STATUS_REASON"
-                print_warning "Blocked: $task"
-                print_warning "Reason: $__STATUS_REASON"
-                return 1
-                ;;
-        esac
-    else
-        case "$__STATUS_RESULT" in
-            error)
-                print_error "$__STATUS_REASON"
-                mark_task_blocked "$task" "$__STATUS_REASON"
-                return 1
-                ;;
-        esac
-    fi
-}
-
-# ─────────────────────────────────────────────────────────────────────────────────
 # Main workflow
 # ─────────────────────────────────────────────────────────────────────────────────
 
@@ -1458,48 +1391,15 @@ main() {
     print_header "BuildCrew - Autonomous Development Pipeline"
     print_info "To stop after the current task: buildcrew stop"
 
-    # Detect mode (teams > phase-isolated > legacy)
-    local use_isolation=false
-    local use_teams=false
-    if [[ "$USE_TEAMS" == "true" ]]; then
-        # Source teams module
-        source "$__WORKFLOW_DIR/teams.sh"
-
-        if ! check_teams_prerequisites; then
-            exit 1
-        fi
-        use_teams=true
-        print_info "Mode: Agent Teams (experimental)"
-        print_warning "Agent teams is experimental. Token usage will be higher than phase-isolated mode."
-        if [[ "$HUMAN_REVIEW" == "true" ]]; then
-            print_warning "--review is not yet supported with --teams (team lead manages workflow internally). Ignoring."
-            HUMAN_REVIEW=false
-        fi
-    elif is_phase_isolation_available; then
-        use_isolation=true
-        local _phase_count=5
-        [[ "$SKIP_SPEC" != "true" ]] && [[ -d ".claude/skills/buildcrew-spec" ]] && _phase_count=$((_phase_count + 1))
-        [[ -d ".claude/skills/buildcrew-outcome" ]] && _phase_count=$((_phase_count + 1))
-        print_info "Mode: Phase-isolated ($_phase_count invocations per task)"
-    else
-        print_info "Mode: Legacy (single invocation per task)"
-        if [[ "$HUMAN_REVIEW" == "true" ]]; then
-            print_warning "--review requires phase-isolated mode (no phase boundaries in legacy mode). Ignoring."
-            HUMAN_REVIEW=false
-        fi
-        if [[ "$GIT_BRANCH" == "true" ]]; then
-            print_warning "--branch requires phase-isolated mode (no phase boundaries in legacy mode). Ignoring."
-            GIT_BRANCH=false
-        fi
-        if [[ "$RESUME_MODE" == "true" ]]; then
-            print_warning "--resume requires phase-isolated mode (no phase boundaries in legacy mode). Ignoring."
-            RESUME_MODE=false
-        fi
-        if [[ "$USE_TEAMS" == "true" ]]; then
-            print_warning "--teams requires phase-isolated mode. Ignoring."
-            USE_TEAMS=false
-        fi
+    # Require phase-isolated skills (installed via buildcrew init)
+    if ! is_phase_isolation_available; then
+        error "Phase-isolated skills not found. Run 'buildcrew init' to install them."
     fi
+
+    local _phase_count=5
+    [[ "$SKIP_SPEC" != "true" ]] && [[ -d ".claude/skills/buildcrew-spec" ]] && _phase_count=$((_phase_count + 1))
+    [[ -d ".claude/skills/buildcrew-outcome" ]] && _phase_count=$((_phase_count + 1))
+    print_info "Mode: Phase-isolated ($_phase_count invocations per task)"
 
     # Git branch setup
     if [[ "$GIT_BRANCH" == "true" ]]; then
@@ -1596,25 +1496,19 @@ main() {
             if [[ "$GIT_BRANCH" == "true" ]]; then
                 print_info "[DRY RUN] Would create branch: $(task_to_branch_name "$task")"
             fi
-            if [[ "$use_teams" == "true" ]]; then
-                print_info "[DRY RUN] Would launch agent teams for: $task"
-            elif [[ "$use_isolation" == "true" ]]; then
-                if [[ "$RESUME_MODE" == "true" ]] && [[ -f "$PROGRESS_FILE" ]]; then
-                    local skip_phases
-                    skip_phases=$(jq -r '.completed_phases // [] | join(", ")' "$PROGRESS_FILE" 2>/dev/null)
-                    print_info "[DRY RUN] Would resume task, skipping phases: ${skip_phases:-none}"
-                else
-                    local phase_list="research review build test verify"
-                    if [[ "$SKIP_SPEC" != "true" ]]; then
-                        phase_list="spec $phase_list"
-                    fi
-                    if [[ -d ".claude/skills/buildcrew-outcome" ]]; then
-                        phase_list="${phase_list/test verify/test outcome verify}"
-                    fi
-                    print_info "[DRY RUN] Would execute phases: $phase_list"
-                fi
+            if [[ "$RESUME_MODE" == "true" ]] && [[ -f "$PROGRESS_FILE" ]]; then
+                local skip_phases
+                skip_phases=$(jq -r '.completed_phases // [] | join(", ")' "$PROGRESS_FILE" 2>/dev/null)
+                print_info "[DRY RUN] Would resume task, skipping phases: ${skip_phases:-none}"
             else
-                print_info "[DRY RUN] Would execute: claude -p \"Execute the buildcrew skill for this task: $task\""
+                local phase_list="research review build test verify"
+                if [[ "$SKIP_SPEC" != "true" ]]; then
+                    phase_list="spec $phase_list"
+                fi
+                if [[ -d ".claude/skills/buildcrew-outcome" ]]; then
+                    phase_list="${phase_list/test verify/test outcome verify}"
+                fi
+                print_info "[DRY RUN] Would execute phases: $phase_list"
             fi
             print_info "[DRY RUN] Would mark complete: $task"
             ((completed++))
@@ -1634,24 +1528,10 @@ main() {
 
             # Run the appropriate processor
             local task_result=0
-            if [[ "$use_teams" == "true" ]]; then
-                if process_task_teams "$task"; then
-                    task_result=0
-                else
-                    task_result=1
-                fi
-            elif [[ "$use_isolation" == "true" ]]; then
-                if process_task_isolated "$task"; then
-                    task_result=0
-                else
-                    task_result=1
-                fi
+            if process_task_isolated "$task"; then
+                task_result=0
             else
-                if process_task_legacy "$task"; then
-                    task_result=0
-                else
-                    task_result=1
-                fi
+                task_result=1
             fi
 
             if [[ $task_result -eq 0 ]]; then
