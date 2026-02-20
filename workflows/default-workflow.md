@@ -4,8 +4,6 @@ This is the default workflow for BuildCrew. Projects can customize this by creat
 
 ---
 
-> **Note**: Norms analysis is NOT a workflow phase. It is a separate, optional step. Do not auto-trigger norms from within the workflow. If `.buildcrew/norms/` exists, phases may read from it; if not, proceed without it.
-
 ## Phases
 
 ### SPEC (optional)

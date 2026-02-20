@@ -3,7 +3,7 @@ name: buildcrew
 description: Invoke a BuildCrew persona for ad-hoc tasks
 arguments:
   - name: persona
-    description: "Persona to invoke: principal-engineer, feature-engineer, security-engineer, qa-engineer, product-manager, ux-designer, norms"
+    description: "Persona to invoke: principal-engineer, feature-engineer, security-engineer, qa-engineer, product-manager, ux-designer"
     required: true
 ---
 
@@ -21,7 +21,6 @@ You are invoking a BuildCrew expert persona for an ad-hoc task.
 | `qa-engineer` | Testing, quality assurance | Test planning, writing tests, coverage |
 | `product-manager` | Requirements, prioritization | Project discovery, scoping, planning |
 | `ux-designer` | UI/UX, accessibility | Design specs, user flows, visual design |
-| `norms` | Codebase analysis | Generate/regenerate coding norms from codebase and git history |
 
 ## Invocation
 
@@ -53,12 +52,6 @@ Start the interactive discovery process for a new project.
 Use the Task tool to launch the `ux-designer` agent.
 Start the interactive design discovery process.
 
-### If persona is `norms`:
-Generate team coding conventions from codebase analysis. This creates `.buildcrew/norms/`.
-
-1. If `.buildcrew/norms/NORMS.md` already exists, warn the user it will be overwritten and ask to confirm before proceeding. If declined: respond with "Norms analysis skipped." and **stop -- do not ask follow-up questions, do not suggest alternatives.**
-2. Invoke the `buildcrew-norms` skill directly (no Task sub-agent needed).
-
 ## Example Usage
 
 ```
@@ -70,9 +63,6 @@ Generate team coding conventions from codebase analysis. This creates `.buildcre
 
 /buildcrew principal-engineer
 → Initiates code or plan review
-
-/buildcrew norms
-→ Generates coding norms from codebase analysis
 ```
 
 ## Important

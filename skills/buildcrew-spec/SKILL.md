@@ -62,7 +62,6 @@ Before writing the spec:
 
 1. **Read the codebase** (lightly): Understand what already exists relevant to this task. Use Glob/Grep to find related files.
 2. **Read project context**: Check `.buildcrew/context/principles.md`, `.buildcrew/context/users.md`, and `.buildcrew/context/domain.md` if they exist.
-3. **Check norms**: If `.buildcrew/norms/` exists, check `NORMS.md` for relevant patterns.
 
 ### Step 3: Write the Specification
 

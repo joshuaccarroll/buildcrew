@@ -40,7 +40,7 @@ An unknown verdict hits the catch-all and marks the task blocked:
 | `BACKLOG.md` | Task queue (`- [ ]` pending, `- [x]` done, `- [!]` blocked) |
 | `.buildcrew/lessons.md` | Failure lessons — injected into every phase's context |
 | `.buildcrew/config` | Optional project config (key=value) — overrides defaults for `MAX_INVOCATIONS` etc. |
-| `.buildcrew/` | Runtime state directory (created by workflow, not in git) — lock files, task progress, lessons, norms |
+| `.buildcrew/` | Runtime state directory (created by workflow, not in git) — lock files, task progress, lessons |
 
 ## Hard Rules
 
@@ -48,7 +48,6 @@ An unknown verdict hits the catch-all and marks the task blocked:
 
 **YOU MUST NOT set shell options** (`set -e`, `set -u`, `set -o pipefail`) in `lib/common.sh` — callers have conflicting requirements.
 
-- **Norms never auto-trigger from skills.** The norms skill runs once at workflow startup only.
 - **No branch operations in skills.** Git branching is orchestrated by `workflow.sh`; skills only commit.
 - **Run `./test.sh`** after modifying `lib/`, `bin/`, or `tests/`.
 - **Bash 3.2 compatibility** (macOS default): avoid `declare -A`, `declare -n`, `mapfile`.
@@ -74,7 +73,6 @@ When context is compacted, always preserve:
 
 ## Phase Sequence
 
-0. **norms** — Analyze codebase conventions (runs once at startup, not per-task)
 1. **spec** — Refine task into acceptance criteria (skipped with `--skip-spec`)
 2. **research** — Explore codebase, write implementation plan
 3. **review** — 3-pass adversarial plan review

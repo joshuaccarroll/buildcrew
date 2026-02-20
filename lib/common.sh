@@ -108,10 +108,6 @@ load_project_context() {
             project_context+="$(cat "$ctx_file")"$'\n\n'
         fi
     done
-    # Load norms index (if generated)
-    if [[ -f ".buildcrew/norms/NORMS.md" ]]; then
-        project_context+="$(cat ".buildcrew/norms/NORMS.md")"$'\n\n'
-    fi
     # Load lessons (Change 2: Self-Improvement Loop)
     if [[ -f ".buildcrew/lessons.md" ]]; then
         project_context+="$(cat ".buildcrew/lessons.md")"$'\n\n'

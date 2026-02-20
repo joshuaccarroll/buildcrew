@@ -41,7 +41,6 @@ Read `.claude/current-plan.md` and interrogate it against:
 2. **Architecture Fit** — What's the most serious architectural risk here?
    - Does this align with existing architecture, or does it fight it?
    - Will this create technical debt that will cost 3x to unwind?
-   - If `.buildcrew/norms/patterns.md` exists, read it — what pattern does this plan violate?
 
 3. **Simplicity Check** — What's the most unnecessary thing in this plan?
    - What would you cut if you had to ship in half the time?

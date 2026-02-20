@@ -113,7 +113,6 @@ cmd_init() {
 
     # Create .buildcrew directory for project-specific overrides
     mkdir -p .buildcrew/rules
-    mkdir -p .buildcrew/norms
 
     # Create workflow.md.example if not present
     if [ ! -f ".buildcrew/workflow.md.example" ]; then
@@ -690,18 +689,15 @@ EOF
     echo -e "  • ${CYAN}.claude/skills${NC} - BuildCrew skills (builder, personas)"
     echo -e "  • ${CYAN}.claude/settings.json${NC} - Permissions for Claude Code"
     echo -e "  • ${CYAN}.buildcrew/${NC} - Directory for project-specific customization"
-    echo -e "  • ${CYAN}.buildcrew/norms/${NC} - Auto-generated codebase conventions (run /buildcrew norms)"
     echo -e "  • ${CYAN}BACKLOG.md${NC} - Your task backlog"
     echo ""
     echo -e "${BOLD}Optional customization:${NC}"
     echo -e "  • Copy ${CYAN}.buildcrew/workflow.md.example${NC} to ${CYAN}workflow.md${NC} to customize phases"
     echo -e "  • Copy ${CYAN}.buildcrew/rules/project-rules.md.example${NC} to add project rules"
-    echo -e "  ${CYAN}Tip:${NC} Add .buildcrew/norms/ to .gitignore for per-dev norms, or commit for shared team norms"
     echo ""
     echo -e "${BOLD}Next steps:${NC}"
     echo -e "  1. Run ${CYAN}buildcrew run${NC} to start"
     echo -e "  2. Use ${CYAN}/buildcrew <persona>${NC} to invoke a persona ad-hoc"
-    echo -e "  3. Use ${CYAN}/buildcrew norms${NC} to analyze existing codebase conventions"
     echo ""
 }
 
