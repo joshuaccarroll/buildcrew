@@ -281,6 +281,16 @@ teardown() {
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
+# handle_spec_review early-return path tests
+# ─────────────────────────────────────────────────────────────────────────────
+
+@test "handle_spec_review: returns 0 with warning when non-interactive" {
+    run handle_spec_review "my task" "3"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Non-interactive terminal"* ]]
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
 # save_original_branch / ensure_clean_worktree tests
 # ─────────────────────────────────────────────────────────────────────────────
 

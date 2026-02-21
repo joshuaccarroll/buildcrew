@@ -8,6 +8,9 @@ allowed-tools: Read, Write, Edit, Glob, Grep, Bash, Task
 
 `[Phase: spec | Input: task description | Output: .claude/spec.md | Next: RESEARCH]`
 
+> **Context budget**: This spec is read by every subsequent phase. Keep it under 200 lines.
+> If it's getting long, the task scope is probably too large — revisit "Out of Scope."
+
 You are executing the spec phase of the BuildCrew autonomous development workflow.
 
 ## Your Task
@@ -35,6 +38,7 @@ Before writing anything, assess whether this task is specific enough to produce 
 - Task is purely aspirational with no concrete behavior described (e.g., "improve performance")
 - Task refers to undefined external artifacts (e.g., "implement the thing we discussed")
 - Task is ambiguous enough that 2 engineers would build completely different features
+- Task describes multiple unrelated outcomes (e.g., "add login AND redesign the dashboard") — recommend splitting into separate backlog items, each with its own spec
 
 If the task is **insufficient**, write `.claude/spec.md` with a `VAGUE` verdict:
 
@@ -65,12 +69,15 @@ Before writing the spec:
 
 ### Step 3: Write the Specification
 
-Write a concise spec to `.claude/spec.md`. The spec must answer these four questions:
+Write a concise spec to `.claude/spec.md`. The spec must answer these five questions:
 
 1. **What exact behavior should exist when this is done?**
 2. **What does "done" look like from the user's perspective?**
 3. **What should explicitly NOT be built?** (scope boundaries)
 4. **Testable acceptance criteria** — concrete pass/fail checks, not vague goals
+5. **The One Thing**: What is the single primary deliverable? State it in one sentence.
+   If the sentence requires "and" to connect unrelated deliverables, the scope is too large.
+   Note the split in "Out of Scope" and recommend creating a separate task.
 
 Keep the spec focused and brief. No rigid template with dozens of fields — just a simple markdown document structured around these four answers.
 
@@ -79,24 +86,22 @@ Keep the spec focused and brief. No rigid template with dozens of fields — jus
 ```markdown
 # Specification: [Task Title]
 
-## What It Does
-[1-3 sentences describing the exact behavior that will exist when done. Be specific about inputs, outputs, triggers, and state changes.]
+## Summary
+[1-3 sentences. Exact behavior when done. Inputs, outputs, triggers, state changes.]
 
-## Done From the User's Perspective
-[Walk through the user's experience: "When a user does X, they see/get Y. They can now Z."]
+## User Experience
+[One short paragraph. "When a user does X, they see Y. They can now Z."]
 
 ## Out of Scope
-[Explicitly list what is NOT being built. This prevents scope creep during build.]
-- [Thing that might be assumed but isn't included]
-- [Related feature that belongs in a separate task]
+- [NOT being built]
+- [Belongs in a separate task]
+
+**This task delivers**: [one sentence — the single primary deliverable]
 
 ## Acceptance Criteria
-
-Each criterion below is a concrete, binary pass/fail check. The QA Engineer will validate each one.
-
-- [ ] AC-01: [Specific, verifiable condition — what to check and what the expected result is]
-- [ ] AC-02: [Another specific verifiable condition]
-- [ ] AC-03: [Edge case or boundary condition]
+- [ ] AC-01: [Specific, verifiable condition]
+- [ ] AC-02: [Another verifiable condition]
+- [ ] AC-03: [Edge case or error condition]
 ```
 
 ### Acceptance Criteria Writing Rules
@@ -113,24 +118,48 @@ Each criterion below is a concrete, binary pass/fail check. The QA Engineer will
 
 **Minimum**: 2 acceptance criteria. **Maximum**: 8 (if you need more, the task scope is too large — note this in Out of Scope).
 
-### Step 4: Review the Spec
+### Formatting Norms
 
-After writing `.claude/spec.md`, spawn a Task sub-agent (general-purpose type) with this prompt:
+- **No narrative**: Use bullet points and short sentences. Specs are reference documents.
+- **No repeated context**: Do not restate the task description. The task is already known.
+- **One behavior per AC**: Do not combine checks. "Login works and redirects" is two ACs.
+- **ACs are the contract**: If a behavior matters, it must be in an AC. If it's not in an AC,
+  it will not be verified at outcome time.
+- **Tables over prose**: For multi-step behaviors or comparisons, use a table.
+
+### Step 4: Iterative Spec Review (up to 5 iterations)
+
+Run iterative sub-agent review until convergence:
 
 ```
-Read .claude/spec.md. Review it critically as if you are a QA engineer seeing this spec for the first time.
+iteration = 0
+while iteration < 5:
+    Spawn a Task sub-agent (general-purpose) with this prompt:
 
-Check for:
-- Are the acceptance criteria actually testable as written? Could an automated test or manual check definitively pass or fail each one?
-- Is anything in "What It Does" vague enough to be interpreted two different ways?
-- Does "Out of Scope" cover the most likely scope-creep risks?
-- Are there obvious edge cases or error conditions missing from acceptance criteria?
+    "Read .claude/spec.md. You are a QA engineer reviewing this spec for the first time.
 
-Make concrete improvements directly to the file. If an AC is untestable, rewrite it to be testable.
+    Apply the contractor test: Could a capable contractor in a different timezone
+    build this correctly without asking a single question? If the answer is no for
+    any acceptance criterion, rewrite it until the answer is yes.
 
-If the spec is solid and no meaningful improvements can be made, respond with exactly: CONVERGED
+    Also check:
+    - Are all ACs binary pass/fail? Could a test definitively pass or fail each one?
+    - Is anything in the description vague enough to be interpreted two different ways?
+    - Does 'Out of Scope' cover the most likely scope-creep risks?
+    - Are there obvious edge cases or error conditions missing from ACs?
+    - Is each AC specific about inputs, outputs, commands, and expected results?
+    - Is the spec under 200 lines total? Prefer concise, testable ACs over exhaustive prose.
 
-Do not explain what you reviewed. Either improve the file or respond CONVERGED.
+    Make concrete improvements directly to the file.
+
+    If the spec passes the contractor test and no meaningful improvements remain,
+    respond with exactly: CONVERGED
+
+    Do not explain what you reviewed. Improve the file or respond CONVERGED."
+
+    if sub-agent output contains "CONVERGED":
+        break
+    iteration += 1
 ```
 
 ---
