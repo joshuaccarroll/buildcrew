@@ -65,6 +65,7 @@ setup_phase_isolation() {
     mkdir -p .claude/skills/buildcrew-research
     mkdir -p .claude/skills/buildcrew-review
     mkdir -p .claude/skills/buildcrew-build
+    mkdir -p .claude/skills/buildcrew-codereview
     mkdir -p .claude/skills/buildcrew-test
     mkdir -p .claude/skills/buildcrew-verify
 }
