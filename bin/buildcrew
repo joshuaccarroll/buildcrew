@@ -48,6 +48,7 @@ print_help() {
     echo "    status           Show backlog stats and last workflow result"
     echo "    stop             Stop workflow after current task completes"
     echo "    reset            Clear blocked tasks and clean up artifacts"
+    echo "    repair           Check (and optionally fix) installation health"
     echo "    lessons          List recorded lessons"
     echo "    lessons promote  Graduate a lesson to permanent project rules"
     echo "    lessons prune    Interactively remove stale lessons"
@@ -65,7 +66,8 @@ print_help() {
     echo "    --resume      Resume an interrupted task from where it left off (with 'run')"
     echo "    --task N      Target a specific task by name or number (with 'run')"
     echo "    --skip-spec   Skip the specification refinement phase (with 'run')"
-    echo "    --strict      Require ALL acceptance criteria to pass before commit (with 'run')"
+    echo "    --strict      (default) Require ALL acceptance criteria to pass before commit (with 'run')"
+    echo "    --no-strict   Allow partial acceptance criteria pass — proceed with warnings (with 'run')"
     echo "    --max-invocations N  Max Claude invocations per run (default: 15, with 'run')"
     echo "    --verbose     Show orchestrator decisions, phase verdicts, and invocation counts"
     echo "    --debug       Alias for --verbose"
@@ -1046,6 +1048,586 @@ cmd_reset() {
     echo ""
 }
 
+# _repair_check_skills <fix_mode> <interactive> <stored_home>
+# Inspects .claude/skills/ — either as a symlink or as a real directory containing per-skill entries.
+# Reads and mutates __REPAIR_ISSUES, __REPAIR_REMAINING, __REPAIR_SKIPPED_PROMPTED globals.
+_repair_check_skills() {
+    local fix_mode="$1"
+    local interactive="$2"
+    local stored_home="$3"
+
+    local skills_dir=".claude/skills"
+
+    # Determine the state of .claude/skills itself
+    if [ ! -L "$skills_dir" ] && [ ! -e "$skills_dir" ]; then
+        # Missing — safe auto-fix
+        __REPAIR_ISSUES=$((__REPAIR_ISSUES + 1))
+        echo -e "  ${YELLOW}⚠${NC} .claude/skills — missing"
+        if [[ "$fix_mode" == "true" ]]; then
+            ln -s "$stored_home/skills" "$skills_dir" || true
+            if [ -L "$skills_dir" ]; then
+                echo -e "    → Created symlink to $stored_home/skills"
+            else
+                echo -e "    ${RED}✗${NC} Failed to create symlink — check permissions"
+                __REPAIR_REMAINING=$((__REPAIR_REMAINING + 1))
+            fi
+        else
+            __REPAIR_REMAINING=$((__REPAIR_REMAINING + 1))
+        fi
+        return
+    fi
+
+    if [ -L "$skills_dir" ]; then
+        local link_target
+        link_target="$(readlink "$skills_dir")"
+        if [ ! -e "$skills_dir" ]; then
+            # Broken symlink
+            __REPAIR_ISSUES=$((__REPAIR_ISSUES + 1))
+            echo -e "  ${YELLOW}⚠${NC} .claude/skills — broken symlink → $link_target"
+            if [[ "$fix_mode" == "true" ]]; then
+                if [[ "$interactive" == "true" ]]; then
+                    printf "    Replace with symlink to %s? [y/N] " "$stored_home/skills"
+                    read -r answer
+                    if [[ "$answer" == "y" || "$answer" == "Y" ]]; then
+                        rm -f "$skills_dir"
+                        ln -s "$stored_home/skills" "$skills_dir" || true
+                        if [ -L "$skills_dir" ]; then
+                            echo -e "    ${GREEN}✓${NC} Fixed"
+                        else
+                            echo -e "    ${RED}✗${NC} Failed to create symlink — check permissions"
+                            __REPAIR_REMAINING=$((__REPAIR_REMAINING + 1))
+                        fi
+                    else
+                        __REPAIR_REMAINING=$((__REPAIR_REMAINING + 1))
+                    fi
+                else
+                    __REPAIR_SKIPPED_PROMPTED=$((__REPAIR_SKIPPED_PROMPTED + 1))
+                    __REPAIR_REMAINING=$((__REPAIR_REMAINING + 1))
+                    echo -e "    → Skipped (non-interactive — run \`buildcrew repair --fix\` in a terminal)"
+                fi
+            else
+                __REPAIR_REMAINING=$((__REPAIR_REMAINING + 1))
+            fi
+        else
+            # Symlink exists and resolves — check target
+            local expected="${stored_home}/skills"
+            local norm_link="${link_target%/}"
+            local norm_expected="${expected%/}"
+            if [[ "$norm_link" != "$norm_expected" ]]; then
+                __REPAIR_ISSUES=$((__REPAIR_ISSUES + 1))
+                echo -e "  ${YELLOW}⚠${NC} .claude/skills — symlink to wrong target"
+                echo -e "    Current:  $link_target"
+                echo -e "    Proposed: $expected"
+                if [[ "$fix_mode" == "true" ]]; then
+                    if [[ "$interactive" == "true" ]]; then
+                        printf "    Repoint symlink? [y/N] "
+                        read -r answer
+                        if [[ "$answer" == "y" || "$answer" == "Y" ]]; then
+                            rm -f "$skills_dir"
+                            ln -s "$expected" "$skills_dir" || true
+                            if [ -L "$skills_dir" ]; then
+                                echo -e "    ${GREEN}✓${NC} Fixed"
+                            else
+                                echo -e "    ${RED}✗${NC} Failed to create symlink — check permissions"
+                                __REPAIR_REMAINING=$((__REPAIR_REMAINING + 1))
+                            fi
+                        else
+                            __REPAIR_REMAINING=$((__REPAIR_REMAINING + 1))
+                        fi
+                    else
+                        __REPAIR_SKIPPED_PROMPTED=$((__REPAIR_SKIPPED_PROMPTED + 1))
+                        __REPAIR_REMAINING=$((__REPAIR_REMAINING + 1))
+                        echo -e "    → Skipped (non-interactive — run \`buildcrew repair --fix\` in a terminal)"
+                    fi
+                else
+                    __REPAIR_REMAINING=$((__REPAIR_REMAINING + 1))
+                fi
+            else
+                echo -e "  ${GREEN}✓${NC} .claude/skills — symlink OK"
+            fi
+        fi
+        return
+    fi
+
+    # .claude/skills is a real directory — inspect per-skill entries
+    # Guard: verify the source skills directory exists
+    if [ ! -d "$BUILDCREW_HOME/skills" ]; then
+        echo -e "  ${YELLOW}⚠${NC} $BUILDCREW_HOME/skills — directory missing (broken installation)"
+        __REPAIR_ISSUES=$((__REPAIR_ISSUES + 1))
+        __REPAIR_REMAINING=$((__REPAIR_REMAINING + 1))
+        return
+    fi
+
+    local had_skill_issues=false
+    local skill_path skill_name dest link_target expected norm_link norm_expected
+
+    for skill_path in "$BUILDCREW_HOME/skills"/*/; do
+        [ -d "$skill_path" ] || continue
+        skill_name="$(basename "$skill_path")"
+        dest="$skills_dir/$skill_name"
+        expected="$BUILDCREW_HOME/skills/$skill_name"
+
+        if [ ! -L "$dest" ] && [ ! -e "$dest" ]; then
+            # Missing — safe auto-fix
+            __REPAIR_ISSUES=$((__REPAIR_ISSUES + 1))
+            had_skill_issues=true
+            echo -e "  ${YELLOW}⚠${NC} .claude/skills/$skill_name — missing"
+            if [[ "$fix_mode" == "true" ]]; then
+                ln -s "$expected" "$dest" || true
+                if [ -L "$dest" ]; then
+                    echo -e "    → Created symlink to $expected"
+                else
+                    echo -e "    ${RED}✗${NC} Failed to create symlink — check permissions"
+                    __REPAIR_REMAINING=$((__REPAIR_REMAINING + 1))
+                fi
+            else
+                __REPAIR_REMAINING=$((__REPAIR_REMAINING + 1))
+            fi
+        elif [ -L "$dest" ]; then
+            link_target="$(readlink "$dest")"
+            if [ ! -e "$dest" ]; then
+                # Broken symlink
+                __REPAIR_ISSUES=$((__REPAIR_ISSUES + 1))
+                had_skill_issues=true
+                echo -e "  ${YELLOW}⚠${NC} .claude/skills/$skill_name — broken symlink → $link_target"
+                if [[ "$fix_mode" == "true" ]]; then
+                    if [[ "$interactive" == "true" ]]; then
+                        printf "    Replace with symlink to %s? [y/N] " "$expected"
+                        read -r answer
+                        if [[ "$answer" == "y" || "$answer" == "Y" ]]; then
+                            rm -f "$dest"
+                            ln -s "$expected" "$dest" || true
+                            if [ -L "$dest" ]; then
+                                echo -e "    ${GREEN}✓${NC} Fixed"
+                            else
+                                echo -e "    ${RED}✗${NC} Failed to create symlink — check permissions"
+                                __REPAIR_REMAINING=$((__REPAIR_REMAINING + 1))
+                            fi
+                        else
+                            __REPAIR_REMAINING=$((__REPAIR_REMAINING + 1))
+                        fi
+                    else
+                        __REPAIR_SKIPPED_PROMPTED=$((__REPAIR_SKIPPED_PROMPTED + 1))
+                        __REPAIR_REMAINING=$((__REPAIR_REMAINING + 1))
+                        echo -e "    → Skipped (non-interactive — run \`buildcrew repair --fix\` in a terminal)"
+                    fi
+                else
+                    __REPAIR_REMAINING=$((__REPAIR_REMAINING + 1))
+                fi
+            else
+                # Symlink exists and resolves
+                norm_link="${link_target%/}"
+                norm_expected="${expected%/}"
+                if [[ "$norm_link" != "$norm_expected" ]]; then
+                    __REPAIR_ISSUES=$((__REPAIR_ISSUES + 1))
+                    had_skill_issues=true
+                    echo -e "  ${YELLOW}⚠${NC} .claude/skills/$skill_name — symlink to wrong target"
+                    echo -e "    Current:  $link_target"
+                    echo -e "    Proposed: $expected"
+                    if [[ "$fix_mode" == "true" ]]; then
+                        if [[ "$interactive" == "true" ]]; then
+                            printf "    Repoint symlink? [y/N] "
+                            read -r answer
+                            if [[ "$answer" == "y" || "$answer" == "Y" ]]; then
+                                rm -f "$dest"
+                                ln -s "$expected" "$dest" || true
+                                if [ -L "$dest" ]; then
+                                    echo -e "    ${GREEN}✓${NC} Fixed"
+                                else
+                                    echo -e "    ${RED}✗${NC} Failed to create symlink — check permissions"
+                                    __REPAIR_REMAINING=$((__REPAIR_REMAINING + 1))
+                                fi
+                            else
+                                __REPAIR_REMAINING=$((__REPAIR_REMAINING + 1))
+                            fi
+                        else
+                            __REPAIR_SKIPPED_PROMPTED=$((__REPAIR_SKIPPED_PROMPTED + 1))
+                            __REPAIR_REMAINING=$((__REPAIR_REMAINING + 1))
+                            echo -e "    → Skipped (non-interactive — run \`buildcrew repair --fix\` in a terminal)"
+                        fi
+                    else
+                        __REPAIR_REMAINING=$((__REPAIR_REMAINING + 1))
+                    fi
+                fi
+            fi
+        else
+            # Real directory — manual review required
+            __REPAIR_ISSUES=$((__REPAIR_ISSUES + 1))
+            __REPAIR_REMAINING=$((__REPAIR_REMAINING + 1))
+            had_skill_issues=true
+            echo -e "  ${YELLOW}⚠${NC} .claude/skills/$skill_name — real directory (not a symlink)"
+            echo -e "    → Manual review required. Skipping."
+        fi
+    done
+
+    if [[ "$had_skill_issues" == "false" ]]; then
+        echo -e "  ${GREEN}✓${NC} .claude/skills — per-skill entries OK"
+    fi
+}
+
+cmd_repair() {
+    local fix_mode=false
+    local arg
+    for arg in "$@"; do
+        case "$arg" in
+            --fix) fix_mode=true ;;
+            *) echo -e "${RED}Error:${NC} Unknown option '$arg'"; echo "Usage: buildcrew repair [--fix]"; exit 1 ;;
+        esac
+    done
+
+    local interactive=false
+    [[ -t 0 ]] && interactive=true
+
+    # Global counters
+    __REPAIR_ISSUES=0
+    __REPAIR_REMAINING=0
+    __REPAIR_SKIPPED_PROMPTED=0
+    __repair_workflow_live=false
+    __repair_workflow_pid=""
+
+    if [[ "$fix_mode" == "true" ]]; then
+        echo -e "${BOLD}BuildCrew Repair — Fix Mode${NC}"
+    else
+        echo -e "${BOLD}BuildCrew Repair — Health Check${NC}"
+    fi
+    echo ""
+
+    # ─── C1: .claude/.buildcrew-link ─────────────────────────────────────────────
+    local stored_home=""
+
+    if [ ! -d ".claude" ]; then
+        __REPAIR_ISSUES=$((__REPAIR_ISSUES + 1))
+        __REPAIR_REMAINING=$((__REPAIR_REMAINING + 1))
+        echo -e "  ${YELLOW}⚠${NC} BuildCrew is not initialized. Run \`buildcrew init\`."
+        echo ""
+        echo "1 issue(s) found."
+        exit 1
+    fi
+
+    if [ ! -f ".claude/.buildcrew-link" ]; then
+        __REPAIR_ISSUES=$((__REPAIR_ISSUES + 1))
+        __REPAIR_REMAINING=$((__REPAIR_REMAINING + 1))
+        echo -e "  ${YELLOW}⚠${NC} BuildCrew is not initialized in this project. Run \`buildcrew init\`."
+        echo ""
+        echo "1 issue(s) found."
+        exit 1
+    fi
+
+    # Parse BUILDCREW_HOME= line without sourcing or eval
+    local parsed_home=""
+    while IFS= read -r line; do
+        case "$line" in
+            BUILDCREW_HOME=*)
+                parsed_home="${line#BUILDCREW_HOME=}"
+                break
+                ;;
+        esac
+    done < ".claude/.buildcrew-link"
+
+    if [ -z "$parsed_home" ]; then
+        # Malformed — no BUILDCREW_HOME= line
+        __REPAIR_ISSUES=$((__REPAIR_ISSUES + 1))
+        echo -e "  ${YELLOW}⚠${NC} .claude/.buildcrew-link is malformed — expected \`BUILDCREW_HOME=<path>\`"
+        if [[ "$fix_mode" == "true" ]]; then
+            if [[ "$interactive" == "true" ]]; then
+                printf "    Rewrite with BUILDCREW_HOME=%s? [y/N] " "$BUILDCREW_HOME"
+                read -r answer
+                if [[ "$answer" == "y" || "$answer" == "Y" ]]; then
+                    echo "BUILDCREW_HOME=$BUILDCREW_HOME" > ".claude/.buildcrew-link"
+                    stored_home="$BUILDCREW_HOME"
+                    echo -e "    ${GREEN}✓${NC} Fixed"
+                else
+                    stored_home="$BUILDCREW_HOME"
+                    echo -e "    → Using runtime path ($BUILDCREW_HOME) for subsequent checks"
+                    __REPAIR_REMAINING=$((__REPAIR_REMAINING + 1))
+                fi
+            else
+                __REPAIR_SKIPPED_PROMPTED=$((__REPAIR_SKIPPED_PROMPTED + 1))
+                __REPAIR_REMAINING=$((__REPAIR_REMAINING + 1))
+                stored_home="$BUILDCREW_HOME"
+                echo -e "    → Skipped (non-interactive — run \`buildcrew repair --fix\` in a terminal)"
+                echo -e "    → Using runtime path ($BUILDCREW_HOME) for subsequent checks"
+            fi
+        else
+            stored_home="$BUILDCREW_HOME"
+            __REPAIR_REMAINING=$((__REPAIR_REMAINING + 1))
+            echo -e "    → Using runtime path ($BUILDCREW_HOME) for subsequent checks"
+        fi
+    elif [ ! -d "$parsed_home" ]; then
+        # Stale — path doesn't exist on disk
+        __REPAIR_ISSUES=$((__REPAIR_ISSUES + 1))
+        echo -e "  ${YELLOW}⚠${NC} .claude/.buildcrew-link — stale path ($parsed_home does not exist)"
+        if [[ "$fix_mode" == "true" ]]; then
+            if [[ "$interactive" == "true" ]]; then
+                printf "    Rewrite with BUILDCREW_HOME=%s? [y/N] " "$BUILDCREW_HOME"
+                read -r answer
+                if [[ "$answer" == "y" || "$answer" == "Y" ]]; then
+                    echo "BUILDCREW_HOME=$BUILDCREW_HOME" > ".claude/.buildcrew-link"
+                    stored_home="$BUILDCREW_HOME"
+                    echo -e "    ${GREEN}✓${NC} Fixed"
+                else
+                    stored_home="$BUILDCREW_HOME"
+                    echo -e "    → Using runtime path ($BUILDCREW_HOME) for subsequent checks"
+                    __REPAIR_REMAINING=$((__REPAIR_REMAINING + 1))
+                fi
+            else
+                __REPAIR_SKIPPED_PROMPTED=$((__REPAIR_SKIPPED_PROMPTED + 1))
+                __REPAIR_REMAINING=$((__REPAIR_REMAINING + 1))
+                stored_home="$BUILDCREW_HOME"
+                echo -e "    → Skipped (non-interactive — run \`buildcrew repair --fix\` in a terminal)"
+                echo -e "    → Using runtime path ($BUILDCREW_HOME) for subsequent checks"
+            fi
+        else
+            stored_home="$BUILDCREW_HOME"
+            __REPAIR_REMAINING=$((__REPAIR_REMAINING + 1))
+            echo -e "    → Using runtime path ($BUILDCREW_HOME) for subsequent checks"
+        fi
+    else
+        stored_home="$parsed_home"
+        echo -e "  ${GREEN}✓${NC} .claude/.buildcrew-link — valid (BUILDCREW_HOME=$parsed_home)"
+    fi
+
+    # ─── C5: Lock/state files (must run before C4) ───────────────────────────────
+    local lockfile=".buildcrew/.workflow-lock"
+    if [ -f "$lockfile" ]; then
+        local pid_val
+        pid_val="$(cat "$lockfile" 2>/dev/null || true)"
+        if [[ "$pid_val" =~ ^[0-9]+$ ]] && kill -0 "$pid_val" 2>/dev/null; then
+            __repair_workflow_live=true
+            __repair_workflow_pid="$pid_val"
+            echo -e "  ${CYAN}○${NC} .buildcrew/.workflow-lock — workflow running (PID $pid_val)"
+        else
+            # Stale lock
+            __repair_workflow_live=false
+            __REPAIR_ISSUES=$((__REPAIR_ISSUES + 1))
+            echo -e "  ${YELLOW}⚠${NC} .buildcrew/.workflow-lock — stale lock (PID: ${pid_val:-none})"
+            if [[ "$fix_mode" == "true" ]]; then
+                rm -f "$lockfile" || true
+                echo -e "    → Removed"
+            else
+                __REPAIR_REMAINING=$((__REPAIR_REMAINING + 1))
+            fi
+        fi
+    else
+        __repair_workflow_live=false
+        echo -e "  ${GREEN}✓${NC} .buildcrew/.workflow-lock — absent"
+    fi
+
+    local stop_file=".buildcrew/.stop-workflow"
+    if [ -f "$stop_file" ]; then
+        __REPAIR_ISSUES=$((__REPAIR_ISSUES + 1))
+        echo -e "  ${YELLOW}⚠${NC} .buildcrew/.stop-workflow — stop signal is set — \`buildcrew run\` will not start a new workflow"
+        if [[ "$fix_mode" == "true" ]]; then
+            if [[ "$interactive" == "true" ]]; then
+                printf "    Remove stop signal? [y/N] "
+                read -r answer
+                if [[ "$answer" == "y" || "$answer" == "Y" ]]; then
+                    rm -f "$stop_file" || true
+                    echo -e "    ${GREEN}✓${NC} Fixed"
+                else
+                    __REPAIR_REMAINING=$((__REPAIR_REMAINING + 1))
+                fi
+            else
+                __REPAIR_SKIPPED_PROMPTED=$((__REPAIR_SKIPPED_PROMPTED + 1))
+                __REPAIR_REMAINING=$((__REPAIR_REMAINING + 1))
+                echo -e "    → Skipped (non-interactive — run \`buildcrew repair --fix\` in a terminal)"
+            fi
+        else
+            __REPAIR_REMAINING=$((__REPAIR_REMAINING + 1))
+        fi
+    fi
+
+    local progress_file=".buildcrew/task-progress.json"
+    local current_task_file=".buildcrew/.current-task"
+    if [[ "$__repair_workflow_live" == "false" ]]; then
+        for state_f in "$progress_file" "$current_task_file"; do
+            if [ -f "$state_f" ]; then
+                __REPAIR_ISSUES=$((__REPAIR_ISSUES + 1))
+                echo -e "  ${YELLOW}⚠${NC} $state_f — stale state file"
+                if [[ "$fix_mode" == "true" ]]; then
+                    rm -f "$state_f" || true
+                    echo -e "    → Removed"
+                else
+                    __REPAIR_REMAINING=$((__REPAIR_REMAINING + 1))
+                fi
+            fi
+        done
+    fi
+
+    # ─── C4: Stale phase artifacts ────────────────────────────────────────────────
+    if [[ "$__repair_workflow_live" == "true" ]]; then
+        echo -e "  ${CYAN}○${NC} Skipping artifact check — workflow is running (PID $__repair_workflow_pid)"
+    else
+        local artifact_files=(
+            .claude/spec.md .claude/research.md .claude/current-plan.md .claude/plan-review.md
+            .claude/review-pass1-pe.md .claude/review-pass2-pm.md
+            .claude/code-review.md .claude/test-report.md .claude/outcome-report.md
+            .claude/security-audit.md .claude/verify-report.md .claude/current-test-plan.md
+            .claude/phase-result.json .claude/workflow-status.json
+        )
+        local any_artifacts=false
+        local af
+        for af in "${artifact_files[@]}"; do
+            if [ -f "$af" ]; then
+                any_artifacts=true
+                __REPAIR_ISSUES=$((__REPAIR_ISSUES + 1))
+                echo -e "  ${YELLOW}⚠${NC} Stale artifact: $af"
+                if [[ "$fix_mode" == "true" ]]; then
+                    rm -f "$af" || true
+                    echo -e "    → Removed"
+                else
+                    __REPAIR_REMAINING=$((__REPAIR_REMAINING + 1))
+                fi
+            fi
+        done
+        if [[ "$any_artifacts" == "false" ]]; then
+            echo -e "  ${GREEN}✓${NC} No stale phase artifacts"
+        fi
+    fi
+
+    # ─── C2: .claude/commands symlink ────────────────────────────────────────────
+    local commands_path=".claude/commands"
+    local expected_commands="$stored_home/commands"
+    if [ ! -L "$commands_path" ] && [ ! -e "$commands_path" ]; then
+        # Missing
+        __REPAIR_ISSUES=$((__REPAIR_ISSUES + 1))
+        echo -e "  ${YELLOW}⚠${NC} .claude/commands — missing"
+        if [[ "$fix_mode" == "true" ]]; then
+            ln -s "$expected_commands" "$commands_path" || true
+            if [ -L "$commands_path" ]; then
+                echo -e "    → Created symlink to $expected_commands"
+            else
+                echo -e "    ${RED}✗${NC} Failed to create symlink — check permissions"
+                __REPAIR_REMAINING=$((__REPAIR_REMAINING + 1))
+            fi
+        else
+            __REPAIR_REMAINING=$((__REPAIR_REMAINING + 1))
+        fi
+    elif [ -L "$commands_path" ]; then
+        local cmd_link_target
+        cmd_link_target="$(readlink "$commands_path")"
+        if [ ! -e "$commands_path" ]; then
+            # Broken symlink
+            __REPAIR_ISSUES=$((__REPAIR_ISSUES + 1))
+            echo -e "  ${YELLOW}⚠${NC} .claude/commands — broken symlink → $cmd_link_target"
+            if [[ "$fix_mode" == "true" ]]; then
+                if [[ "$interactive" == "true" ]]; then
+                    printf "    Replace with symlink to %s? [y/N] " "$expected_commands"
+                    read -r answer
+                    if [[ "$answer" == "y" || "$answer" == "Y" ]]; then
+                        rm -f "$commands_path"
+                        ln -s "$expected_commands" "$commands_path" || true
+                        if [ -L "$commands_path" ]; then
+                            echo -e "    ${GREEN}✓${NC} Fixed"
+                        else
+                            echo -e "    ${RED}✗${NC} Failed to create symlink — check permissions"
+                            __REPAIR_REMAINING=$((__REPAIR_REMAINING + 1))
+                        fi
+                    else
+                        __REPAIR_REMAINING=$((__REPAIR_REMAINING + 1))
+                    fi
+                else
+                    __REPAIR_SKIPPED_PROMPTED=$((__REPAIR_SKIPPED_PROMPTED + 1))
+                    __REPAIR_REMAINING=$((__REPAIR_REMAINING + 1))
+                    echo -e "    → Skipped (non-interactive — run \`buildcrew repair --fix\` in a terminal)"
+                fi
+            else
+                __REPAIR_REMAINING=$((__REPAIR_REMAINING + 1))
+            fi
+        else
+            local norm_cmd="${cmd_link_target%/}"
+            local norm_expected_cmd="${expected_commands%/}"
+            if [[ "$norm_cmd" != "$norm_expected_cmd" ]]; then
+                __REPAIR_ISSUES=$((__REPAIR_ISSUES + 1))
+                echo -e "  ${YELLOW}⚠${NC} .claude/commands — symlink to wrong target"
+                echo -e "    Current:  $cmd_link_target"
+                echo -e "    Proposed: $expected_commands"
+                if [[ "$fix_mode" == "true" ]]; then
+                    if [[ "$interactive" == "true" ]]; then
+                        printf "    Repoint symlink? [y/N] "
+                        read -r answer
+                        if [[ "$answer" == "y" || "$answer" == "Y" ]]; then
+                            rm -f "$commands_path"
+                            ln -s "$expected_commands" "$commands_path" || true
+                            if [ -L "$commands_path" ]; then
+                                echo -e "    ${GREEN}✓${NC} Fixed"
+                            else
+                                echo -e "    ${RED}✗${NC} Failed to create symlink — check permissions"
+                                __REPAIR_REMAINING=$((__REPAIR_REMAINING + 1))
+                            fi
+                        else
+                            __REPAIR_REMAINING=$((__REPAIR_REMAINING + 1))
+                        fi
+                    else
+                        __REPAIR_SKIPPED_PROMPTED=$((__REPAIR_SKIPPED_PROMPTED + 1))
+                        __REPAIR_REMAINING=$((__REPAIR_REMAINING + 1))
+                        echo -e "    → Skipped (non-interactive — run \`buildcrew repair --fix\` in a terminal)"
+                    fi
+                else
+                    __REPAIR_REMAINING=$((__REPAIR_REMAINING + 1))
+                fi
+            else
+                echo -e "  ${GREEN}✓${NC} .claude/commands — symlink OK"
+            fi
+        fi
+    else
+        # Real directory
+        __REPAIR_ISSUES=$((__REPAIR_ISSUES + 1))
+        __REPAIR_REMAINING=$((__REPAIR_REMAINING + 1))
+        echo -e "  ${YELLOW}⚠${NC} .claude/commands — real directory (not a symlink)"
+        echo -e "    → Manual review required. Skipping."
+    fi
+
+    # ─── C3: .claude/skills/ ─────────────────────────────────────────────────────
+    _repair_check_skills "$fix_mode" "$interactive" "$stored_home"
+
+    # ─── C6: .buildcrew/ directory structure ─────────────────────────────────────
+    local missing_dirs=()
+    [ ! -d ".buildcrew" ] && missing_dirs+=(".buildcrew")
+    [ ! -d ".buildcrew/rules" ] && missing_dirs+=(".buildcrew/rules")
+    [ ! -d ".buildcrew/context" ] && missing_dirs+=(".buildcrew/context")
+
+    if [[ "${#missing_dirs[@]}" -gt 0 ]]; then
+        __REPAIR_ISSUES=$((__REPAIR_ISSUES + 1))
+        local missing_list
+        missing_list="${missing_dirs[*]}"
+        echo -e "  ${YELLOW}⚠${NC} .buildcrew/ structure — missing: $missing_list"
+        if [[ "$fix_mode" == "true" ]]; then
+            mkdir -p .buildcrew/rules .buildcrew/context || true
+            echo -e "    → Created missing directories"
+        else
+            __REPAIR_REMAINING=$((__REPAIR_REMAINING + 1))
+        fi
+    else
+        echo -e "  ${GREEN}✓${NC} .buildcrew/ structure — OK"
+    fi
+
+    # ─── Footer ──────────────────────────────────────────────────────────────────
+    echo ""
+
+    if [[ "$__REPAIR_SKIPPED_PROMPTED" -gt 0 ]]; then
+        echo "Note: $__REPAIR_SKIPPED_PROMPTED prompted fix(es) skipped — run interactively to resolve."
+    fi
+
+    if [[ "$__REPAIR_ISSUES" -eq 0 ]]; then
+        echo "All checks passed."
+        exit 0
+    fi
+
+    if [[ "$fix_mode" == "true" ]]; then
+        if [[ "$__REPAIR_REMAINING" -eq 0 ]]; then
+            echo "All issues resolved."
+            exit 0
+        else
+            echo "$__REPAIR_REMAINING issue(s) remain (manual review required)."
+            exit 1
+        fi
+    else
+        echo "$__REPAIR_ISSUES issue(s) found. Run \`buildcrew repair --fix\` to resolve."
+        exit 1
+    fi
+}
+
 cmd_status() {
     local version
     version=$(get_version)
@@ -1225,6 +1807,10 @@ case "${1:-}" in
         ;;
     reset)
         cmd_reset
+        ;;
+    repair)
+        shift
+        cmd_repair "$@"
         ;;
     lessons)
         shift
