@@ -7,12 +7,13 @@
 # This script orchestrates an autonomous development workflow using Claude Code.
 # It reads tasks from BACKLOG.md and processes each one through phase groups:
 #
-# Phase-isolated mode (up to 7 separate Claude invocations):
+# Phase-isolated mode (up to 8 separate Claude invocations):
 #   spec (optional, skipped with --skip-spec)
 #   research + plan
 #   plan-review (3-pass)
 #   build
-#   code-review + refactor + test
+#   codereview (adversarial PE review — independent phase)
+#   test
 #   outcome (validates against spec acceptance criteria)
 #   verify + security audit + commit + signal
 #
@@ -1232,53 +1233,51 @@ process_task_isolated() {
             run_phase_group "build" "$task" "$build_context" || { clear_task_progress; return 1; }
 
             # --- code review (independent phase) ---
-            if [[ -d ".claude/skills/buildcrew-codereview" ]]; then
-                run_phase_group "codereview" "$task" "${__spec_context}" || { clear_task_progress; return 1; }
+            run_phase_group "codereview" "$task" "${__spec_context}" || { clear_task_progress; return 1; }
 
-                local cr_verdict
-                cr_verdict=$(jq -r '.verdict' "$PHASE_RESULT_FILE")
-                case "$cr_verdict" in
-                    approved)
-                        : # fall through to test
-                        ;;
-                    needs_rebuild)
-                        ((consecutive_build_failures++))
-                        if (( consecutive_build_failures >= 2 )); then
-                            local failure_summary
-                            failure_summary=$(jq -r '.details // "Code review failed twice"' "$PHASE_RESULT_FILE")
-                            print_warning "[CIRCUIT BREAKER] Approach failed twice at Code Review phase. Re-planning from scratch with failure context."
-                            print_debug "Circuit breaker: consecutive_failures=$consecutive_build_failures, replan_count=$__replan_count"
-                            append_lesson "build" \
-                                "Code review NEEDS_REBUILD after $build_attempt attempts: $failure_summary" \
-                                "Triggered circuit breaker and re-planned from scratch" \
-                                "When code review rejects twice on the same approach, the plan itself is likely flawed — re-plan rather than retry"
-                            if (( __replan_count >= 1 )); then
-                                print_error "Circuit breaker triggered again after re-planning. Stopping task."
-                                mark_task_blocked "$task" "Circuit breaker: code review failed twice even after re-planning"
-                                clear_task_progress
-                                return 1
-                            fi
-                            ((__replan_count++))
-                            __replan_context="CIRCUIT BREAKER: Code review NEEDS_REBUILD twice. Previous failure: $failure_summary. The implementation approach needs to change — re-plan with a different strategy."
-                            print_debug "Re-plan context: $__replan_context"
-                            __need_replan=true
-                            __completed_phases=""
-                            clear_task_progress
-                            break
-                        fi
-                        local cr_fail_details
-                        cr_fail_details=$(jq -r '.details // "Code review NEEDS_REBUILD"' "$PHASE_RESULT_FILE")
+            local cr_verdict
+            cr_verdict=$(jq -r '.verdict' "$PHASE_RESULT_FILE")
+            case "$cr_verdict" in
+                approved)
+                    : # fall through to test
+                    ;;
+                needs_rebuild)
+                    ((consecutive_build_failures++))
+                    if (( consecutive_build_failures >= 2 )); then
+                        local failure_summary
+                        failure_summary=$(jq -r '.details // "Code review failed twice"' "$PHASE_RESULT_FILE")
+                        print_warning "[CIRCUIT BREAKER] Approach failed twice at Code Review phase. Re-planning from scratch with failure context."
+                        print_debug "Circuit breaker: consecutive_failures=$consecutive_build_failures, replan_count=$__replan_count"
                         append_lesson "build" \
-                            "Code review NEEDS_REBUILD on attempt $build_attempt: $cr_fail_details" \
-                            "Retrying build with revised approach" \
-                            "Read code review carefully before retrying — the issues usually indicate a misunderstanding of the existing codebase"
-                        continue ;;
-                    *)
-                        mark_task_blocked "$task" "Unexpected codereview verdict: $cr_verdict"
+                            "Code review NEEDS_REBUILD after $build_attempt attempts: $failure_summary" \
+                            "Triggered circuit breaker and re-planned from scratch" \
+                            "When code review rejects twice on the same approach, the plan itself is likely flawed — re-plan rather than retry"
+                        if (( __replan_count >= 1 )); then
+                            print_error "Circuit breaker triggered again after re-planning. Stopping task."
+                            mark_task_blocked "$task" "Circuit breaker: code review failed twice even after re-planning"
+                            clear_task_progress
+                            return 1
+                        fi
+                        ((__replan_count++))
+                        __replan_context="CIRCUIT BREAKER: Code review NEEDS_REBUILD twice. Previous failure: $failure_summary. The implementation approach needs to change — re-plan with a different strategy."
+                        print_debug "Re-plan context: $__replan_context"
+                        __need_replan=true
+                        __completed_phases=""
                         clear_task_progress
-                        return 1 ;;
-                esac
-            fi
+                        break
+                    fi
+                    local cr_fail_details
+                    cr_fail_details=$(jq -r '.details // "Code review NEEDS_REBUILD"' "$PHASE_RESULT_FILE")
+                    append_lesson "build" \
+                        "Code review NEEDS_REBUILD on attempt $build_attempt: $cr_fail_details" \
+                        "Retrying build with revised approach" \
+                        "Read code review carefully before retrying — the issues usually indicate a misunderstanding of the existing codebase"
+                    continue ;;
+                *)
+                    mark_task_blocked "$task" "Unexpected codereview verdict: $cr_verdict"
+                    clear_task_progress
+                    return 1 ;;
+            esac
 
             local test_extra="${__spec_context}"
             run_phase_group "test" "$task" "$test_extra" || { clear_task_progress; return 1; }
@@ -1395,6 +1394,12 @@ process_task_isolated() {
                             "Partial acceptance at outcome stage means the implementation is incomplete — re-read the specific failing criteria in the spec"
                         ((build_attempt++))
                         run_phase_group "build" "$task" "OUTCOME FIX: $partial_details | $__spec_context" || { clear_task_progress; return 1; }
+                        run_phase_group "codereview" "$task" "${__spec_context}" || { clear_task_progress; return 1; }
+                        cr_verdict=$(jq -r '.verdict' "$PHASE_RESULT_FILE")
+                        if [[ "$cr_verdict" == "needs_rebuild" ]]; then
+                            mark_task_blocked "$task" "Code review rejected rebuild at outcome stage"
+                            clear_task_progress; return 1
+                        fi
                         run_phase_group "test" "$task" "$__spec_context" || { clear_task_progress; return 1; }
                         continue
                     else
@@ -1440,6 +1445,12 @@ process_task_isolated() {
                         "Always run the feature against its acceptance criteria before consider it done"
                     ((build_attempt++))
                     run_phase_group "build" "$task" "OUTCOME FIX: $rebuild_ctx | $__spec_context" || { clear_task_progress; return 1; }
+                    run_phase_group "codereview" "$task" "${__spec_context}" || { clear_task_progress; return 1; }
+                    cr_verdict=$(jq -r '.verdict' "$PHASE_RESULT_FILE")
+                    if [[ "$cr_verdict" == "needs_rebuild" ]]; then
+                        mark_task_blocked "$task" "Code review rejected rebuild at outcome stage"
+                        clear_task_progress; return 1
+                    fi
                     run_phase_group "test" "$task" "$__spec_context" || { clear_task_progress; return 1; }
                     continue ;;
                 *)
@@ -1509,13 +1520,12 @@ process_task_isolated() {
                             "Rebuilt with targeted fix for $failing issues" \
                             "Always run the full verify check before considering a build complete"
                         run_phase_group "build" "$task" "$rebuild_context" || { clear_task_progress; return 1; }
-                        run_phase_group "test" "$task" "$verify_extra" || { clear_task_progress; return 1; }
-                        ;;
-                    code_review)
-                        append_lesson "verify" \
-                            "Code review blocked verify on attempt $verify_attempt: $failure_details" \
-                            "Re-ran test phase to address code review issues" \
-                            "Code review failures at verify stage mean test phase missed quality checks — address style/structure issues during build"
+                        run_phase_group "codereview" "$task" "${__spec_context}" || { clear_task_progress; return 1; }
+                        cr_verdict=$(jq -r '.verdict' "$PHASE_RESULT_FILE")
+                        if [[ "$cr_verdict" == "needs_rebuild" ]]; then
+                            mark_task_blocked "$task" "Code review rejected rebuild at verify stage"
+                            clear_task_progress; return 1
+                        fi
                         run_phase_group "test" "$task" "$verify_extra" || { clear_task_progress; return 1; }
                         ;;
                     *)
@@ -1579,7 +1589,7 @@ main() {
         error "Phase-isolated skills not found. Run 'buildcrew init' to install them."
     fi
 
-    local _phase_count=5
+    local _phase_count=6
     [[ "$SKIP_SPEC" != "true" ]] && [[ -d ".claude/skills/buildcrew-spec" ]] && _phase_count=$((_phase_count + 1))
     [[ -d ".claude/skills/buildcrew-outcome" ]] && _phase_count=$((_phase_count + 1))
     print_info "Mode: Phase-isolated ($_phase_count invocations per task)"
@@ -1689,6 +1699,8 @@ main() {
                 if [[ "$SKIP_SPEC" != "true" ]]; then
                     phase_list="spec $phase_list"
                 fi
+                # Insert codereview between build and test (before outcome insertion)
+                phase_list="${phase_list/build test/build codereview test}"
                 if [[ -d ".claude/skills/buildcrew-outcome" ]]; then
                     phase_list="${phase_list/test verify/test outcome verify}"
                 fi

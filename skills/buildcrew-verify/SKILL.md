@@ -45,7 +45,7 @@ All items must be checked and pass:
 
 **Note**: The gate checks for absence of unresolved blocking findings, not just an "APPROVED" verdict string. Advisory findings are acceptable.
 
-**If blocking findings remain**: Write phase-result.json with `blocked` verdict, `failing_check: "code_review"`.
+**If blocking findings remain**: Write phase-result.json with `blocked` verdict, `failing_check: "quality"`.
 
 #### 3. Security Audit (Security Engineer)
 
@@ -100,7 +100,7 @@ Write verification status to `.claude/verify-report.md`:
 - **Coverage**: X%
 
 ### Code Review
-- **Status**: [APPROVED | NEEDS_REFACTOR | NEEDS_REBUILD]
+- **Status**: [CLEAN | BLOCKED]
 - **Reviewer**: Principal Engineer
 - **Critical Issues**: X (fixed: Y)
 - **Major Concerns**: X (fixed: Y)
@@ -203,7 +203,7 @@ When all verification, commit, and signal phases are complete, write `.claude/ph
 {
   "phase": "verify_and_commit",
   "verdict": "blocked",
-  "failing_check": "tests|code_review|security|architecture",
+  "failing_check": "tests|quality|security|architecture",
   "details": "[Description of what failed]"
 }
 ```

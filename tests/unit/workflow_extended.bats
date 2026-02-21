@@ -724,7 +724,7 @@ teardown() {
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
-# New phase turns (spec, outcome)
+# New phase turns (spec, outcome, codereview)
 # ─────────────────────────────────────────────────────────────────────────────
 
 @test "get_phase_max_turns: spec returns 30" {
@@ -734,6 +734,11 @@ teardown() {
 
 @test "get_phase_max_turns: outcome returns 40" {
     run get_phase_max_turns "outcome"
+    [ "$output" = "40" ]
+}
+
+@test "get_phase_max_turns: codereview returns 40" {
+    run get_phase_max_turns "codereview"
     [ "$output" = "40" ]
 }
 
