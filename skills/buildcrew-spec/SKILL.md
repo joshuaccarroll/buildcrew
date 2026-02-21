@@ -81,6 +81,11 @@ Write a concise spec to `.claude/spec.md`. The spec must answer these five quest
 
 Keep the spec focused and brief. No rigid template with dozens of fields — just a simple markdown document structured around these four answers.
 
+**Before moving to Step 4, verify your draft:**
+- Does it contain a `**This task delivers**` line in the "Out of Scope" section (or immediately following the Out of Scope bullets)? The line is in the template — confirm it was replaced with a real sentence, not left as the placeholder text `[one sentence — the single primary deliverable]`.
+- Does that sentence use "and" to connect unrelated deliverables? If yes, the scope is too large — split the task.
+- Does "Out of Scope" address the most likely scope-creep risks for this specific task, not generic filler?
+
 ### Spec Template
 
 ```markdown

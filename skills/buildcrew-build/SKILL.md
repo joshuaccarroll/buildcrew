@@ -62,6 +62,7 @@ If the context mentions **REBUILD AFTER VERIFY FAILURE**, this is a targeted fix
 - Keep functions small and focused (< 20 lines preferred)
 - Add comments only where logic isn't self-evident
 - Don't over-engineer - implement only what's in the approved plan
+- If `.claude/spec.md` exists, locate the `**This task delivers**` line and treat it as your scope boundary. Anything not covered by that sentence and not explicitly in the approved plan is out of scope — do not implement it.
 - No premature abstractions - wait until you have 3+ use cases
 - Write helpful error messages that guide users
 - Consider loading states and edge cases users will hit

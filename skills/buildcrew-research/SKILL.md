@@ -8,6 +8,11 @@ allowed-tools: Read, Write, Edit, Glob, Grep, Bash, Task, WebSearch, WebFetch
 
 `[Phases: research, plan | Input: task description | Output: .claude/research.md, .claude/current-plan.md | Next: plan-review]`
 
+> **Context budget**: The research document feeds directly into plan writing.
+> Keep it under 150 lines. Prefer URLs over pasted documentation.
+> Prefer code snippets (10-20 lines) over prose descriptions of APIs.
+> If you are pasting more than 30 lines of external content, summarize it instead.
+
 You are executing the research and plan phases of the BuildCrew autonomous development workflow.
 
 ## Your Task
@@ -83,25 +88,29 @@ For tasks requiring full research:
 ## Constraints & Gotchas
 - [Known issues, breaking changes, deprecations]
 
+## UX Impact
+*(Skip body for internal tasks — replace with: `N/A — internal/refactoring task with no user-visible behavior changes.`)*
+- **User roles affected**: [who]
+- **Touch points**: [what the user interacts with]
+- **Error experience**: [what the user sees when something goes wrong]
+- **Minimum viable surface**: [fewest UI/CLI elements that deliver the value]
+
 ## Sources
 - [URL 1]
 - [URL 2]
 ```
 
-For internal-only tasks (light research):
+**For internal-only tasks**, use a minimal research document:
 
 ```markdown
 # Research: [Task Title]
 
-## Research Topics
-- No external APIs, libraries, or patterns to research
+## Local Context
+- [Relevant files, patterns, constraints found in the codebase]
+- [Existing utilities to reuse]
 
-## Local Codebase Context
-- [Relevant existing patterns found]
-- [Current stack/dependency info]
-
-## Key Findings
-- This task is internal to the codebase; no external research required.
+## Implementation Notes
+- [Key decisions, gotchas, ordering constraints]
 ```
 
 ### Error Handling
@@ -109,6 +118,19 @@ For internal-only tasks (light research):
 - If WebSearch is unavailable or returns no results, proceed with local-only research. Note the limitation in the research document.
 - If WebFetch fails on specific URLs, log the URLs as "could not fetch" in the Sources section and continue.
 - The research phase should never block the workflow — always produce a `.claude/research.md`, even if it only contains local context.
+
+### Step 8b: UX Consideration (user-facing tasks only)
+
+Before proceeding to the plan phase, consider the user experience for any task that has
+user-visible behavior changes:
+
+1. **Who touches this?** Which user roles interact with this feature (end user, developer, admin, CI system)?
+2. **What do they see?** For each touch point: what do they click/type? What feedback do they get? What happens on error?
+3. **What is the minimum viable surface?** Resist adding options, flags, config, or UI elements unless the spec explicitly requires them. The simplest UX that delivers the value is the right UX.
+
+**User-facing** means any change that modifies: CLI output, command-line flags, error messages, or any behavior observable by a person running the tool. If in doubt, apply this step — the cost of UX consideration for an internal task is low; the cost of missing it is high. Skip this step only for tasks with zero observable behavior changes (e.g., pure refactors with no output changes, internal data structure changes with no CLI/output impact).
+
+Populate the `## UX Impact` section in the template above with task-specific content. For user-facing tasks, fill in all four fields. If this task is not user-facing per the definition above, replace the section body with: `N/A — internal/refactoring task with no user-visible behavior changes.`
 
 After writing the research document, run iterative sub-agent review on `.claude/research.md`:
 
@@ -126,6 +148,8 @@ while iteration < 5:
 
     If the document is solid and no meaningful improvements can be made,
     respond with exactly: CONVERGED
+
+    Also read `.claude/spec.md` to understand whether this task has user-visible behavior changes. Then check: if the task is user-facing per the definition in Step 8b, does `research.md` contain a `## UX Impact` section with all four fields populated (not just the N/A marker)? If missing, sparse, or replaced with N/A when the task is clearly user-facing, flag it and recommend the researcher revisit Step 8b.
 
     Do not explain what you reviewed. Either improve the file or respond CONVERGED."
 

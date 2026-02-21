@@ -53,7 +53,13 @@ Read `.claude/current-plan.md` and interrogate it against:
 5. **Red Flags** — What would make you reject this in a real code review?
    - Over-engineering? Poor separation of concerns? Security holes?
 
-6. **Step Ordering** — What ordering mistake will bite us mid-build?
+6. **Context Budget** — Will this plan produce oversized artifacts?
+   Will the implementation plan produce documents or code that will strain the context window
+   in later phases? Flag any step that generates 200+ lines of output (large config files,
+   extensive test suites, long documentation). These should be broken into smaller steps or
+   noted as a context risk.
+
+7. **Step Ordering** — What ordering mistake will bite us mid-build?
    - Are foundations laid before features?
    - Each step: does it produce a verifiable state?
    - Human prerequisites (API keys, accounts, DNS) — are they early enough?
@@ -80,12 +86,21 @@ You are a product manager reviewing an implementation plan for user impact. Your
 
 Read `.claude/current-plan.md`. If `.claude/spec.md` exists, read it too.
 
+**Before walking the user flow:**
+Check whether `.claude/research.md` exists.
+- If it exists and contains a `## UX Impact` section: read it. Verify that the plan addresses each touch point listed and accounts for the described error experience. Record any gaps as findings in your review output (`.claude/review-pass2-pm.md`).
+- If it exists but does NOT contain a `## UX Impact` section, and the spec describes user-visible behavior changes: record a finding that UX analysis was expected but not produced. This is a Pass 2 finding that contributes to a NEEDS_REVISION verdict.
+- If `research.md` does not exist: skip this check.
+
 Walk through the plan from the end user's perspective with adversarial intent:
 
 1. **User Flow Challenge**
-   - "I'm a user who wants [goal]." Now walk through the plan step by step.
-   - At what point does the user experience break down?
-   - What will confuse a user who hasn't read the code?
+   Walk the COMPLETE user journey from first trigger to final outcome:
+   - "I am a user who wants [goal]." At what step does my experience break down?
+   - What is my mental model of how this works? Does the implementation match it?
+   - What is the FIRST error message I will see if something goes wrong? Is it actionable?
+   - What will confuse a user who has never read the code?
+   - What happens to my in-progress work if the operation fails halfway through?
 
 2. **Acceptance Criteria Gap Hunt**
    - Does this plan actually solve the stated task from the end user's perspective?
