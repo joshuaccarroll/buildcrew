@@ -1320,6 +1320,37 @@ process_task_isolated() {
                         "Retrying build with revised approach" \
                         "Read test output carefully before retrying — the error usually indicates a misunderstanding of the existing codebase"
                     continue ;;
+                needs_rebuild)
+                    ((consecutive_build_failures++))
+                    if (( consecutive_build_failures >= 2 )); then
+                        local failure_summary
+                        failure_summary=$(jq -r '.details // "Smoke test failure twice"' "$PHASE_RESULT_FILE")
+                        print_warning "[CIRCUIT BREAKER] Approach failed twice at Build/Test phase (smoke). Re-planning."
+                        print_debug "Circuit breaker: consecutive_failures=$consecutive_build_failures, replan_count=$__replan_count"
+                        append_lesson "build" \
+                            "Smoke test NEEDS_REBUILD after $build_attempt attempts: $failure_summary" \
+                            "Triggered circuit breaker and re-planned from scratch" \
+                            "Smoke test failure means the app cannot start or run — re-plan with a different approach"
+                        if (( __replan_count >= 1 )); then
+                            print_error "Circuit breaker triggered again after re-planning. Stopping task."
+                            mark_task_blocked "$task" "Circuit breaker: smoke test failed twice even after re-planning"
+                            clear_task_progress
+                            return 1
+                        fi
+                        ((__replan_count++))
+                        __replan_context="CIRCUIT BREAKER: Smoke test NEEDS_REBUILD twice. Failure: $failure_summary. Re-plan with a different implementation strategy."
+                        __need_replan=true
+                        __completed_phases=""
+                        clear_task_progress
+                        break
+                    fi
+                    local smoke_fail_details
+                    smoke_fail_details=$(jq -r '.details // "Smoke test NEEDS_REBUILD"' "$PHASE_RESULT_FILE")
+                    append_lesson "build" \
+                        "Smoke test NEEDS_REBUILD on attempt $build_attempt: $smoke_fail_details" \
+                        "Retrying build with fix for smoke failure" \
+                        "Smoke failures mean the app cannot start/run correctly — fix the entry point, dependency wiring, or startup logic"
+                    continue ;;
                 *) mark_task_blocked "$task" "Unexpected test verdict: $verdict"; clear_task_progress; return 1 ;;
             esac
         done

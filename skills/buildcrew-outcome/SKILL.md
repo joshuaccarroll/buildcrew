@@ -27,8 +27,8 @@ The task was provided in the prompt. You are the **QA Engineer**. Your job is to
 Read `.claude/spec.md`. Extract every acceptance criterion (lines starting with `- [ ] AC-`).
 
 If `.claude/spec.md` does not exist or has no acceptance criteria:
-- Write a passing outcome report noting there are no acceptance criteria to verify
-- Issue `verdict: "passed"` since there's nothing to fail
+- Write an outcome report noting no spec was found
+- Issue `verdict: "failed"` with details: "No spec or acceptance criteria found. Run the spec phase before outcome verification."
 
 ### Step 2: Verify Each Acceptance Criterion
 
@@ -49,6 +49,55 @@ For each acceptance criterion:
 | API behavior | Make the request (if testable), check the response |
 
 **Scope limits**: If a criterion requires an external service (database, third-party API) that is not available in this environment, mark it as `SKIPPED (requires external service)` — not failed.
+
+### Step 2.5: Integration Smoke Test
+
+After verifying individual acceptance criteria, run a holistic "can it actually work" check.
+This catches failure modes that ACs often miss because ACs test specific behaviors, not startup
+and dependency integrity.
+
+**Skip smoke tests only if ALL of the following are true for this task:**
+1. No new binary, CLI command, server route, or background worker was added
+2. No new environment variable or config key is consumed
+3. No new external API or third-party service is called
+4. The modified code paths are not callable from any existing entry point (i.e., no existing startup path, public function, or command routes through the changed code)
+
+If any condition is false, run the applicable checks below.
+
+**Checks (map directly to SMOKE-XX IDs):**
+
+1. **SMOKE-01 — Startup, clean state**: Run the entry point with no config or credentials
+   present. The expected result is a helpful error message, not a crash or unhandled exception.
+   A startup that panics or throws on missing config is a blocker regardless of whether ACs pass.
+
+2. **SMOKE-02 — Startup, valid config**: Run the entry point with a valid, complete config.
+   Verify it initializes successfully. If startup depends on external services, also verify it
+   fails gracefully when those services are unreachable (clear error, no silent hang).
+
+3. **SMOKE-03 — End-to-end, happy path**: Trace one complete user journey from input to output
+   using valid config and credentials — not just "does the function return the right value" but
+   "can a user trigger this feature and get a useful result."
+
+For dependency wiring concerns (env var documentation, config validation behavior, API error
+handling) that don't fit neatly into SMOKE-01–03, add a **SMOKE-04 — Dependency wiring** check
+and record it as a separate entry.
+
+**External service handling**: If a check cannot be executed because it requires an external
+service (database, third-party API, cloud provider) that is unavailable in this environment,
+mark it as `SMOKE-XX: SKIPPED (requires external service: [name])`. SKIPPED entries do not
+count as failures.
+
+**Record results** as `SMOKE-XX` entries in the outcome report (alongside AC-XX entries).
+Use the canonical IDs and labels defined in the test plan — these must match exactly so test and
+outcome reports can be cross-referenced:
+- `SMOKE-01: Startup — clean state — PASS / FAIL / SKIPPED (requires external service: X) — [notes]`
+- `SMOKE-02: Startup — valid config — PASS / FAIL / SKIPPED — [notes]`
+- `SMOKE-03: End-to-end — happy path — PASS / FAIL / SKIPPED — [notes]`
+
+**Verdict impact**: A SMOKE failure is always a critical failure — issue verdict `failed`, not
+`partial`. A crashed startup or unhandled exception is not a partial outcome; the feature does
+not work. The `partial` verdict applies only to AC-level mismatches where the core feature
+functions but specific edge-case criteria are unmet.
 
 ### Step 3: Autonomous Fix Attempt (Scoped)
 
@@ -86,10 +135,21 @@ Write results to `.claude/outcome-report.md`:
 | AC-01 | [criterion text] | PASS / FAIL / SKIPPED | [brief notes] |
 | AC-02 | [criterion text] | PASS / FAIL / SKIPPED | [brief notes] |
 
+### Smoke Test Results
+
+| ID | Check | Result | Notes |
+|----|-------|--------|-------|
+| SMOKE-01 | Startup — clean state | PASS / FAIL / SKIPPED (requires external service: X) | [notes] |
+| SMOKE-02 | Startup — valid config | PASS / FAIL / SKIPPED | [notes] |
+| SMOKE-03 | End-to-end — happy path | PASS / FAIL / SKIPPED | [notes] |
+
+(Omit this section entirely if smoke tests were skipped — record reason in Summary)
+
 ### Summary
 - **Passed**: X of Y criteria
 - **Failed**: X criteria
 - **Skipped**: X criteria (requires external service)
+- **Smoke tests skipped**: [YES — reason | NO]
 
 ### Failures (if any)
 For each failed criterion:
@@ -99,7 +159,7 @@ For each failed criterion:
 
 ### VERDICT: [PASSED | PARTIAL | FAILED]
 - PASSED: All verifiable criteria pass (skipped criteria are acceptable)
-- PARTIAL: Some criteria pass, some fail (non-blocking without --strict)
+- PARTIAL: Some criteria pass, some fail (blocks commit unless --no-strict is set)
 - FAILED: More than half of criteria fail, or any critical criterion fails
 ```
 
@@ -110,27 +170,27 @@ For each failed criterion:
 **If all verifiable criteria pass:**
 ```json
 {
-  "phase": "outcome_verify",
+  "phase": "outcome",
   "verdict": "passed",
-  "details": "All N acceptance criteria verified"
+  "details": "All N acceptance criteria verified. Smoke tests: PASS (or SKIPPED — reason)"
 }
 ```
 
 **If some criteria fail (partial):**
 ```json
 {
-  "phase": "outcome_verify",
+  "phase": "outcome",
   "verdict": "partial",
-  "details": "X of N criteria passed. Failed: [AC-01: reason], [AC-02: reason]. STRICT_MODE=[true|false]"
+  "details": "X of N criteria passed. Failed: [AC-01: reason]. SMOKE: [SMOKE-01: result]. STRICT_MODE=[true|false]"
 }
 ```
 
 **If most/critical criteria fail:**
 ```json
 {
-  "phase": "outcome_verify",
+  "phase": "outcome",
   "verdict": "failed",
-  "details": "Acceptance criteria not met: [AC-01: reason], [AC-02: reason]. Rebuild needed."
+  "details": "Acceptance criteria not met: [AC-01: reason]. SMOKE failures: [SMOKE-01: result]. Rebuild needed."
 }
 ```
 
