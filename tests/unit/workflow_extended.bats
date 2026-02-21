@@ -233,6 +233,7 @@ teardown() {
     mkdir -p .claude/skills/buildcrew-research
     mkdir -p .claude/skills/buildcrew-review
     mkdir -p .claude/skills/buildcrew-build
+    mkdir -p .claude/skills/buildcrew-codereview
     mkdir -p .claude/skills/buildcrew-test
     mkdir -p .claude/skills/buildcrew-verify
     run is_phase_isolation_available
@@ -745,9 +746,9 @@ teardown() {
     [ "$SKIP_SPEC" = "false" ]
 }
 
-@test "parse_args: no args leaves STRICT_MODE=false" {
+@test "parse_args: no args leaves STRICT_MODE=true (strict by default)" {
     parse_args
-    [ "$STRICT_MODE" = "false" ]
+    [ "$STRICT_MODE" = "true" ]
 }
 
 @test "parse_args: --skip-spec combined with other flags" {
@@ -755,6 +756,38 @@ teardown() {
     [ "$SKIP_SPEC" = "true" ]
     [ "$STRICT_MODE" = "true" ]
     [ "$DRY_RUN" = "true" ]
+}
+
+@test "parse_args: --no-strict sets STRICT_MODE=false" {
+    parse_args --no-strict
+    [ "$STRICT_MODE" = "false" ]
+}
+
+@test "parse_args: --no-strict sets STRICT_EXPLICIT=true" {
+    parse_args --no-strict
+    [ "$STRICT_EXPLICIT" = "true" ]
+}
+
+@test "parse_args: --strict sets STRICT_EXPLICIT=true" {
+    parse_args --strict
+    [ "$STRICT_EXPLICIT" = "true" ]
+}
+
+@test "parse_args: no args leaves STRICT_EXPLICIT=false" {
+    parse_args
+    [ "$STRICT_EXPLICIT" = "false" ]
+}
+
+@test "parse_args: --strict --no-strict last wins (STRICT_MODE=false, STRICT_EXPLICIT=true)" {
+    parse_args --strict --no-strict
+    [ "$STRICT_MODE" = "false" ]
+    [ "$STRICT_EXPLICIT" = "true" ]
+}
+
+@test "parse_args: --no-strict --strict last wins (STRICT_MODE=true, STRICT_EXPLICIT=true)" {
+    parse_args --no-strict --strict
+    [ "$STRICT_MODE" = "true" ]
+    [ "$STRICT_EXPLICIT" = "true" ]
 }
 
 @test "parse_args: --help mentions --skip-spec" {
@@ -898,6 +931,57 @@ EOF
     [ "$status" -eq 1 ]
     [ -s "$blocked_file" ]
     rm -f "$blocked_file"
+}
+
+@test "AC count resume: spec with 1 AC triggers re-run" {
+    mkdir -p .buildcrew ".claude/skills/buildcrew-spec"
+    printf '# Spec\n- [ ] AC-01: only one criterion\n' > .claude/spec.md
+    echo "- [ ] test task" > BACKLOG.md
+    SKIP_SPEC=false
+    STRICT_MODE=true
+    HUMAN_REVIEW=false
+    # Simulate a resume — RESUME_MODE=true causes process_task_isolated to take
+    # the resume path, which skips the artifact cleanup (so spec.md is preserved).
+    # load_task_progress is mocked to inject __RESUME_PHASES directly.
+    RESUME_MODE=true
+
+    local spec_rerun_file
+    spec_rerun_file=$(mktemp)
+
+    archive_task_artifacts() { :; }
+    clear_task_progress()    { :; }
+    save_task_progress()     { :; }
+    append_lesson()          { :; }
+    handle_human_review()    { return 0; }
+    handle_spec_review()     { return 0; }  # required: spec re-run calls this
+    mark_task_blocked()      { :; }
+    # Mock load_task_progress: inject resume state with spec+downstream complete
+    load_task_progress() {
+        __RESUME_TASK="test task"
+        __RESUME_PHASES="spec research review build"
+        __RESUME_INVOCATIONS=0
+        return 0
+    }
+    run_phase_group() {
+        local phase="$1"
+        mkdir -p .claude
+        if [[ "$phase" == "spec" ]]; then
+            echo "spec" >> "$spec_rerun_file"
+            # Write a spec with 2 ACs so the retry passes
+            printf '# Spec\n- [ ] AC-01: first\n- [ ] AC-02: second\n' > .claude/spec.md
+        fi
+        echo '{"verdict":"complete","details":"stub"}' > "$PHASE_RESULT_FILE"
+        return 0
+    }
+
+    run process_task_isolated "test task"
+    # spec must have been re-run
+    [ -s "$spec_rerun_file" ]
+    # the spec on disk after re-run must satisfy the 2-AC minimum (the mock writes 2 ACs)
+    local ac_count_after
+    ac_count_after=$(grep -c '^- \[ \] AC-' .claude/spec.md 2>/dev/null || echo 0)
+    [ "$ac_count_after" -ge 2 ]
+    rm -f "$spec_rerun_file"
 }
 
 @test "outcome strict mode: marks task blocked after two consecutive partial failures" {

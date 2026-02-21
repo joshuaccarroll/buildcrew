@@ -96,14 +96,15 @@ __RESUME_PHASES=""
 # Uses a function instead of declare -A for bash 3.2 (macOS) compatibility
 get_phase_max_turns() {
     case "$1" in
-        spec)     echo 30 ;;
-        research) echo 40 ;;
-        review)   echo 50 ;;
-        build)    echo 50 ;;
-        test)     echo 60 ;;
-        outcome)  echo 40 ;;
-        verify)   echo 30 ;;
-        *)        echo 30 ;;
+        spec)       echo 30 ;;
+        research)   echo 40 ;;
+        review)     echo 50 ;;
+        build)      echo 50 ;;
+        codereview) echo 40 ;;
+        test)       echo 60 ;;
+        outcome)    echo 40 ;;
+        verify)     echo 30 ;;
+        *)          echo 30 ;;
     esac
 }
 
@@ -121,7 +122,8 @@ ORIGINAL_BRANCH=""
 HAS_REMOTE=false
 GH_AVAILABLE=false
 SKIP_SPEC=false
-STRICT_MODE=false
+STRICT_MODE=true
+STRICT_EXPLICIT=false   # true only when --strict or --no-strict is passed explicitly
 VERBOSE=false
 
 parse_args() {
@@ -161,6 +163,12 @@ parse_args() {
                 ;;
             --strict)
                 STRICT_MODE=true
+                STRICT_EXPLICIT=true
+                shift
+                ;;
+            --no-strict)
+                STRICT_MODE=false
+                STRICT_EXPLICIT=true
                 shift
                 ;;
             --verbose|--debug)
@@ -186,7 +194,8 @@ parse_args() {
                 echo "  --task NAME  Target a specific task by name or number (implies --single)"
                 echo "  --resume     Resume an interrupted task from where it left off"
                 echo "  --skip-spec  Skip the specification refinement phase (for tasks with detailed specs already)"
-                echo "  --strict     Require ALL acceptance criteria to pass before commit (outcome phase)"
+                echo "  --strict     (default) Require ALL acceptance criteria to pass before commit"
+                echo "  --no-strict  Allow partial acceptance criteria pass — proceed with warnings"
                 echo "  --max-invocations N  Set maximum Claude invocations per run (default: 15)"
                 echo "  --verbose    Show orchestrator decisions, phase verdicts, and invocation counts"
                 echo "  --debug      Alias for --verbose"
@@ -254,6 +263,63 @@ handle_human_review() {
         q|Q) return 2 ;;
         *) return 0 ;;
     esac
+}
+
+# Mandatory spec review — guides the human to evaluate the spec before proceeding.
+# Distinct from handle_human_review(): always fires (not gated on --review), and
+# provides spec-specific framing rather than a generic "approve/skip" prompt.
+# Returns: 0 = approved, 1 = skip task, 2 = quit pipeline
+handle_spec_review() {
+    local task="$1"
+    local ac_count="$2"
+
+    # Non-interactive terminals fall through autonomously (same as handle_human_review)
+    if [[ ! -t 0 ]]; then
+        print_warning "Non-interactive terminal — skipping spec review pause"
+        return 0
+    fi
+
+    echo -e "\n${YELLOW}${BOLD}┌─────────────────────────────────────────────────────────────┐${NC}"
+    echo -e "${YELLOW}${BOLD}│   SPEC REVIEW                                               │${NC}"
+    echo -e "${YELLOW}│   The spec defines what 'done' means. Get this right.        │${NC}"
+    echo -e "${YELLOW}${BOLD}└─────────────────────────────────────────────────────────────┘${NC}"
+    echo ""
+    echo -e "${CYAN}  Task:  $task${NC}"
+    echo -e "${CYAN}  Spec:  .claude/spec.md  ($ac_count acceptance criteria)${NC}"
+    echo ""
+    echo -e "${BOLD}  Before approving, ask yourself:${NC}"
+    echo ""
+    echo -e "  1. ${BOLD}Contractor test${NC}: Could someone build this without asking you"
+    echo -e "     a single question?"
+    echo ""
+    echo -e "  2. ${BOLD}Scope${NC}: Is this ONE focused deliverable? Does 'Out of Scope'"
+    echo -e "     protect against the most likely creep?"
+    echo ""
+    echo -e "  3. ${BOLD}Acceptance criteria${NC}: Are they specific enough to verify by"
+    echo -e "     running a command or checking a file? Or are they still aspirational?"
+    echo ""
+    echo -e "  4. ${BOLD}Coverage${NC}: What behavior would you be upset about if it broke"
+    echo -e "     and wasn't covered by an AC?"
+    echo ""
+    echo -e "  ${BOLD}[Enter]${NC} Approve  |  ${BOLD}[e]${NC} Edit spec  |  ${BOLD}[s]${NC} Skip task  |  ${BOLD}[q]${NC} Quit"
+    echo ""
+
+    while true; do
+        read -r spec_response
+        case "$spec_response" in
+            e|E)
+                ${EDITOR:-vi} ".claude/spec.md"
+                ac_count=$(grep -c '^- \[ \] AC-' ".claude/spec.md" 2>/dev/null || echo 0)
+                echo ""
+                echo -e "${CYAN}  Spec updated. ($ac_count acceptance criteria)${NC}"
+                echo -e "  ${BOLD}[Enter]${NC} Approve  |  ${BOLD}[e]${NC} Edit again  |  ${BOLD}[s]${NC} Skip  |  ${BOLD}[q]${NC} Quit"
+                echo ""
+                ;;
+            s|S) return 1 ;;
+            q|Q) return 2 ;;
+            *) return 0 ;;
+        esac
+    done
 }
 
 # ─────────────────────────────────────────────────────────────────────────────────
@@ -766,6 +832,7 @@ is_phase_isolation_available() {
         && [[ -d .claude/skills/buildcrew-research ]] \
         && [[ -d .claude/skills/buildcrew-review ]] \
         && [[ -d .claude/skills/buildcrew-build ]] \
+        && [[ -d .claude/skills/buildcrew-codereview ]] \
         && [[ -d .claude/skills/buildcrew-test ]] \
         && [[ -d .claude/skills/buildcrew-verify ]]; then
         return 0
@@ -944,14 +1011,27 @@ process_task_isolated() {
     local needs_human_review=false
     local hr_reason=""
 
+    # Determine whether spec needs to run
+    local __run_spec=false
+    local __spec_skill_available=false
+    [[ -d ".claude/skills/buildcrew-spec" ]] && __spec_skill_available=true
+
+    if [[ "$SKIP_SPEC" != "true" ]] && [[ "$__spec_skill_available" == "true" ]]; then
+        if ! phase_completed "spec"; then
+            __run_spec=true
+        elif [[ -f ".claude/spec.md" ]]; then
+            local ac_count=0
+            ac_count=$(grep -c '^- \[ \] AC-' ".claude/spec.md" 2>/dev/null || echo 0)
+            if (( ac_count < 2 )); then
+                print_warning "Resumed spec has only $ac_count AC(s) (minimum 2). Re-running spec phase."
+                __run_spec=true
+            fi
+        fi
+    fi
+
     if [[ "$SKIP_SPEC" == "true" ]]; then
         print_info "Skipping phase: spec (--skip-spec flag set)"
-    elif phase_completed "spec"; then
-        print_info "Skipping phase: spec (completed in previous run)"
-        if [[ -f ".claude/spec.md" ]]; then
-            __spec_context="Specification available at .claude/spec.md — read it for acceptance criteria."
-        fi
-    elif [[ -d ".claude/skills/buildcrew-spec" ]]; then
+    elif [[ "$__run_spec" == "true" ]]; then
         run_phase_group "spec" "$task" "${__replan_context:+Re-planning context: $__replan_context}" || { clear_task_progress; return 1; }
 
         local spec_verdict
@@ -967,9 +1047,49 @@ process_task_isolated() {
         fi
 
         __spec_context="Specification available at .claude/spec.md — read it for acceptance criteria and scope boundaries."
+
+        # Validate AC count meets minimum (2 required)
+        local ac_count=0
+        if [[ -f ".claude/spec.md" ]]; then
+            ac_count=$(grep -c '^- \[ \] AC-' ".claude/spec.md" 2>/dev/null || echo 0)
+        fi
+        if (( ac_count < 2 )); then
+            print_warning "Spec has only $ac_count acceptance criteria (minimum 2). Re-running spec phase."
+            run_phase_group "spec" "$task" \
+                "RETRY: Previous spec had only $ac_count acceptance criteria. Minimum is 2 concrete, testable acceptance criteria. Read .claude/spec.md and add more specific ACs." \
+                || { clear_task_progress; return 1; }
+            # Re-validate
+            ac_count=$(grep -c '^- \[ \] AC-' ".claude/spec.md" 2>/dev/null || echo 0)
+            if (( ac_count < 2 )); then
+                mark_task_blocked "$task" "Spec produced only $ac_count acceptance criteria after retry (minimum 2)"
+                clear_task_progress
+                return 1
+            fi
+        fi
+
+        # Mandatory spec review — always pauses when spec phase runs (unconditional)
+        local spec_review_exit=0
+        handle_spec_review "$task" "$ac_count" || spec_review_exit=$?
+        if [[ $spec_review_exit -eq 1 ]]; then
+            mark_task_blocked "$task" "Skipped during spec review"
+            clear_task_progress
+            return 1
+        elif [[ $spec_review_exit -eq 2 ]]; then
+            touch "$STOP_FILE"
+            mark_task_blocked "$task" "Pipeline stopped during spec review"
+            clear_task_progress
+            return 1
+        fi
+
         __completed_phases="${__completed_phases:+$__completed_phases }spec"
         save_task_progress "$task" "$__completed_phases" "$__INVOCATION_COUNT"
+    elif [[ "$__spec_skill_available" == "true" ]] && phase_completed "spec"; then
+        print_info "Skipping phase: spec (completed in previous run)"
+        if [[ -f ".claude/spec.md" ]]; then
+            __spec_context="Specification available at .claude/spec.md — read it for acceptance criteria."
+        fi
     fi
+    # If spec skill is not installed, fall through silently (no message, no context set)
 
     # --- research + plan ---
     if phase_completed "research"; then
@@ -1090,9 +1210,9 @@ process_task_isolated() {
         save_task_progress "$task" "$__completed_phases" "$__INVOCATION_COUNT"
     fi
 
-    # --- build → code-review/test (with rebuild loop, circuit breaker) ---
+    # --- build → codereview → test (with rebuild loop, circuit breaker) ---
     if phase_completed "build"; then
-        print_info "Skipping phase: build+test (completed in previous run)"
+        print_info "Skipping phase: build+codereview+test (completed in previous run)"
     else
         local consecutive_build_failures=0
         while true; do
@@ -1111,6 +1231,55 @@ process_task_isolated() {
 
             run_phase_group "build" "$task" "$build_context" || { clear_task_progress; return 1; }
 
+            # --- code review (independent phase) ---
+            if [[ -d ".claude/skills/buildcrew-codereview" ]]; then
+                run_phase_group "codereview" "$task" "${__spec_context}" || { clear_task_progress; return 1; }
+
+                local cr_verdict
+                cr_verdict=$(jq -r '.verdict' "$PHASE_RESULT_FILE")
+                case "$cr_verdict" in
+                    approved)
+                        : # fall through to test
+                        ;;
+                    needs_rebuild)
+                        ((consecutive_build_failures++))
+                        if (( consecutive_build_failures >= 2 )); then
+                            local failure_summary
+                            failure_summary=$(jq -r '.details // "Code review failed twice"' "$PHASE_RESULT_FILE")
+                            print_warning "[CIRCUIT BREAKER] Approach failed twice at Code Review phase. Re-planning from scratch with failure context."
+                            print_debug "Circuit breaker: consecutive_failures=$consecutive_build_failures, replan_count=$__replan_count"
+                            append_lesson "build" \
+                                "Code review NEEDS_REBUILD after $build_attempt attempts: $failure_summary" \
+                                "Triggered circuit breaker and re-planned from scratch" \
+                                "When code review rejects twice on the same approach, the plan itself is likely flawed — re-plan rather than retry"
+                            if (( __replan_count >= 1 )); then
+                                print_error "Circuit breaker triggered again after re-planning. Stopping task."
+                                mark_task_blocked "$task" "Circuit breaker: code review failed twice even after re-planning"
+                                clear_task_progress
+                                return 1
+                            fi
+                            ((__replan_count++))
+                            __replan_context="CIRCUIT BREAKER: Code review NEEDS_REBUILD twice. Previous failure: $failure_summary. The implementation approach needs to change — re-plan with a different strategy."
+                            print_debug "Re-plan context: $__replan_context"
+                            __need_replan=true
+                            __completed_phases=""
+                            clear_task_progress
+                            break
+                        fi
+                        local cr_fail_details
+                        cr_fail_details=$(jq -r '.details // "Code review NEEDS_REBUILD"' "$PHASE_RESULT_FILE")
+                        append_lesson "build" \
+                            "Code review NEEDS_REBUILD on attempt $build_attempt: $cr_fail_details" \
+                            "Retrying build with revised approach" \
+                            "Read code review carefully before retrying — the issues usually indicate a misunderstanding of the existing codebase"
+                        continue ;;
+                    *)
+                        mark_task_blocked "$task" "Unexpected codereview verdict: $cr_verdict"
+                        clear_task_progress
+                        return 1 ;;
+                esac
+            fi
+
             local test_extra="${__spec_context}"
             run_phase_group "test" "$task" "$test_extra" || { clear_task_progress; return 1; }
 
@@ -1120,7 +1289,7 @@ process_task_isolated() {
                 approved)
                     consecutive_build_failures=0
                     break ;;
-                needs_rebuild|test_failure)
+                test_failure)
                     ((consecutive_build_failures++))
                     if (( consecutive_build_failures >= 2 )); then
                         local failure_summary
@@ -1152,7 +1321,7 @@ process_task_isolated() {
                         "Retrying build with revised approach" \
                         "Read test output carefully before retrying — the error usually indicates a misunderstanding of the existing codebase"
                     continue ;;
-                *) mark_task_blocked "$task" "Unexpected review verdict: $verdict"; clear_task_progress; return 1 ;;
+                *) mark_task_blocked "$task" "Unexpected test verdict: $verdict"; clear_task_progress; return 1 ;;
             esac
         done
 
@@ -1167,7 +1336,7 @@ process_task_isolated() {
     # --- outcome (validates against spec acceptance criteria) ---
     if phase_completed "outcome"; then
         print_info "Skipping phase: outcome (completed in previous run)"
-    elif [[ -d ".claude/skills/buildcrew-outcome" ]] && [[ "$SKIP_SPEC" != "true" ]] && [[ -f ".claude/spec.md" ]]; then
+    elif [[ -d ".claude/skills/buildcrew-outcome" ]] && [[ "$SKIP_SPEC" != "true" ]]; then
         local outcome_attempt=0
         local consecutive_outcome_failures=0
         while true; do
@@ -1621,7 +1790,7 @@ main() {
 
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
     parse_args "$@"
-    if [[ "$STRICT_MODE" == "true" ]] && [[ "$SKIP_SPEC" == "true" ]]; then
+    if [[ "$STRICT_EXPLICIT" == "true" ]] && [[ "$STRICT_MODE" == "true" ]] && [[ "$SKIP_SPEC" == "true" ]]; then
         print_warning "--strict has no effect with --skip-spec (outcome phase requires a spec)"
     fi
     main
