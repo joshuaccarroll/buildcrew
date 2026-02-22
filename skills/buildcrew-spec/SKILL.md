@@ -171,6 +171,8 @@ while iteration < 5:
 
 ## Phase Result Protocol
 
+Write `.claude/phase-result.json` using the Write tool before ending your response:
+
 **If spec was written successfully:**
 ```json
 {
@@ -188,5 +190,7 @@ while iteration < 5:
   "details": "Task too vague to produce acceptance criteria: [reason]. Flagged in spec.md."
 }
 ```
+
+Writing `.claude/phase-result.json` is mandatory. Do not end your response without writing it.
 
 Then exit.

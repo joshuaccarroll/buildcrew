@@ -97,7 +97,7 @@ __RESUME_PHASES=""
 # Uses a function instead of declare -A for bash 3.2 (macOS) compatibility
 get_phase_max_turns() {
     case "$1" in
-        spec)       echo 30 ;;
+        spec)       echo 50 ;;
         research)   echo 40 ;;
         review)     echo 50 ;;
         build)      echo 50 ;;
@@ -1043,7 +1043,7 @@ process_task_isolated() {
     if [[ "$SKIP_SPEC" == "true" ]]; then
         print_info "Skipping phase: spec (--skip-spec flag set)"
     elif [[ "$__run_spec" == "true" ]]; then
-        run_phase_group "spec" "$task" "${__replan_context:+Re-planning context: $__replan_context}" || { clear_task_progress; return 1; }
+        run_phase_group "spec" "$task" "${__replan_context:+Re-planning context: $__replan_context}" || { mark_task_blocked "$task" "spec phase failed to produce a valid result"; clear_task_progress; return 1; }
 
         local spec_verdict
         spec_verdict=$(jq -r '.verdict // "complete"' "$PHASE_RESULT_FILE")
@@ -1068,7 +1068,7 @@ process_task_isolated() {
             print_warning "Spec has only $ac_count acceptance criteria (minimum 2). Re-running spec phase."
             run_phase_group "spec" "$task" \
                 "RETRY: Previous spec had only $ac_count acceptance criteria. Minimum is 2 concrete, testable acceptance criteria. Read .claude/spec.md and add more specific ACs." \
-                || { clear_task_progress; return 1; }
+                || { mark_task_blocked "$task" "spec phase failed to produce a valid result on AC retry"; clear_task_progress; return 1; }
             # Re-validate
             ac_count=$(grep -c '^- \[ \] AC-' ".claude/spec.md" 2>/dev/null) || ac_count=0
             if (( ac_count < 2 )); then
@@ -1110,7 +1110,7 @@ process_task_isolated() {
         if [[ -n "$__replan_context" ]]; then
             research_extra="${research_extra:+$research_extra | }REPLAN: $__replan_context"
         fi
-        run_phase_group "research" "$task" "$research_extra" || { clear_task_progress; return 1; }
+        run_phase_group "research" "$task" "$research_extra" || { mark_task_blocked "$task" "research phase failed to produce a valid result"; clear_task_progress; return 1; }
         __completed_phases="${__completed_phases:+$__completed_phases }research"
         save_task_progress "$task" "$__completed_phases" "$__INVOCATION_COUNT"
 
@@ -1150,7 +1150,7 @@ process_task_isolated() {
             if [[ -n "$__spec_context" ]]; then
                 review_extra="$review_extra | $__spec_context"
             fi
-            run_phase_group "review" "$task" "$review_extra" || { clear_task_progress; return 1; }
+            run_phase_group "review" "$task" "$review_extra" || { mark_task_blocked "$task" "review phase failed to produce a valid result"; clear_task_progress; return 1; }
 
             local verdict
             verdict=$(jq -r '.verdict' "$PHASE_RESULT_FILE")
@@ -1240,10 +1240,10 @@ process_task_isolated() {
                 build_context="${build_context:+$build_context | }This is build attempt $build_attempt. Previous attempt failed: $prev_reason. Avoid the same mistakes."
             fi
 
-            run_phase_group "build" "$task" "$build_context" || { clear_task_progress; return 1; }
+            run_phase_group "build" "$task" "$build_context" || { mark_task_blocked "$task" "build phase failed to produce a valid result"; clear_task_progress; return 1; }
 
             # --- code review (independent phase) ---
-            run_phase_group "codereview" "$task" "${__spec_context}" || { clear_task_progress; return 1; }
+            run_phase_group "codereview" "$task" "${__spec_context}" || { mark_task_blocked "$task" "codereview phase failed to produce a valid result"; clear_task_progress; return 1; }
 
             local cr_verdict
             cr_verdict=$(jq -r '.verdict' "$PHASE_RESULT_FILE")
@@ -1290,7 +1290,7 @@ process_task_isolated() {
             esac
 
             local test_extra="${__spec_context}"
-            run_phase_group "test" "$task" "$test_extra" || { clear_task_progress; return 1; }
+            run_phase_group "test" "$task" "$test_extra" || { mark_task_blocked "$task" "test phase failed to produce a valid result"; clear_task_progress; return 1; }
 
             local verdict
             verdict=$(jq -r '.verdict' "$PHASE_RESULT_FILE")
@@ -1389,7 +1389,7 @@ process_task_isolated() {
                 outcome_extra="$outcome_extra | Retry after fix. Previous failure: $prev_outcome_reason"
             fi
 
-            run_phase_group "outcome" "$task" "$outcome_extra" || { clear_task_progress; return 1; }
+            run_phase_group "outcome" "$task" "$outcome_extra" || { mark_task_blocked "$task" "outcome phase failed to produce a valid result"; clear_task_progress; return 1; }
 
             local outcome_verdict
             outcome_verdict=$(jq -r '.verdict // "unknown"' "$PHASE_RESULT_FILE")
@@ -1434,14 +1434,14 @@ process_task_isolated() {
                             "Rebuilt with targeted fix for failing criteria" \
                             "Partial acceptance at outcome stage means the implementation is incomplete — re-read the specific failing criteria in the spec"
                         ((build_attempt++))
-                        run_phase_group "build" "$task" "OUTCOME FIX: $partial_details | $__spec_context" || { clear_task_progress; return 1; }
-                        run_phase_group "codereview" "$task" "${__spec_context}" || { clear_task_progress; return 1; }
+                        run_phase_group "build" "$task" "OUTCOME FIX: $partial_details | $__spec_context" || { mark_task_blocked "$task" "build phase failed during outcome fix"; clear_task_progress; return 1; }
+                        run_phase_group "codereview" "$task" "${__spec_context}" || { mark_task_blocked "$task" "codereview phase failed to produce a valid result"; clear_task_progress; return 1; }
                         cr_verdict=$(jq -r '.verdict' "$PHASE_RESULT_FILE")
                         if [[ "$cr_verdict" == "needs_rebuild" ]]; then
                             mark_task_blocked "$task" "Code review rejected rebuild at outcome stage"
                             clear_task_progress; return 1
                         fi
-                        run_phase_group "test" "$task" "$__spec_context" || { clear_task_progress; return 1; }
+                        run_phase_group "test" "$task" "$__spec_context" || { mark_task_blocked "$task" "test phase failed during outcome fix"; clear_task_progress; return 1; }
                         continue
                     else
                         local partial_details
@@ -1485,14 +1485,14 @@ process_task_isolated() {
                         "Rebuilt with targeted fix for failing criteria" \
                         "Always run the feature against its acceptance criteria before consider it done"
                     ((build_attempt++))
-                    run_phase_group "build" "$task" "OUTCOME FIX: $rebuild_ctx | $__spec_context" || { clear_task_progress; return 1; }
-                    run_phase_group "codereview" "$task" "${__spec_context}" || { clear_task_progress; return 1; }
+                    run_phase_group "build" "$task" "OUTCOME FIX: $rebuild_ctx | $__spec_context" || { mark_task_blocked "$task" "build phase failed during outcome fix"; clear_task_progress; return 1; }
+                    run_phase_group "codereview" "$task" "${__spec_context}" || { mark_task_blocked "$task" "codereview phase failed to produce a valid result"; clear_task_progress; return 1; }
                     cr_verdict=$(jq -r '.verdict' "$PHASE_RESULT_FILE")
                     if [[ "$cr_verdict" == "needs_rebuild" ]]; then
                         mark_task_blocked "$task" "Code review rejected rebuild at outcome stage"
                         clear_task_progress; return 1
                     fi
-                    run_phase_group "test" "$task" "$__spec_context" || { clear_task_progress; return 1; }
+                    run_phase_group "test" "$task" "$__spec_context" || { mark_task_blocked "$task" "test phase failed during outcome fix"; clear_task_progress; return 1; }
                     continue ;;
                 *)
                     mark_task_blocked "$task" "Unexpected outcome verdict: $outcome_verdict"
@@ -1516,7 +1516,7 @@ process_task_isolated() {
         ((verify_attempt++))
 
         local verify_extra="${__spec_context}"
-        run_phase_group "verify" "$task" "$verify_extra" || { clear_task_progress; return 1; }
+        run_phase_group "verify" "$task" "$verify_extra" || { mark_task_blocked "$task" "verify phase failed to produce a valid result"; clear_task_progress; return 1; }
 
         local verdict
         verdict=$(jq -r '.verdict' "$PHASE_RESULT_FILE")
@@ -1560,14 +1560,14 @@ process_task_isolated() {
                             "Verify blocked on '$failing': $failure_details" \
                             "Rebuilt with targeted fix for $failing issues" \
                             "Always run the full verify check before considering a build complete"
-                        run_phase_group "build" "$task" "$rebuild_context" || { clear_task_progress; return 1; }
-                        run_phase_group "codereview" "$task" "${__spec_context}" || { clear_task_progress; return 1; }
+                        run_phase_group "build" "$task" "$rebuild_context" || { mark_task_blocked "$task" "build phase failed during verify fix"; clear_task_progress; return 1; }
+                        run_phase_group "codereview" "$task" "${__spec_context}" || { mark_task_blocked "$task" "codereview phase failed to produce a valid result"; clear_task_progress; return 1; }
                         cr_verdict=$(jq -r '.verdict' "$PHASE_RESULT_FILE")
                         if [[ "$cr_verdict" == "needs_rebuild" ]]; then
                             mark_task_blocked "$task" "Code review rejected rebuild at verify stage"
                             clear_task_progress; return 1
                         fi
-                        run_phase_group "test" "$task" "$verify_extra" || { clear_task_progress; return 1; }
+                        run_phase_group "test" "$task" "$verify_extra" || { mark_task_blocked "$task" "test phase failed during verify fix"; clear_task_progress; return 1; }
                         ;;
                     *)
                         mark_task_blocked "$task" "Verification blocked: $failing"

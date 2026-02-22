@@ -727,9 +727,9 @@ teardown() {
 # New phase turns (spec, outcome, codereview)
 # ─────────────────────────────────────────────────────────────────────────────
 
-@test "get_phase_max_turns: spec returns 30" {
+@test "get_phase_max_turns: spec returns 50" {
     run get_phase_max_turns "spec"
-    [ "$output" = "30" ]
+    [ "$output" = "50" ]
 }
 
 @test "get_phase_max_turns: outcome returns 40" {
@@ -1200,4 +1200,87 @@ EOF
         print_debug "result=$(touch "$marker_file"; echo evaluated)"
     fi
     [ ! -f "$marker_file" ]
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Phase group failure: marks task blocked (prevents infinite loop in main)
+# ─────────────────────────────────────────────────────────────────────────────
+
+@test "phase group failure: marks task blocked when spec phase produces no result" {
+    mkdir -p .buildcrew ".claude/skills/buildcrew-spec"
+    echo "- [ ] test task" > BACKLOG.md
+    SKIP_SPEC=false
+    STRICT_MODE=false
+    HUMAN_REVIEW=false
+    __RESUME_PHASES=""
+
+    local blocked_file
+    blocked_file=$(mktemp)
+
+    archive_task_artifacts() { :; }
+    clear_task_progress()    { :; }
+    save_task_progress()     { :; }
+    append_lesson()          { :; }
+    handle_human_review()    { return 0; }
+    handle_spec_review()     { return 0; }
+    mark_task_blocked()      { echo "$*" > "$blocked_file"; }
+    run_phase_group()        { return 1; }
+
+    run process_task_isolated "test task"
+    [ "$status" -eq 1 ]
+    [ -s "$blocked_file" ]
+    grep -q "spec" "$blocked_file"
+    rm -f "$blocked_file"
+}
+
+@test "phase group failure: marks task blocked when research phase produces no result" {
+    mkdir -p .buildcrew
+    echo "- [ ] test task" > BACKLOG.md
+    SKIP_SPEC=true
+    STRICT_MODE=false
+    HUMAN_REVIEW=false
+    __RESUME_PHASES=""
+
+    local blocked_file
+    blocked_file=$(mktemp)
+
+    archive_task_artifacts() { :; }
+    clear_task_progress()    { :; }
+    save_task_progress()     { :; }
+    append_lesson()          { :; }
+    handle_human_review()    { return 0; }
+    mark_task_blocked()      { echo "$*" > "$blocked_file"; }
+    run_phase_group()        { return 1; }
+
+    run process_task_isolated "test task"
+    [ "$status" -eq 1 ]
+    [ -s "$blocked_file" ]
+    grep -q "research" "$blocked_file"
+    rm -f "$blocked_file"
+}
+
+@test "phase group failure: marks task blocked when review phase produces no result" {
+    mkdir -p .buildcrew
+    echo "- [ ] test task" > BACKLOG.md
+    SKIP_SPEC=true
+    STRICT_MODE=false
+    HUMAN_REVIEW=false
+    __RESUME_PHASES="research"
+
+    local blocked_file
+    blocked_file=$(mktemp)
+
+    archive_task_artifacts() { :; }
+    clear_task_progress()    { :; }
+    save_task_progress()     { :; }
+    append_lesson()          { :; }
+    handle_human_review()    { return 0; }
+    mark_task_blocked()      { echo "$*" > "$blocked_file"; }
+    run_phase_group()        { return 1; }
+
+    run process_task_isolated "test task"
+    [ "$status" -eq 1 ]
+    [ -s "$blocked_file" ]
+    grep -q "review" "$blocked_file"
+    rm -f "$blocked_file"
 }
