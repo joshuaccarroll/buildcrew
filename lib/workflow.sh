@@ -310,7 +310,7 @@ handle_spec_review() {
         case "$spec_response" in
             e|E)
                 ${EDITOR:-vi} ".claude/spec.md"
-                ac_count=$(grep -c '^- \[ \] AC-' ".claude/spec.md" 2>/dev/null || echo 0)
+                ac_count=$(grep -c '^- \[ \] AC-' ".claude/spec.md" 2>/dev/null) || ac_count=0
                 echo ""
                 echo -e "${CYAN}  Spec updated. ($ac_count acceptance criteria)${NC}"
                 echo -e "  ${BOLD}[Enter]${NC} Approve  |  ${BOLD}[e]${NC} Edit again  |  ${BOLD}[s]${NC} Skip  |  ${BOLD}[q]${NC} Quit"
@@ -706,7 +706,7 @@ append_lesson() {
     # Count existing lesson entries (lines starting with "## Lesson")
     local entry_count=0
     if [[ -f "$LESSONS_FILE" ]]; then
-        entry_count=$(grep -c '^## Lesson [0-9]' "$LESSONS_FILE" 2>/dev/null || echo 0)
+        entry_count=$(grep -c '^## Lesson [0-9]' "$LESSONS_FILE" 2>/dev/null) || entry_count=0
     fi
 
     # Summarize oldest entries if at cap
@@ -1022,7 +1022,7 @@ process_task_isolated() {
             __run_spec=true
         elif [[ -f ".claude/spec.md" ]]; then
             local ac_count=0
-            ac_count=$(grep -c '^- \[ \] AC-' ".claude/spec.md" 2>/dev/null || echo 0)
+            ac_count=$(grep -c '^- \[ \] AC-' ".claude/spec.md" 2>/dev/null) || ac_count=0
             if (( ac_count < 2 )); then
                 print_warning "Resumed spec has only $ac_count AC(s) (minimum 2). Re-running spec phase."
                 __run_spec=true
@@ -1052,7 +1052,7 @@ process_task_isolated() {
         # Validate AC count meets minimum (2 required)
         local ac_count=0
         if [[ -f ".claude/spec.md" ]]; then
-            ac_count=$(grep -c '^- \[ \] AC-' ".claude/spec.md" 2>/dev/null || echo 0)
+            ac_count=$(grep -c '^- \[ \] AC-' ".claude/spec.md" 2>/dev/null) || ac_count=0
         fi
         if (( ac_count < 2 )); then
             print_warning "Spec has only $ac_count acceptance criteria (minimum 2). Re-running spec phase."
@@ -1060,7 +1060,7 @@ process_task_isolated() {
                 "RETRY: Previous spec had only $ac_count acceptance criteria. Minimum is 2 concrete, testable acceptance criteria. Read .claude/spec.md and add more specific ACs." \
                 || { clear_task_progress; return 1; }
             # Re-validate
-            ac_count=$(grep -c '^- \[ \] AC-' ".claude/spec.md" 2>/dev/null || echo 0)
+            ac_count=$(grep -c '^- \[ \] AC-' ".claude/spec.md" 2>/dev/null) || ac_count=0
             if (( ac_count < 2 )); then
                 mark_task_blocked "$task" "Spec produced only $ac_count acceptance criteria after retry (minimum 2)"
                 clear_task_progress
