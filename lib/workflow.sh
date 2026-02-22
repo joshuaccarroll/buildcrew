@@ -863,9 +863,24 @@ run_phase_group() {
 
     print_info "Phase: $phase (max $max_turns turns)"
 
-    local prompt="Execute the buildcrew-$phase skill for this task: $task"
-    if [[ -n "$extra_context" ]]; then
-        prompt="$prompt. Context: $extra_context"
+    # Build prompt: inline SKILL.md content directly so phase instructions are
+    # always available even if the Skill tool fails in headless (claude -p) mode.
+    local skill_file=".claude/skills/buildcrew-${phase}/SKILL.md"
+    local prompt
+    if [[ -f "$skill_file" ]]; then
+        # Strip YAML frontmatter (content between first and second --- delimiters)
+        local skill_content
+        skill_content=$(awk 'NR==1&&/^---/{f=1;next} f&&/^---/{f=0;next} !f' "$skill_file")
+        prompt="Execute the buildcrew-$phase skill for this task: $task"
+        if [[ -n "$extra_context" ]]; then
+            prompt="$prompt. Context: $extra_context"
+        fi
+        prompt="$prompt"$'\n\n---\n\n'"$skill_content"
+    else
+        prompt="Execute the buildcrew-$phase skill for this task: $task"
+        if [[ -n "$extra_context" ]]; then
+            prompt="$prompt. Context: $extra_context"
+        fi
     fi
 
     # Inject project context

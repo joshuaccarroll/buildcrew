@@ -456,6 +456,7 @@ EOF
       "TodoWrite",
       "WebFetch",
       "WebSearch",
+      "Task",
 
       "Bash(npm:*)",
       "Bash(npx:*)",
