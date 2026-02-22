@@ -195,6 +195,8 @@ After completing any refactor or rebuild, if user-facing behavior or setup steps
 
 ## Phase Result Protocol
 
+When the code review is complete, write `.claude/phase-result.json` using the Write tool:
+
 **If approved (code review passed, refactor complete if needed):**
 ```json
 {
@@ -213,4 +215,4 @@ After completing any refactor or rebuild, if user-facing behavior or setup steps
 }
 ```
 
-Then exit.
+Writing `.claude/phase-result.json` is mandatory. Do not end your response without writing it using the Write tool.
