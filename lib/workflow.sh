@@ -875,6 +875,13 @@ run_phase_group() {
         prompt="$prompt"$'\n\nProject Context:\n'"$project_context"
     fi
 
+    # Save terminal state — claude may leave terminal in raw/no-echo mode when
+    # killed by SIGINT (from the file monitor), breaking subsequent read prompts.
+    local __saved_stty=""
+    if [[ -t 0 ]]; then
+        __saved_stty=$(stty -g 2>/dev/null) || __saved_stty=""
+    fi
+
     # Start file watcher
     start_file_monitor "$PHASE_RESULT_FILE" "claude.*buildcrew-$phase"
 
@@ -883,6 +890,8 @@ run_phase_group() {
     claude -p "$prompt" --max-turns "$max_turns" || true
 
     stop_file_monitor
+    # Restore terminal state in case claude modified it before being killed
+    [[ -n "$__saved_stty" ]] && stty "$__saved_stty" 2>/dev/null || true
 
     # Validate result (with one retry on failure)
     if [[ ! -f "$PHASE_RESULT_FILE" ]] || ! jq -e . "$PHASE_RESULT_FILE" >/dev/null 2>&1; then
@@ -902,6 +911,7 @@ run_phase_group() {
         claude -p "$prompt" --max-turns "$max_turns" || true
 
         stop_file_monitor
+        [[ -n "$__saved_stty" ]] && stty "$__saved_stty" 2>/dev/null || true
 
         if [[ ! -f "$PHASE_RESULT_FILE" ]] || ! jq -e . "$PHASE_RESULT_FILE" >/dev/null 2>&1; then
             print_error "Phase $phase failed after retry"
