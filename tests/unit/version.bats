@@ -5,11 +5,15 @@ load '../setup.bash'
 
 setup() {
     setup_test_dir
+    # Point BUILDCREW_HOME at the temp dir so VERSION reads/writes don't touch the real file
+    BUILDCREW_HOME="$TEST_DIR"
     source_lib "version.sh"
 }
 
 teardown() {
     teardown_test_dir
+    # Restore BUILDCREW_HOME after each test
+    BUILDCREW_HOME="$BUILDCREW_ROOT"
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
