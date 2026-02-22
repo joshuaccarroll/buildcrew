@@ -110,7 +110,7 @@ while iteration < 5:
 Start by getting the project name:
 
 **Ask the user:**
-> "Welcome to Josh Workflow Builder! Let's create something great together.
+> "Welcome to BuildCrew! Let's create something great together.
 >
 > First, what should we call this project? Give me a short name (e.g., 'task-manager', 'portfolio-site', 'api-gateway')."
 
