@@ -167,6 +167,8 @@ For each failed criterion:
 
 ## Phase Result Protocol
 
+When outcome verification is complete, write `.claude/phase-result.json` using the Write tool:
+
 **If all verifiable criteria pass:**
 ```json
 {
@@ -193,5 +195,7 @@ For each failed criterion:
   "details": "Acceptance criteria not met: [AC-01: reason]. SMOKE failures: [SMOKE-01: result]. Rebuild needed."
 }
 ```
+
+Writing `.claude/phase-result.json` is mandatory. Do not end your response without writing it using the Write tool.
 
 Then exit.
