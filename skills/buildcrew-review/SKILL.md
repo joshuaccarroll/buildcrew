@@ -16,6 +16,12 @@ The task was provided in the prompt. The implementation plan is in `.claude/curr
 
 ---
 
+### Revision Cycle Detection
+
+If `.claude/plan-review-prev.md` exists, this is a **revision cycle** — the plan was already reviewed and revised. Your job shifts from "find everything wrong" to "verify previous issues were addressed and check for regressions." Read `.claude/plan-review-prev.md` first to understand what was previously flagged.
+
+---
+
 ## PLAN-REVIEW: Adversarial 3-Pass Review
 
 **Goal**: Challenge the plan ruthlessly before any code is written. Your job is to find what's wrong with it — not to approve it quickly. This phase uses 3 adversarial review passes with fresh-context sub-agents for Passes 1 and 2.
@@ -66,6 +72,29 @@ Read `.claude/current-plan.md` and interrogate it against:
 
 Write your review to `.claude/review-pass1-pe.md`. Do NOT modify `.claude/current-plan.md`.
 Keep your review concise: max 80 lines. Focus on the top 3-5 findings, not exhaustive nitpicking.
+
+End your review with a verdict line on its own line:
+VERDICT: PASS
+or
+VERDICT: NEEDS_REVISION
+```
+
+If `.claude/plan-review-prev.md` exists, use this alternate prompt for Pass 1 instead:
+
+```
+You are a principal engineer reviewing a REVISED implementation plan. The plan was already reviewed once and flagged for revision. Your job is NOT to find everything wrong from scratch — it is to verify that the previous issues were addressed and that revisions did not introduce regressions.
+
+Read `.claude/plan-review-prev.md` and `.claude/review-pass1-pe-prev.md` first to understand what was previously flagged. Then read `.claude/current-plan.md` to evaluate the revised plan.
+
+The previous review files reflect an earlier version of the plan. Do not re-inherit the previous verdict — evaluate the current plan on its own merits, informed by what changed.
+
+Focus on:
+1. **Were previous issues addressed?** For each finding in `.claude/review-pass1-pe-prev.md`, did the revision substantively resolve it? Note which were addressed and which were not.
+2. **Did revisions introduce regressions?** Did fixing one issue break another part of the plan? Are new structural problems present that weren't there before?
+3. **New blocking issues only** — only flag NEW issues if they are genuinely blocking (security holes, data loss risk, core logic errors, complete misunderstanding of requirements). Do not nitpick things not flagged in the previous cycle.
+
+Write your review to `.claude/review-pass1-pe.md`. Do NOT modify `.claude/current-plan.md`.
+Keep your review concise: max 50 lines.
 
 End your review with a verdict line on its own line:
 VERDICT: PASS
@@ -131,6 +160,30 @@ or
 VERDICT: NEEDS_REVISION
 ```
 
+If `.claude/plan-review-prev.md` exists, use this alternate prompt for Pass 2 instead:
+
+```
+You are a product manager reviewing a REVISED implementation plan. The plan was already reviewed once and flagged for revision. Your job is NOT to find everything wrong from scratch — it is to verify that the previous user-impact issues were addressed and that revisions did not accidentally drop or weaken acceptance criteria.
+
+Read `.claude/plan-review-prev.md` and `.claude/review-pass2-pm-prev.md` first to understand what was previously flagged. Then read `.claude/current-plan.md` to evaluate the revised plan. If `.claude/spec.md` exists, read it too.
+
+The previous review files reflect an earlier version of the plan. Do not re-inherit the previous verdict — evaluate the current plan on its own merits, informed by what changed.
+
+Focus on:
+1. **Were previous user-impact issues resolved?** For each finding in `.claude/review-pass2-pm-prev.md`, did the revision substantively address it? Note which were addressed and which were not.
+2. **Were acceptance criteria preserved?** Did the revisions accidentally drop, weaken, or contradict any acceptance criteria from `.claude/spec.md` or the original task? Verify each criterion is still covered.
+3. **Did revisions introduce regressions?** Did fixing one user-flow issue create a different one? Are there new gaps in the user journey not present before?
+4. **New blocking issues only** — only flag NEW issues if they are genuinely blocking (acceptance criteria dropped, critical user flow broken, fundamental misunderstanding of the task). Do not nitpick things not flagged in the previous cycle.
+
+Write your review to `.claude/review-pass2-pm.md`. Do NOT modify `.claude/current-plan.md`. Do NOT use AskUserQuestion.
+Keep your review concise: max 50 lines.
+
+End your review with a verdict line on its own line:
+VERDICT: PASS
+or
+VERDICT: NEEDS_REVISION
+```
+
 After the sub-agent completes, verify that `.claude/review-pass2-pm.md` exists and contains a `VERDICT:` line. If the file is missing or contains no VERDICT line, log a warning ("Pass 2 sub-agent failed to produce review") and treat this pass as NEEDS_REVISION with details "Sub-agent failed to produce review".
 
 If both sub-agents failed to produce their review files, write `.claude/phase-result.json`:
@@ -159,10 +212,12 @@ Synthesize:
 4. Is there a fundamentally simpler way to deliver the same value that was overlooked?
 5. Step ordering: foundations first, verification checkpoints present, prerequisites early?
 6. What would you be embarrassed about if this shipped as-is?
+7. If `.claude/plan-review-prev.md` exists: were previous findings substantively addressed?
+8. If this is a revision cycle: bias toward convergence if previous issues were addressed, even if imperfectly. Do not reject for issues not flagged in the previous cycle unless they are genuinely critical (security, data loss, core logic error).
 
 **Pass 3 Verdict**: APPROVED / NEEDS_REVISION / REJECTED
 
-Only issue APPROVED if you would genuinely stake your reputation on this plan proceeding to build.
+Only issue APPROVED if you would genuinely stake your reputation on this plan proceeding to build. Holding a revised plan to a higher standard than the original creates a non-converging loop. If the revisions addressed the substance of previous findings, approve.
 
 If NEEDS_REVISION or REJECTED: update `.claude/current-plan.md` with targeted edits based on the synthesized findings from Pass 1 and Pass 2. **Do NOT re-enter the 3-pass cycle** — the orchestrator handles retries externally.
 

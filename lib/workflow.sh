@@ -653,6 +653,7 @@ LESSONS_FILE=".buildcrew/lessons.md"
 ARTIFACT_FILES=(
     .claude/spec.md .claude/research.md .claude/current-plan.md .claude/plan-review.md
     .claude/review-pass1-pe.md .claude/review-pass2-pm.md
+    .claude/plan-review-prev.md .claude/review-pass1-pe-prev.md .claude/review-pass2-pm-prev.md
     .claude/code-review.md .claude/test-report.md .claude/outcome-report.md
     .claude/security-audit.md .claude/verify-report.md .claude/current-test-plan.md
 )
@@ -1174,11 +1175,15 @@ process_task_isolated() {
     else
         local plan_review_cycle=0
         local consecutive_review_failures=0
+        local prev_review_details=""
         while true; do
             ((plan_review_cycle++))
             local review_extra="Plan review cycle $plan_review_cycle (max 2 before re-planning)"
             if [[ -n "$__spec_context" ]]; then
                 review_extra="$review_extra | $__spec_context"
+            fi
+            if (( plan_review_cycle > 1 )) && [[ -f ".claude/plan-review-prev.md" ]]; then
+                review_extra="$review_extra | REVISION CYCLE: Previous review findings are in .claude/plan-review-prev.md — focus on whether those issues were addressed. Previous details: $prev_review_details"
             fi
             run_phase_group "review" "$task" "$review_extra" || { mark_task_blocked "$task" "review phase failed to produce a valid result"; clear_task_progress; return 1; }
 
@@ -1228,6 +1233,7 @@ process_task_isolated() {
                             print_error "Circuit breaker triggered again after re-planning. Stopping task."
                             mark_task_blocked "$task" "Circuit breaker: plan failed twice even after re-planning"
                             clear_task_progress
+                            rm -f .claude/plan-review-prev.md .claude/review-pass1-pe-prev.md .claude/review-pass2-pm-prev.md
                             return 1
                         fi
                         ((__replan_count++))
@@ -1236,8 +1242,13 @@ process_task_isolated() {
                         __need_replan=true
                         __completed_phases=""
                         clear_task_progress
+                        rm -f .claude/plan-review-prev.md .claude/review-pass1-pe-prev.md .claude/review-pass2-pm-prev.md
                         break
                     fi
+                    prev_review_details=$(jq -r '.details // ""' "$PHASE_RESULT_FILE")
+                    [[ -f ".claude/plan-review.md" ]] && cp .claude/plan-review.md .claude/plan-review-prev.md
+                    [[ -f ".claude/review-pass1-pe.md" ]] && cp .claude/review-pass1-pe.md .claude/review-pass1-pe-prev.md
+                    [[ -f ".claude/review-pass2-pm.md" ]] && cp .claude/review-pass2-pm.md .claude/review-pass2-pm-prev.md
                     ;;
                 *) mark_task_blocked "$task" "Unexpected plan review verdict: $verdict"; clear_task_progress; return 1 ;;
             esac
