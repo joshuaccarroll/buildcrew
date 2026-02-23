@@ -1763,3 +1763,330 @@ EOF
     run load_buildcrew_config
     [[ "$output" == *"Warning"*"KEEP_LOGS"* ]]
 }
+
+# -----------------------------------------------------------------------
+# Chunked phase execution tests
+# -----------------------------------------------------------------------
+
+@test "parse_plan_steps: returns step count and creates progress file" {
+    mkdir -p .buildcrew .claude
+    cat > .claude/current-plan.md <<'EOF'
+# Plan
+
+### Step 1: Setup scaffolding
+Some description.
+
+### Step 2: Implement core logic
+More description.
+
+### Step 3: Write tests
+Test description.
+EOF
+    run parse_plan_steps
+    [ "$status" -eq 0 ]
+    [ "$output" = "3" ]
+    [ -f "$STEP_PROGRESS_FILE" ]
+    [ "$(wc -l < "$STEP_PROGRESS_FILE" | tr -d ' ')" -eq 3 ]
+}
+
+@test "parse_plan_steps: returns 1 when no steps found" {
+    mkdir -p .buildcrew .claude
+    cat > .claude/current-plan.md <<'EOF'
+# Plan
+
+## Context
+No step headers here.
+EOF
+    run parse_plan_steps
+    [ "$status" -eq 1 ]
+}
+
+@test "parse_plan_steps: returns 1 when plan file does not exist" {
+    mkdir -p .buildcrew
+    rm -f .claude/current-plan.md
+    run parse_plan_steps
+    [ "$status" -eq 1 ]
+}
+
+@test "parse_plan_steps: handles step names with special characters" {
+    mkdir -p .buildcrew .claude
+    cat > .claude/current-plan.md <<'EOF'
+### Step 1: Add `foo:bar` (handles colons/backticks)
+EOF
+    run parse_plan_steps
+    [ "$status" -eq 0 ]
+    [ "$output" = "1" ]
+    grep -q "Add" "$STEP_PROGRESS_FILE"
+}
+
+@test "get_next_pending_step: returns first pending step" {
+    mkdir -p .buildcrew
+    printf '1|pending|Step one\n2|pending|Step two\n3|pending|Step three\n' > "$STEP_PROGRESS_FILE"
+    run get_next_pending_step
+    [ "$status" -eq 0 ]
+    [ "$output" = "1" ]
+}
+
+@test "get_next_pending_step: skips completed steps" {
+    mkdir -p .buildcrew
+    printf '1|complete|Step one\n2|pending|Step two\n3|pending|Step three\n' > "$STEP_PROGRESS_FILE"
+    run get_next_pending_step
+    [ "$status" -eq 0 ]
+    [ "$output" = "2" ]
+}
+
+@test "get_next_pending_step: returns 1 when all complete" {
+    mkdir -p .buildcrew
+    printf '1|complete|Step one\n2|complete|Step two\n' > "$STEP_PROGRESS_FILE"
+    run get_next_pending_step
+    [ "$status" -eq 1 ]
+}
+
+@test "mark_step_complete: updates step status" {
+    mkdir -p .buildcrew
+    printf '1|pending|Step one\n2|pending|Step two\n' > "$STEP_PROGRESS_FILE"
+    mark_step_complete 1
+    grep -q "^1|complete|" "$STEP_PROGRESS_FILE"
+    grep -q "^2|pending|" "$STEP_PROGRESS_FILE"
+}
+
+@test "get_step_name: returns step name by number" {
+    mkdir -p .buildcrew
+    printf '1|pending|Setup scaffolding\n2|pending|Core logic\n' > "$STEP_PROGRESS_FILE"
+    run get_step_name 2
+    [ "$status" -eq 0 ]
+    [ "$output" = "Core logic" ]
+}
+
+@test "clear_task_progress: also clears step progress" {
+    mkdir -p .buildcrew
+    echo '{}' > "$PROGRESS_FILE"
+    printf '1|pending|Step one\n' > "$STEP_PROGRESS_FILE"
+    clear_task_progress
+    [ ! -f "$PROGRESS_FILE" ]
+    [ ! -f "$STEP_PROGRESS_FILE" ]
+}
+
+@test "_check_max_turns_in_log: detects max-turns in log output" {
+    mkdir -p .buildcrew
+    local log_file
+    log_file=$(mktemp)
+    printf 'some output\nHit max-turns limit\nmore output\n' > "$log_file"
+    __LOG_FILE="$log_file"
+    run _check_max_turns_in_log 0
+    [ "$status" -eq 0 ]
+    rm -f "$log_file"
+}
+
+@test "_check_max_turns_in_log: returns 1 when no match" {
+    mkdir -p .buildcrew
+    local log_file
+    log_file=$(mktemp)
+    printf 'Phase complete\nAll good\n' > "$log_file"
+    __LOG_FILE="$log_file"
+    run _check_max_turns_in_log 0
+    [ "$status" -eq 1 ]
+    rm -f "$log_file"
+}
+
+@test "_check_max_turns_in_log: returns 1 when LOG_FILE empty" {
+    __LOG_FILE=""
+    run _check_max_turns_in_log 0
+    [ "$status" -eq 1 ]
+}
+
+@test "chunked build: triggered when run_phase_group returns 2" {
+    mkdir -p .buildcrew .claude
+    echo "- [ ] test task" > BACKLOG.md
+    SKIP_SPEC=true
+    STRICT_MODE=false
+    HUMAN_REVIEW=false
+    # Use RESUME_MODE=true so process_task_isolated skips artifact cleanup,
+    # preserving .claude/current-plan.md which was created before run.
+    RESUME_MODE=true
+
+    # Plan with 2 steps so chunked build has work to do
+    cat > .claude/current-plan.md <<'EOF'
+# Plan
+
+### Step 1: First step
+Description.
+
+### Step 2: Second step
+Description.
+EOF
+
+    local blocked_file
+    blocked_file=$(mktemp)
+    local call_count_file
+    call_count_file=$(mktemp)
+    echo "0" > "$call_count_file"
+
+    archive_task_artifacts() { :; }
+    clear_task_progress()    { :; }
+    save_task_progress()     { :; }
+    append_lesson()          { :; }
+    handle_human_review()    { return 0; }
+    handle_plan_review()     { return 0; }
+    mark_task_blocked()      { echo "$*" > "$blocked_file"; }
+    load_task_progress() {
+        __RESUME_TASK="test task"
+        __RESUME_PHASES="research review"
+        __RESUME_INVOCATIONS=0
+        return 0
+    }
+
+    run_phase_group() {
+        local phase="$1"
+        mkdir -p .claude
+        local count
+        count=$(cat "$call_count_file")
+        count=$(( count + 1 ))
+        echo "$count" > "$call_count_file"
+        case "$phase" in
+            build)
+                if [[ "$count" -eq 1 ]]; then
+                    # First build call (non-chunked) hits max-turns
+                    return 2
+                fi
+                # Chunked build steps succeed
+                echo '{"phase":"build","verdict":"complete","details":"step done"}' > "$PHASE_RESULT_FILE"
+                return 0
+                ;;
+            codereview)
+                echo '{"phase":"codereview","verdict":"approved","details":"ok"}' > "$PHASE_RESULT_FILE"
+                return 0
+                ;;
+            test)
+                echo '{"phase":"test","verdict":"approved","details":"ok"}' > "$PHASE_RESULT_FILE"
+                return 0
+                ;;
+            *)
+                echo '{"phase":"'"$phase"'","verdict":"complete","details":"ok"}' > "$PHASE_RESULT_FILE"
+                return 0
+                ;;
+        esac
+    }
+
+    run process_task_isolated "test task"
+    # Task should NOT be blocked — chunked build succeeded
+    [ ! -s "$blocked_file" ]
+    rm -f "$blocked_file" "$call_count_file"
+}
+
+@test "chunked build: blocks task when parse_plan_steps finds no steps" {
+    mkdir -p .buildcrew .claude
+    echo "- [ ] test task" > BACKLOG.md
+    SKIP_SPEC=true
+    STRICT_MODE=false
+    HUMAN_REVIEW=false
+    RESUME_MODE=true
+
+    # Plan exists but has NO ### Step headers — parse_plan_steps returns 1
+    cat > .claude/current-plan.md <<'EOF'
+# Plan
+
+## Context
+Implementation notes without step headers.
+EOF
+
+    local blocked_file
+    blocked_file=$(mktemp)
+
+    archive_task_artifacts() { :; }
+    clear_task_progress()    { :; }
+    save_task_progress()     { :; }
+    append_lesson()          { :; }
+    handle_human_review()    { return 0; }
+    handle_plan_review()     { return 0; }
+    mark_task_blocked()      { echo "$*" > "$blocked_file"; }
+    load_task_progress() {
+        __RESUME_TASK="test task"
+        __RESUME_PHASES="research review"
+        __RESUME_INVOCATIONS=0
+        return 0
+    }
+
+    run_phase_group() {
+        local phase="$1"
+        mkdir -p .claude
+        if [[ "$phase" == "build" ]]; then
+            return 2  # always hit max-turns
+        fi
+        echo '{"phase":"'"$phase"'","verdict":"complete","details":"ok"}' > "$PHASE_RESULT_FILE"
+        return 0
+    }
+
+    run process_task_isolated "test task"
+    [ "$status" -eq 1 ]
+    [ -s "$blocked_file" ]
+    grep -qi "chunk\|cannot" "$blocked_file"
+    rm -f "$blocked_file"
+}
+
+@test "chunked test: triggered when run_phase_group returns 2 for test" {
+    mkdir -p .buildcrew .claude
+    echo "- [ ] test task" > BACKLOG.md
+    SKIP_SPEC=true
+    STRICT_MODE=false
+    HUMAN_REVIEW=false
+    __RESUME_PHASES="research review"
+
+    cat > .claude/current-plan.md <<'EOF'
+# Plan
+
+### Step 1: Implementation
+Description.
+EOF
+
+    local blocked_file
+    blocked_file=$(mktemp)
+    local test_call_count_file
+    test_call_count_file=$(mktemp)
+    echo "0" > "$test_call_count_file"
+
+    archive_task_artifacts() { :; }
+    clear_task_progress()    { :; }
+    save_task_progress()     { :; }
+    append_lesson()          { :; }
+    handle_human_review()    { return 0; }
+    handle_plan_review()     { return 0; }
+    mark_task_blocked()      { echo "$*" > "$blocked_file"; }
+
+    run_phase_group() {
+        local phase="$1"
+        mkdir -p .claude
+        case "$phase" in
+            build)
+                echo '{"phase":"build","verdict":"complete","details":"ok"}' > "$PHASE_RESULT_FILE"
+                return 0
+                ;;
+            codereview)
+                echo '{"phase":"codereview","verdict":"approved","details":"ok"}' > "$PHASE_RESULT_FILE"
+                return 0
+                ;;
+            test)
+                local count
+                count=$(cat "$test_call_count_file")
+                count=$(( count + 1 ))
+                echo "$count" > "$test_call_count_file"
+                if [[ "$count" -eq 1 ]]; then
+                    # First test call hits max-turns
+                    return 2
+                fi
+                # Chunked test sub-phases succeed
+                echo '{"phase":"test","verdict":"approved","details":"ok"}' > "$PHASE_RESULT_FILE"
+                return 0
+                ;;
+            *)
+                echo '{"phase":"'"$phase"'","verdict":"complete","details":"ok"}' > "$PHASE_RESULT_FILE"
+                return 0
+                ;;
+        esac
+    }
+
+    run process_task_isolated "test task"
+    # Task should NOT be blocked
+    [ ! -s "$blocked_file" ]
+    rm -f "$blocked_file" "$test_call_count_file"
+}

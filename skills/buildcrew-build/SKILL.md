@@ -92,6 +92,18 @@ When you encounter routine errors during the build, attempt to fix them directly
 
 When escalating, write the phase result with the error details so the review phase has full context.
 
+### Chunked Build Mode
+
+If the context mentions **CHUNKED BUILD MODE**, you are executing a single step from the plan:
+
+1. **Read the full plan** in `.claude/current-plan.md` for overall context
+2. **Execute ONLY the specified step** -- do not work on subsequent steps
+3. **Previous steps are already complete** -- inspect their output if needed, but do not redo their work
+4. **Verify** the step using its Verify gate before writing the result
+5. **Write phase-result.json** with `{"phase":"build","verdict":"complete","details":"Step N complete"}`
+
+A chunked build exists because the full build exceeded the session turn limit. Stay focused on your assigned step.
+
 ### Documentation Maintenance
 
 After implementing changes, update `README.md` to reflect the actual implementation:

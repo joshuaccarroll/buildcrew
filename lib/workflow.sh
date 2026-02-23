@@ -764,6 +764,7 @@ mark_task_blocked() {
 # ─────────────────────────────────────────────────────────────────────────────────
 
 PROGRESS_FILE=".buildcrew/task-progress.json"
+STEP_PROGRESS_FILE=".buildcrew/.step-progress"
 
 # Save progress after a phase group completes successfully.
 # Usage: save_task_progress "task text" "research review" 4
@@ -834,6 +835,93 @@ load_task_progress() {
 # Clear progress file (on completion or fresh start).
 clear_task_progress() {
     rm -f "$PROGRESS_FILE"
+    clear_step_progress
+}
+
+# ─────────────────────────────────────────────────────────────────────────────────
+# Plan step progress tracking (for chunked build)
+# ─────────────────────────────────────────────────────────────────────────────────
+
+# Parse ### Step N: headers from .claude/current-plan.md into STEP_PROGRESS_FILE.
+# Echoes step count to stdout. Returns 1 if no parseable steps found.
+parse_plan_steps() {
+    local plan_file=".claude/current-plan.md"
+    if [[ ! -f "$plan_file" ]]; then
+        return 1
+    fi
+
+    rm -f "$STEP_PROGRESS_FILE"
+    grep '^### Step [0-9]' "$plan_file" | while IFS= read -r line; do
+        step_num=$(echo "$line" | sed 's/^### Step \([0-9][0-9]*\).*/\1/')
+        step_name=$(echo "$line" | sed 's/^### Step [0-9][0-9]*: *//')
+        echo "${step_num}|pending|${step_name}" >> "$STEP_PROGRESS_FILE"
+    done
+
+    if [[ ! -f "$STEP_PROGRESS_FILE" ]]; then
+        return 1
+    fi
+
+    local count
+    count=$(wc -l < "$STEP_PROGRESS_FILE" | tr -d ' ')
+    if [[ "$count" -eq 0 ]]; then
+        rm -f "$STEP_PROGRESS_FILE"
+        return 1
+    fi
+    echo "$count"
+}
+
+# Echoes the next pending step number to stdout. Returns 1 if none remaining.
+get_next_pending_step() {
+    if [[ ! -f "$STEP_PROGRESS_FILE" ]]; then
+        return 1
+    fi
+    local num
+    while IFS='|' read -r num status name; do
+        if [[ "$status" == "pending" ]]; then
+            echo "$num"
+            return 0
+        fi
+    done < "$STEP_PROGRESS_FILE"
+    return 1
+}
+
+# Mark a step as complete. Args: $1=step_num
+mark_step_complete() {
+    local step_num="$1"
+    if [[ ! -f "$STEP_PROGRESS_FILE" ]]; then
+        return
+    fi
+    local tmp
+    tmp="${STEP_PROGRESS_FILE}.tmp.$$"
+    while IFS='|' read -r num status name; do
+        if [[ "$num" == "$step_num" ]]; then
+            echo "${num}|complete|${name}"
+        else
+            echo "${num}|${status}|${name}"
+        fi
+    done < "$STEP_PROGRESS_FILE" > "$tmp"
+    mv "$tmp" "$STEP_PROGRESS_FILE"
+}
+
+# Echoes the step name for a given step number. Args: $1=step_num
+get_step_name() {
+    local step_num="$1"
+    if [[ ! -f "$STEP_PROGRESS_FILE" ]]; then
+        return 1
+    fi
+    local num status name
+    while IFS='|' read -r num status name; do
+        if [[ "$num" == "$step_num" ]]; then
+            echo "$name"
+            return 0
+        fi
+    done < "$STEP_PROGRESS_FILE"
+    return 1
+}
+
+# Remove the step progress file.
+clear_step_progress() {
+    rm -f "$STEP_PROGRESS_FILE"
 }
 
 WORKFLOW_STATE_FILE=".buildcrew/.workflow-state"
@@ -1090,6 +1178,22 @@ is_phase_isolation_available() {
 # Phase-Isolated Mode: run_phase_group
 # ─────────────────────────────────────────────────────────────────────────────────
 
+# Check recent log output for max-turns indicator.
+# Args: $1=log_offset (byte offset captured before claude -p call)
+# Returns: 0 if max-turns detected, 1 otherwise
+_check_max_turns_in_log() {
+    local offset="$1"
+    if [[ -z "${__LOG_FILE:-}" || ! -f "$__LOG_FILE" ]]; then
+        return 1
+    fi
+    local recent
+    recent=$(tail -c +"$(( offset + 1 ))" "$__LOG_FILE" 2>/dev/null || true)
+    if echo "$recent" | grep -qi "max.turns"; then
+        return 0
+    fi
+    return 1
+}
+
 run_phase_group() {
     local phase="$1"
     local task="$2"
@@ -1149,6 +1253,10 @@ run_phase_group() {
     __INVOCATION_COUNT=$(( __INVOCATION_COUNT + 1 ))
     print_debug "Invoking claude for phase: $phase (invocation $__INVOCATION_COUNT/$MAX_INVOCATIONS, max_turns=$max_turns)"
     log_msg "=== PHASE: $phase started (max_turns=$max_turns, invocation=$__INVOCATION_COUNT/$MAX_INVOCATIONS) ==="
+    local __log_offset=0
+    if [[ -n "${__LOG_FILE:-}" && -f "$__LOG_FILE" ]]; then
+        __log_offset=$(wc -c < "$__LOG_FILE" | tr -d ' ')
+    fi
     if [[ -n "$__LOG_FILE" ]]; then
         log_msg "--- claude output start: $phase ---"
         claude -p "$prompt" --max-turns "$max_turns" 2>&1 | tee -a "$__LOG_FILE" || true
@@ -1163,6 +1271,13 @@ run_phase_group() {
 
     # Validate result (with one retry on failure)
     if [[ ! -f "$PHASE_RESULT_FILE" ]] || ! jq -e . "$PHASE_RESULT_FILE" >/dev/null 2>&1; then
+        # Check for max-turns before retrying — retrying at the same limit will hit the same wall
+        if _check_max_turns_in_log "$__log_offset"; then
+            print_warning "Phase $phase hit max-turns limit ($max_turns turns)"
+            update_workflow_state "$phase" "max_turns"
+            return 2
+        fi
+
         print_warning "Phase $phase produced no valid result. Retrying..."
         rm -f "$PHASE_RESULT_FILE"
 
@@ -1178,6 +1293,11 @@ run_phase_group() {
         __INVOCATION_COUNT=$(( __INVOCATION_COUNT + 1 ))
         print_debug "Phase $phase produced no result file — retrying (invocation $__INVOCATION_COUNT/$MAX_INVOCATIONS)"
         log_msg "=== PHASE: $phase retry (invocation=$__INVOCATION_COUNT/$MAX_INVOCATIONS) ==="
+        # Re-capture offset for retry
+        __log_offset=0
+        if [[ -n "${__LOG_FILE:-}" && -f "$__LOG_FILE" ]]; then
+            __log_offset=$(wc -c < "$__LOG_FILE" | tr -d ' ')
+        fi
         if [[ -n "$__LOG_FILE" ]]; then
             log_msg "--- claude output start: $phase ---"
             claude -p "$prompt" --max-turns "$max_turns" 2>&1 | tee -a "$__LOG_FILE" || true
@@ -1190,6 +1310,18 @@ run_phase_group() {
         [[ -n "$__saved_stty" ]] && stty "$__saved_stty" 2>/dev/null || true
 
         if [[ ! -f "$PHASE_RESULT_FILE" ]] || ! jq -e . "$PHASE_RESULT_FILE" >/dev/null 2>&1; then
+            # Log-based check on retry failure
+            if _check_max_turns_in_log "$__log_offset"; then
+                print_warning "Phase $phase hit max-turns limit on retry ($max_turns turns)"
+                update_workflow_state "$phase" "max_turns"
+                return 2
+            fi
+            # Heuristic: both attempts failed on a heavy phase = likely max-turns
+            if [[ "$phase" == "build" || "$phase" == "test" ]]; then
+                print_warning "Phase $phase failed both attempts -- treating as likely max-turns"
+                update_workflow_state "$phase" "max_turns"
+                return 2
+            fi
             print_error "Phase $phase failed after retry"
             update_workflow_state "$phase" "failed"
             return 1
@@ -1202,6 +1334,109 @@ run_phase_group() {
     print_success "Phase $phase complete — verdict: $verdict"
     update_workflow_state "$phase" "complete"
     log_msg "=== PHASE: $phase ended (verdict: $verdict) ==="
+}
+
+# ─────────────────────────────────────────────────────────────────────────────────
+# Chunked phase execution (fallback when a phase hits max-turns)
+# ─────────────────────────────────────────────────────────────────────────────────
+
+# Execute build phase one plan step at a time.
+# Args: $1=task $2=spec_context (optional)
+# Returns: 0=all steps complete, 1=step failed, 2=single step hit max-turns
+run_chunked_build() {
+    local task="$1"
+    local spec_context="${2:-}"
+
+    local step_count
+    step_count=$(parse_plan_steps) || {
+        print_warning "No parseable steps in plan -- cannot chunk build"
+        return 1
+    }
+
+    print_info "Chunked build: $step_count steps found"
+
+    local step_num
+    while step_num=$(get_next_pending_step); do
+        # Check MAX_INVOCATIONS ceiling before each chunk
+        if (( __INVOCATION_COUNT >= MAX_INVOCATIONS )); then
+            print_error "Global invocation ceiling reached during chunked build ($__INVOCATION_COUNT/$MAX_INVOCATIONS)"
+            return 1
+        fi
+
+        local step_name
+        step_name=$(get_step_name "$step_num")
+
+        local chunk_context="CHUNKED BUILD MODE: Execute ONLY Step $step_num"
+        chunk_context="$chunk_context ($step_name) from .claude/current-plan.md."
+        chunk_context="$chunk_context Steps 1 through $((step_num - 1)) are ALREADY COMPLETE."
+        chunk_context="$chunk_context Do NOT proceed to subsequent steps."
+        chunk_context="$chunk_context After completing this step, write phase-result.json."
+        if [[ -n "$spec_context" ]]; then
+            chunk_context="$chunk_context | $spec_context"
+        fi
+
+        local chunk_result=0
+        run_phase_group "build" "$task" "$chunk_context" || chunk_result=$?
+
+        if [[ $chunk_result -eq 2 ]]; then
+            print_error "Single build step $step_num hit max-turns -- step is too large"
+            return 2
+        elif [[ $chunk_result -ne 0 ]]; then
+            print_error "Chunked build step $step_num failed"
+            return 1
+        fi
+
+        mark_step_complete "$step_num"
+        rm -f "$PHASE_RESULT_FILE"  # Clear for next step
+    done
+
+    clear_step_progress
+    return 0
+}
+
+# Execute test phase in two sub-phases: write tests, then run+fix tests.
+# Args: $1=task $2=spec_context (optional)
+# Returns: 0=success (phase-result.json from phase 2 intact), 1=failure, 2=max-turns
+run_chunked_test() {
+    local task="$1"
+    local spec_context="${2:-}"
+
+    print_info "Chunked test: splitting into plan+write and execute+fix"
+
+    # Check ceiling before first sub-phase
+    if (( __INVOCATION_COUNT >= MAX_INVOCATIONS )); then
+        print_error "Global invocation ceiling reached before chunked test ($__INVOCATION_COUNT/$MAX_INVOCATIONS)"
+        return 1
+    fi
+
+    # Sub-phase 1: Plan and write tests
+    local chunk1_context="CHUNKED TEST PHASE 1 of 2: Create test plan and write test files ONLY. Do NOT run tests yet."
+    if [[ -n "$spec_context" ]]; then
+        chunk1_context="$chunk1_context | $spec_context"
+    fi
+
+    local result1=0
+    run_phase_group "test" "$task" "$chunk1_context" || result1=$?
+    if [[ $result1 -ne 0 ]]; then
+        return $result1
+    fi
+    rm -f "$PHASE_RESULT_FILE"
+
+    # Check ceiling before second sub-phase
+    if (( __INVOCATION_COUNT >= MAX_INVOCATIONS )); then
+        print_error "Global invocation ceiling reached between chunked test phases ($__INVOCATION_COUNT/$MAX_INVOCATIONS)"
+        return 1
+    fi
+
+    # Sub-phase 2: Run and fix tests
+    local chunk2_context="CHUNKED TEST PHASE 2 of 2: Test files already exist. Run all tests and fix failures. Write test report and phase-result.json with appropriate verdict."
+    if [[ -n "$spec_context" ]]; then
+        chunk2_context="$chunk2_context | $spec_context"
+    fi
+
+    local result2=0
+    run_phase_group "test" "$task" "$chunk2_context" || result2=$?
+    return $result2
 }
 
 # ─────────────────────────────────────────────────────────────────────────────────
@@ -1561,7 +1796,23 @@ process_task_isolated() {
                 build_context="${build_context:+$build_context | }This is build attempt $build_attempt. Previous attempt failed: $prev_reason. Avoid the same mistakes."
             fi
 
-            run_phase_group "build" "$task" "$build_context" || { mark_task_blocked "$task" "build phase failed to produce a valid result"; clear_task_progress; return 1; }
+            local build_result=0
+            run_phase_group "build" "$task" "$build_context" || build_result=$?
+
+            if [[ $build_result -eq 2 ]]; then
+                print_info "Build hit max-turns. Switching to chunked build."
+                local chunked_result=0
+                run_chunked_build "$task" "$__spec_context" || chunked_result=$?
+                if [[ $chunked_result -ne 0 ]]; then
+                    local block_reason="Chunked build failed"
+                    [[ $chunked_result -eq 2 ]] && block_reason="Build step too large even for chunked execution"
+                    mark_task_blocked "$task" "$block_reason"
+                    clear_task_progress; return 1
+                fi
+            elif [[ $build_result -ne 0 ]]; then
+                mark_task_blocked "$task" "build phase failed to produce a valid result"
+                clear_task_progress; return 1
+            fi
 
             # --- code review (independent phase) ---
             local cr_verdict
@@ -1624,7 +1875,25 @@ process_task_isolated() {
             fi
 
             local test_extra="${__spec_context}"
-            run_phase_group "test" "$task" "$test_extra" || { mark_task_blocked "$task" "test phase failed to produce a valid result"; clear_task_progress; return 1; }
+            local test_result=0
+            run_phase_group "test" "$task" "$test_extra" || test_result=$?
+
+            if [[ $test_result -eq 2 ]]; then
+                print_info "Test hit max-turns. Switching to chunked test."
+                local chunked_test_result=0
+                run_chunked_test "$task" "$__spec_context" || chunked_test_result=$?
+                if [[ $chunked_test_result -eq 2 ]]; then
+                    mark_task_blocked "$task" "Test too large even for chunked execution"
+                    clear_task_progress; return 1
+                elif [[ $chunked_test_result -ne 0 ]]; then
+                    mark_task_blocked "$task" "Chunked test failed to produce a valid result"
+                    clear_task_progress; return 1
+                fi
+                # chunked_test_result == 0: phase-result.json from phase 2 is intact, fall through
+            elif [[ $test_result -ne 0 ]]; then
+                mark_task_blocked "$task" "test phase failed to produce a valid result"
+                clear_task_progress; return 1
+            fi
 
             local verdict
             verdict=$(jq -r '.verdict' "$PHASE_RESULT_FILE")

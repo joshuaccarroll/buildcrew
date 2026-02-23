@@ -32,6 +32,13 @@ Testing philosophy:
 - AAA pattern: Arrange, Act, Assert | tests must be isolated, repeatable, focused
 - Cover: happy path + error handling + edge cases + boundary conditions
 
+### Chunked Test Mode
+
+If the context mentions **CHUNKED TEST PHASE**:
+
+- **Phase 1 of 2**: Create the test plan and write all test files. Do NOT run tests. Write phase-result.json with `{"phase":"test","verdict":"approved","details":"Test plan and files written"}`.
+- **Phase 2 of 2**: Test files already exist. Run the full suite, fix failures (up to 3 attempts), write the test report and final phase-result.json with the appropriate verdict (`approved`, `test_failure`, or `needs_rebuild` per normal rules).
+
 ### Step 1: Create Test Plan
 
 Before running tests, create a test plan in `.claude/current-test-plan.md`:
