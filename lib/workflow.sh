@@ -89,6 +89,15 @@ load_buildcrew_config() {
                         fi
                     fi
                     ;;
+                KEEP_LOGS)
+                    if [[ -z "${KEEP_LOGS+x}" ]]; then
+                        if [[ "$value" == "true" || "$value" == "false" ]]; then
+                            KEEP_LOGS="$value"
+                        else
+                            echo "Warning: invalid KEEP_LOGS in .buildcrew/config: $value (ignored, must be true or false)" >&2
+                        fi
+                    fi
+                    ;;
                 # Add future config keys here
             esac
         fi
@@ -110,6 +119,7 @@ load_buildcrew_config
 MAX_INVOCATIONS=${MAX_INVOCATIONS:-15}
 COMPLEXITY_AWARE=${COMPLEXITY_AWARE:-true}
 AUTO_MODE=${AUTO_MODE:-false}
+KEEP_LOGS=${KEEP_LOGS:-false}
 __INVOCATION_COUNT=0
 __RESUME_PHASES=""
 
@@ -205,6 +215,10 @@ parse_args() {
                 AUTO_MODE=true
                 shift
                 ;;
+            --keep-logs)
+                KEEP_LOGS=true
+                shift
+                ;;
             --max-invocations)
                 if [[ -z "${2:-}" ]] || ! [[ "$2" =~ ^[1-9][0-9]*$ ]] || [[ ${#2} -gt 5 ]]; then
                     echo "Error: --max-invocations requires a positive integer (1-99999, no leading zeros)"
@@ -229,6 +243,7 @@ parse_args() {
                 echo "  --max-invocations N  Set maximum Claude invocations per run (default: 15)"
                 echo "  --full-pipeline  Force all phases regardless of complexity assessment"
                 echo "  --auto       Run fully unattended — auto-approve all interactive pauses"
+                echo "  --keep-logs  Retain the activity log after a successful run (log is always kept on failure)"
                 echo "  --verbose    Show orchestrator decisions, phase verdicts, and invocation counts"
                 echo "  --debug      Alias for --verbose"
                 echo "  --help, -h   Show this help message"
@@ -264,6 +279,21 @@ print_human_review_banner() {
 cleanup() {
     stop_file_monitor
     rm -f "$LOCKFILE"
+}
+
+# cleanup_log — called at the normal end of main() with the failed task count.
+# Deletes the log on a clean run; retains it on failures or when --keep-logs is set.
+# On error() exits, the EXIT trap fires cleanup() (not cleanup_log), so the log is
+# silently retained — the startup "Activity log: ..." message tells the user where it is.
+cleanup_log() {
+    local failed_count="${1:-0}"
+    [[ -z "$__LOG_FILE" ]] && return 0
+    if [[ "$KEEP_LOGS" == "true" ]] || (( failed_count > 0 )); then
+        print_info "Activity log saved: $__LOG_FILE"
+    else
+        rm -f "$__LOG_FILE"
+        print_debug "Activity log removed (no failures; use --keep-logs to retain)"
+    fi
 }
 
 # Pause for human review when --review is set
@@ -1009,7 +1039,14 @@ run_phase_group() {
 
     __INVOCATION_COUNT=$(( __INVOCATION_COUNT + 1 ))
     print_debug "Invoking claude for phase: $phase (invocation $__INVOCATION_COUNT/$MAX_INVOCATIONS, max_turns=$max_turns)"
-    claude -p "$prompt" --max-turns "$max_turns" || true
+    log_msg "=== PHASE: $phase started (max_turns=$max_turns, invocation=$__INVOCATION_COUNT/$MAX_INVOCATIONS) ==="
+    if [[ -n "$__LOG_FILE" ]]; then
+        log_msg "--- claude output start: $phase ---"
+        claude -p "$prompt" --max-turns "$max_turns" 2>&1 | tee -a "$__LOG_FILE" || true
+        log_msg "--- claude output end: $phase ---"
+    else
+        claude -p "$prompt" --max-turns "$max_turns" || true
+    fi
 
     stop_file_monitor
     # Restore terminal state in case claude modified it before being killed
@@ -1030,7 +1067,14 @@ run_phase_group() {
 
         __INVOCATION_COUNT=$(( __INVOCATION_COUNT + 1 ))
         print_debug "Phase $phase produced no result file — retrying (invocation $__INVOCATION_COUNT/$MAX_INVOCATIONS)"
-        claude -p "$prompt" --max-turns "$max_turns" || true
+        log_msg "=== PHASE: $phase retry (invocation=$__INVOCATION_COUNT/$MAX_INVOCATIONS) ==="
+        if [[ -n "$__LOG_FILE" ]]; then
+            log_msg "--- claude output start: $phase ---"
+            claude -p "$prompt" --max-turns "$max_turns" 2>&1 | tee -a "$__LOG_FILE" || true
+            log_msg "--- claude output end: $phase ---"
+        else
+            claude -p "$prompt" --max-turns "$max_turns" || true
+        fi
 
         stop_file_monitor
         [[ -n "$__saved_stty" ]] && stty "$__saved_stty" 2>/dev/null || true
@@ -1043,10 +1087,9 @@ run_phase_group() {
 
     local verdict
     verdict=$(jq -r '.verdict // "unknown"' "$PHASE_RESULT_FILE")
-    if [[ "$VERBOSE" == "true" ]]; then
-        print_debug "Phase result: verdict=$verdict, details=$(jq -r '.details // "none"' "$PHASE_RESULT_FILE")"
-    fi
+    print_debug "Phase result: verdict=$verdict, details=$(jq -r '.details // "none"' "$PHASE_RESULT_FILE")"
     print_success "Phase $phase complete — verdict: $verdict"
+    log_msg "=== PHASE: $phase ended (verdict: $verdict) ==="
 }
 
 # ─────────────────────────────────────────────────────────────────────────────────
@@ -1842,6 +1885,9 @@ main() {
 
     # Create lockfile now (after worktree check, so --branch mode sees clean tree)
     mkdir -p .buildcrew
+    log_init
+    log_msg "Flags: skip_spec=$SKIP_SPEC strict=$STRICT_MODE review=$HUMAN_REVIEW branch=$GIT_BRANCH resume=$RESUME_MODE full_pipeline=$FULL_PIPELINE complexity_aware=$COMPLEXITY_AWARE auto=$AUTO_MODE"
+    print_info "Activity log: $__LOG_FILE"
     echo $$ > "$LOCKFILE"
     trap cleanup EXIT INT TERM
 
@@ -2037,6 +2083,8 @@ main() {
     else
         print_success "All backlog tasks processed!"
     fi
+
+    cleanup_log "$failed"
 }
 
 # ─────────────────────────────────────────────────────────────────────────────────

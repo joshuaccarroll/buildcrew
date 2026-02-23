@@ -1638,3 +1638,57 @@ EOF
     run load_buildcrew_config
     [[ "$output" == *"Warning"*"AUTO_MODE"* ]]
 }
+
+# ─────────────────────────────────────────────────────────────────────────────
+# --keep-logs flag: parse_args tests
+# ─────────────────────────────────────────────────────────────────────────────
+
+@test "parse_args: --keep-logs sets KEEP_LOGS=true" {
+    parse_args --keep-logs
+    [ "$KEEP_LOGS" = "true" ]
+}
+
+@test "parse_args: no args leaves KEEP_LOGS=false" {
+    parse_args
+    [ "$KEEP_LOGS" = "false" ]
+}
+
+@test "parse_args: --help mentions --keep-logs" {
+    run parse_args --help
+    [[ "$output" == *"--keep-logs"* ]]
+}
+
+@test "parse_args: --keep-logs combined with --auto --single" {
+    parse_args --keep-logs --auto --single
+    [ "$KEEP_LOGS" = "true" ]
+    [ "$AUTO_MODE" = "true" ]
+    [ "$SINGLE_TASK" = "true" ]
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# --keep-logs flag: load_buildcrew_config KEEP_LOGS tests
+# ─────────────────────────────────────────────────────────────────────────────
+
+@test "load_buildcrew_config: sets KEEP_LOGS=true from config" {
+    unset KEEP_LOGS
+    mkdir -p .buildcrew
+    echo "KEEP_LOGS=true" > .buildcrew/config
+    load_buildcrew_config
+    [ "$KEEP_LOGS" = "true" ]
+}
+
+@test "load_buildcrew_config: env var takes precedence over KEEP_LOGS in config" {
+    mkdir -p .buildcrew
+    echo "KEEP_LOGS=true" > .buildcrew/config
+    KEEP_LOGS=false
+    load_buildcrew_config
+    [ "$KEEP_LOGS" = "false" ]
+}
+
+@test "load_buildcrew_config: invalid KEEP_LOGS value ignored with warning" {
+    unset KEEP_LOGS
+    mkdir -p .buildcrew
+    echo "KEEP_LOGS=yes" > .buildcrew/config
+    run load_buildcrew_config
+    [[ "$output" == *"Warning"*"KEEP_LOGS"* ]]
+}

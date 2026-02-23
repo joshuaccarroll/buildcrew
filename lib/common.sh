@@ -17,6 +17,10 @@
 [[ -n "${__BUILDCREW_COMMON_LOADED:-}" ]] && return 0
 __BUILDCREW_COMMON_LOADED=1
 
+# File-scope log path — must be at file scope (not local) so all functions in
+# common.sh and workflow.sh see the same value after sourcing.
+__LOG_FILE=""
+
 # ─────────────────────────────────────────────────────────────────────────────────
 # Color constants (exported for subshell inheritance)
 # ─────────────────────────────────────────────────────────────────────────────────
@@ -34,28 +38,34 @@ export NC='\033[0m'
 # ─────────────────────────────────────────────────────────────────────────────────
 
 print_header() {
+    log_msg "=== $1 ==="
     echo -e "\n${BLUE}═══════════════════════════════════════════════════════════════${NC}"
     echo -e "${BLUE}   ${BOLD}$1${NC}"
     echo -e "${BLUE}═══════════════════════════════════════════════════════════════${NC}\n"
 }
 
 print_success() {
+    log_msg "[OK] $1"
     echo -e "${GREEN}✓ $1${NC}"
 }
 
 print_warning() {
+    log_msg "[WARN] $1"
     echo -e "${YELLOW}⚠ $1${NC}"
 }
 
 print_error() {
+    log_msg "[ERROR] $1"
     echo -e "${RED}✗ $1${NC}"
 }
 
 print_info() {
+    log_msg "[INFO] $1"
     echo -e "${CYAN}ℹ $1${NC}"
 }
 
 print_debug() {
+    log_msg "[DEBUG] $1"
     if [[ "${VERBOSE:-false}" == "true" ]]; then
         echo -e "${CYAN}  [debug] $1${NC}"
     fi
@@ -64,6 +74,30 @@ print_debug() {
 error() {
     print_error "$1"
     exit 1
+}
+
+# ─────────────────────────────────────────────────────────────────────────────────
+# Activity logging
+# ─────────────────────────────────────────────────────────────────────────────────
+
+# log_init — create .buildcrew/logs/ and initialize __LOG_FILE.
+# Uses PID suffix to prevent filename collision when two runs start in the same second.
+log_init() {
+    mkdir -p .buildcrew/logs
+    __LOG_FILE=".buildcrew/logs/buildcrew-$(date '+%Y-%m-%d_%H-%M-%S')-$$.log"
+    echo "[$(date '+%Y-%m-%dT%H:%M:%S')] BuildCrew started (PID=$$)" >> "$__LOG_FILE"
+}
+
+# log_msg — append a timestamped, ANSI-stripped entry to __LOG_FILE.
+# No-op when __LOG_FILE is empty (tests that skip log_init are unaffected).
+# BSD sed on macOS does NOT interpret \x1b in regex; inject the literal ESC byte
+# via printf so the strip works on both macOS and Linux.
+log_msg() {
+    [[ -z "$__LOG_FILE" ]] && return 0
+    local esc clean
+    esc=$(printf '\033')
+    clean=$(printf '%s' "$1" | sed "s/${esc}\[[0-9;]*m//g")
+    echo "[$(date '+%Y-%m-%dT%H:%M:%S')] $clean" >> "$__LOG_FILE"
 }
 
 # ─────────────────────────────────────────────────────────────────────────────────

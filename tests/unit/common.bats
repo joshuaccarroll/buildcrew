@@ -10,6 +10,7 @@ setup() {
 
 teardown() {
     teardown_test_dir
+    __LOG_FILE=""   # Reset log state between tests
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -150,4 +151,69 @@ teardown() {
     local first_load="$__BUILDCREW_COMMON_LOADED"
     source_lib "common.sh"
     [ "$__BUILDCREW_COMMON_LOADED" = "$first_load" ]
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Logging: log_init / log_msg tests
+# ─────────────────────────────────────────────────────────────────────────────
+
+@test "log_init: creates .buildcrew/logs/ directory" {
+    log_init
+    [ -d ".buildcrew/logs" ]
+}
+
+@test "log_init: sets __LOG_FILE to a non-empty value" {
+    log_init
+    [ -n "$__LOG_FILE" ]
+}
+
+@test "log_init: writes a header line (log file is non-empty after init)" {
+    log_init
+    [ -s "$__LOG_FILE" ]
+}
+
+@test "log_msg: writes timestamped entry to log file" {
+    log_init
+    log_msg "test message"
+    run grep "test message" "$__LOG_FILE"
+    [ "$status" -eq 0 ]
+}
+
+@test "log_msg: is a no-op when __LOG_FILE is empty" {
+    __LOG_FILE=""
+    log_msg "should not create a file"
+    run find . -name "*.log" -type f
+    [ -z "$output" ]
+}
+
+@test "print_success: writes to log file when log_init has been called" {
+    log_init
+    print_success "all good"
+    run grep "all good" "$__LOG_FILE"
+    [ "$status" -eq 0 ]
+}
+
+@test "print_debug: logs to file even when VERBOSE=false" {
+    log_init
+    VERBOSE=false
+    print_debug "hidden from terminal"
+    run grep "hidden from terminal" "$__LOG_FILE"
+    [ "$status" -eq 0 ]
+}
+
+@test "print_debug: does NOT write to stdout when VERBOSE=false" {
+    log_init
+    VERBOSE=false
+    run print_debug "hidden from terminal"
+    [ "$status" -eq 0 ]
+    [ -z "$output" ]
+}
+
+@test "log entries have ANSI codes stripped" {
+    log_init
+    print_success "clean text"
+    local esc
+    esc=$(printf '\033')
+    run grep "${esc}" "$__LOG_FILE"
+    [ "$status" -eq 1 ]  # grep returns 1 when no match — i.e., no ANSI codes found
 }

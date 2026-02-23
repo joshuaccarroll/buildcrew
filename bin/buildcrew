@@ -71,6 +71,7 @@ print_help() {
     echo "    --max-invocations N  Max Claude invocations per run (default: 15, with 'run')"
     echo "    --full-pipeline  Force all phases regardless of complexity assessment (with 'run')"
     echo "    --auto        Run fully unattended — auto-approve all interactive pauses (with 'run')"
+    echo "    --keep-logs   Retain the activity log after a successful run (log is always kept on failure)"
     echo "    --verbose     Show orchestrator decisions, phase verdicts, and invocation counts"
     echo "    --debug       Alias for --verbose"
     echo ""
