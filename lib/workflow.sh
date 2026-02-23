@@ -1194,7 +1194,173 @@ _check_max_turns_in_log() {
     return 1
 }
 
-run_phase_group() {
+# Check recent log output for permission denial indicator.
+# Args: $1=log_offset (byte offset captured before claude -p call)
+# Sets: __PERM_DENIED_TOOL to the tool name (or "unknown tool")
+# Returns: 0 if permission denial detected, 1 otherwise
+_check_permission_denied_in_log() {
+    local offset="$1"
+    __PERM_DENIED_TOOL=""
+    if [[ -z "${__LOG_FILE:-}" || ! -f "$__LOG_FILE" ]]; then
+        return 1
+    fi
+    local recent
+    recent=$(tail -c +"$(( offset + 1 ))" "$__LOG_FILE" 2>/dev/null || true)
+    if [[ -z "$recent" ]]; then
+        return 1
+    fi
+
+    # Pattern 1: Claude CLI structured permission output — extract Bash(...) tool name
+    # from lines that contain permission/approval/blocked keywords.
+    # Two-stage grep avoids false positives from settings.json content in phase output.
+    local match=""
+    match=$(echo "$recent" | grep -iE 'blocked|denied|approval|permission|allowed' | grep -oE 'Bash\([^)]+\)' | head -1) || true
+    if [[ -n "$match" ]]; then
+        __PERM_DENIED_TOOL="$match"
+        return 0
+    fi
+
+    # Pattern 2: Generic permission/approval language (fallback — sets tool to "unknown")
+    if echo "$recent" | grep -qi "tool use was blocked\|requires approval\|permission.*denied\|not allowed to use"; then
+        __PERM_DENIED_TOOL="unknown tool"
+        return 0
+    fi
+
+    return 1
+}
+
+# Convert a tool description string to a permission rule for settings.local.json.
+# Examples:
+#   "Bash(docker:*)"         -> "Bash(docker:*)"   (pass-through)
+#   'approval to run `npm test`' -> "Bash(npm:*)"
+#   "unknown tool"           -> ""  (cannot parse)
+_tool_desc_to_permission() {
+    local desc="$1"
+    # Pass-through: already looks like a permission rule
+    if echo "$desc" | grep -qE '^Bash\([^)]+\)$'; then
+        echo "$desc"
+        return
+    fi
+    # Extract command from backtick-quoted content: `npm test` -> npm
+    local cmd
+    cmd=$(echo "$desc" | sed -nE 's/.*`([^`]+)`.*/\1/p' | head -1)
+    if [[ -n "$cmd" ]]; then
+        local prefix
+        prefix=$(echo "$cmd" | awk '{print $1}')
+        if [[ -n "$prefix" ]]; then
+            echo "Bash($prefix:*)"
+            return
+        fi
+    fi
+    # Fallback: first word as command (strip non-alnum chars)
+    # Note: "unknown tool" -> "unknown" which is rejected below intentionally,
+    # so callers get "" and are forced to use the [e]dit path.
+    cmd=$(echo "$desc" | awk '{print $1}' | sed 's/[^a-zA-Z0-9_./-]//g')
+    if [[ -n "$cmd" && "$cmd" != "unknown" ]]; then
+        echo "Bash($cmd:*)"
+        return
+    fi
+    # Cannot parse
+    echo ""
+}
+
+# Append a permission rule to .claude/settings.local.json.
+# Creates the file (and directory) if missing. Idempotent.
+# Args: $1=tool_desc (description string or Bash(...) rule)
+_add_permission_to_settings() {
+    local tool_desc="$1"
+    local settings_file=".claude/settings.local.json"
+    local perm_rule
+    perm_rule=$(_tool_desc_to_permission "$tool_desc")
+    if [[ -z "$perm_rule" ]]; then
+        return 1
+    fi
+    # Ensure .claude directory exists
+    mkdir -p .claude
+    # Create file if missing
+    if [[ ! -f "$settings_file" ]]; then
+        echo '{"permissions":{"allow":[]}}' > "$settings_file"
+    fi
+    # Check if already present (jq -e exits non-zero on null)
+    if jq -e --arg r "$perm_rule" '.permissions.allow | index($r)' "$settings_file" >/dev/null 2>&1; then
+        return 0
+    fi
+    # Add atomically via temp file
+    local tmp_file="${settings_file}.tmp.$$"
+    if jq --arg r "$perm_rule" '.permissions.allow += [$r]' "$settings_file" > "$tmp_file" 2>/dev/null; then
+        mv "$tmp_file" "$settings_file"
+    else
+        rm -f "$tmp_file"
+        return 1
+    fi
+}
+
+# Known-safe tool prefixes that can be auto-approved in --auto mode.
+# Anything not on this list requires interactive approval.
+__SAFE_AUTO_APPROVE_TOOLS="cat ls head tail wc grep find file stat diff sort uniq tr cut tee mkdir cp mv rm touch chmod sed awk test echo printf date pwd cd basename dirname readlink"
+
+# Prompt the user to approve a tool permission after a phase is blocked.
+# In --auto mode, approves known-safe tools and blocks unsafe ones.
+# Args: $1=tool_desc, $2=phase
+# Returns: 0 if approved (settings updated), 1 if skipped/blocked
+_prompt_permission_approval() {
+    local tool_desc="$1"
+    local phase="$2"
+
+    if [[ "$AUTO_MODE" == "true" ]]; then
+        local perm_rule
+        perm_rule=$(_tool_desc_to_permission "$tool_desc")
+        if [[ -z "$perm_rule" ]]; then
+            print_warning "Auto mode: cannot parse permission for '$tool_desc' -- skipping"
+            return 1
+        fi
+        # Extract the command prefix from Bash(prefix:*)
+        local cmd_prefix
+        cmd_prefix=$(echo "$perm_rule" | sed -nE 's/^Bash\(([^:]+):\*\)$/\1/p')
+        # Only auto-approve known-safe tools
+        if [[ -n "$cmd_prefix" ]] && echo " $__SAFE_AUTO_APPROVE_TOOLS " | grep -q " $cmd_prefix "; then
+            print_info "Auto mode: auto-approving safe tool permission ($perm_rule)"
+            _add_permission_to_settings "$tool_desc" || true
+            return 0
+        fi
+        print_warning "Auto mode: refusing to auto-approve potentially unsafe tool ($perm_rule) -- marking blocked"
+        return 1
+    fi
+
+    if [[ ! -t 0 ]]; then
+        print_warning "Non-interactive terminal -- cannot prompt for permission (tool: $tool_desc)"
+        return 1
+    fi
+
+    echo ""
+    print_warning "Phase '$phase' was blocked by a tool permission."
+    echo -e "  Tool: $tool_desc"
+    echo ""
+    echo -e "  [a] Approve and add to .claude/settings.local.json, then retry"
+    echo -e "  [e] Edit .claude/settings.local.json manually, then retry"
+    echo -e "  [s] Skip (mark task blocked)"
+    echo ""
+    while true; do
+        read -r -p "  > " perm_response
+        case "$perm_response" in
+            a|A)
+                if _add_permission_to_settings "$tool_desc"; then
+                    print_success "Permission added"
+                    return 0
+                else
+                    print_error "Could not auto-add permission. Use [e] to add manually."
+                fi ;;
+            e|E)
+                ${EDITOR:-vi} ".claude/settings.local.json"
+                print_info "Settings updated. Retrying phase."
+                return 0 ;;
+            s|S) return 1 ;;
+            *) echo "  Please enter [a], [e], or [s]:" ;;
+        esac
+    done
+}
+
+__run_phase_group_impl() {
     local phase="$1"
     local task="$2"
     local extra_context="${3:-}"
@@ -1271,8 +1437,15 @@ run_phase_group() {
 
     # Validate result (with one retry on failure)
     if [[ ! -f "$PHASE_RESULT_FILE" ]] || ! jq -e . "$PHASE_RESULT_FILE" >/dev/null 2>&1; then
-        # Check for max-turns before retrying — retrying at the same limit will hit the same wall
-        if _check_max_turns_in_log "$__log_offset"; then
+        # Check for permission denial first -- this is recoverable
+        if _check_permission_denied_in_log "$__log_offset"; then
+            if ! _prompt_permission_approval "$__PERM_DENIED_TOOL" "$phase"; then
+                update_workflow_state "$phase" "permission_denied"
+                return 1
+            fi
+            # Permission approved -- fall through to retry below
+        # Check for max-turns before retrying -- retrying at the same limit will hit the same wall
+        elif _check_max_turns_in_log "$__log_offset"; then
             print_warning "Phase $phase hit max-turns limit ($max_turns turns)"
             update_workflow_state "$phase" "max_turns"
             return 2
@@ -1310,6 +1483,12 @@ run_phase_group() {
         [[ -n "$__saved_stty" ]] && stty "$__saved_stty" 2>/dev/null || true
 
         if [[ ! -f "$PHASE_RESULT_FILE" ]] || ! jq -e . "$PHASE_RESULT_FILE" >/dev/null 2>&1; then
+            # Permission denial on retry -- return 3 for wrapper to re-invoke
+            if _check_permission_denied_in_log "$__log_offset"; then
+                if _prompt_permission_approval "$__PERM_DENIED_TOOL" "$phase"; then
+                    return 3  # permission recovered, wrapper will re-invoke
+                fi
+            fi
             # Log-based check on retry failure
             if _check_max_turns_in_log "$__log_offset"; then
                 print_warning "Phase $phase hit max-turns limit on retry ($max_turns turns)"
@@ -1334,6 +1513,23 @@ run_phase_group() {
     print_success "Phase $phase complete — verdict: $verdict"
     update_workflow_state "$phase" "complete"
     log_msg "=== PHASE: $phase ended (verdict: $verdict) ==="
+}
+
+# Wrapper: transparent retry on permission recovery (return code 3 from impl).
+# All callers use this function; the impl is private.
+run_phase_group() {
+    local result=0
+    __run_phase_group_impl "$@" || result=$?
+    if [[ $result -eq 3 ]]; then
+        print_info "Permission recovered -- retrying phase: $1"
+        result=0
+        __run_phase_group_impl "$@" || result=$?
+        if [[ $result -eq 3 ]]; then
+            print_error "Permission recovery failed on retry -- giving up"
+            result=1
+        fi
+    fi
+    return $result
 }
 
 # ─────────────────────────────────────────────────────────────────────────────────

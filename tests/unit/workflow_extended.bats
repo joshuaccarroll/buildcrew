@@ -2090,3 +2090,168 @@ EOF
     [ ! -s "$blocked_file" ]
     rm -f "$blocked_file" "$test_call_count_file"
 }
+
+# -----------------------------------------------------------------------
+# Permission recovery tests
+# -----------------------------------------------------------------------
+
+@test "_check_permission_denied_in_log: detects Bash() tool pattern" {
+    mkdir -p .buildcrew
+    local log_file
+    log_file=$(mktemp)
+    printf 'some output\ntool use was blocked: Bash(docker compose up)\nmore output\n' > "$log_file"
+    __LOG_FILE="$log_file"
+    _check_permission_denied_in_log 0
+    [ "$__PERM_DENIED_TOOL" = "Bash(docker compose up)" ]
+    rm -f "$log_file"
+}
+
+@test "_check_permission_denied_in_log: detects generic permission denial" {
+    mkdir -p .buildcrew
+    local log_file
+    log_file=$(mktemp)
+    printf 'Phase started\ntool use was blocked by policy\nPhase ended\n' > "$log_file"
+    __LOG_FILE="$log_file"
+    _check_permission_denied_in_log 0
+    [ "$__PERM_DENIED_TOOL" = "unknown tool" ]
+    rm -f "$log_file"
+}
+
+@test "_check_permission_denied_in_log: returns 1 on clean log" {
+    mkdir -p .buildcrew
+    local log_file
+    log_file=$(mktemp)
+    printf 'Phase complete\nAll good\nNo issues\n' > "$log_file"
+    __LOG_FILE="$log_file"
+    run _check_permission_denied_in_log 0
+    [ "$status" -eq 1 ]
+    rm -f "$log_file"
+}
+
+@test "_check_permission_denied_in_log: returns 1 when no LOG_FILE" {
+    __LOG_FILE=""
+    run _check_permission_denied_in_log 0
+    [ "$status" -eq 1 ]
+}
+
+@test "_check_permission_denied_in_log: respects byte offset" {
+    mkdir -p .buildcrew
+    local log_file
+    log_file=$(mktemp)
+    printf 'old: tool use was blocked: Bash(rm:*)\nnew: everything fine\n' > "$log_file"
+    __LOG_FILE="$log_file"
+    local old_len
+    old_len=$(printf 'old: tool use was blocked: Bash(rm:*)\n' | wc -c | tr -d ' ')
+    run _check_permission_denied_in_log "$old_len"
+    [ "$status" -eq 1 ]
+    rm -f "$log_file"
+}
+
+@test "_check_permission_denied_in_log: no false positive on settings.json content" {
+    # Regression: a phase that reads .claude/settings.json should not
+    # trigger the permission check just because the output contains Bash(...)
+    mkdir -p .buildcrew
+    local log_file
+    log_file=$(mktemp)
+    printf 'Reading .claude/settings.json\n"allow": ["Bash(npm:*)", "Bash(git:*)"]\nPhase complete\n' > "$log_file"
+    __LOG_FILE="$log_file"
+    run _check_permission_denied_in_log 0
+    [ "$status" -eq 1 ]
+    rm -f "$log_file"
+}
+
+@test "_tool_desc_to_permission: passes through Bash() format" {
+    run _tool_desc_to_permission "Bash(docker:*)"
+    [ "$output" = "Bash(docker:*)" ]
+}
+
+@test "_tool_desc_to_permission: extracts backtick command" {
+    run _tool_desc_to_permission 'approval to run `npm test`'
+    [ "$output" = "Bash(npm:*)" ]
+}
+
+@test "_tool_desc_to_permission: returns empty on unparseable input" {
+    run _tool_desc_to_permission ""
+    [ "$output" = "" ]
+}
+
+@test "_tool_desc_to_permission: returns empty for 'unknown tool'" {
+    run _tool_desc_to_permission "unknown tool"
+    [ "$output" = "" ]
+}
+
+@test "_add_permission_to_settings: creates file if missing" {
+    mkdir -p .claude
+    rm -f .claude/settings.local.json
+    _add_permission_to_settings "Bash(docker:*)"
+    [ -f ".claude/settings.local.json" ]
+    jq -e '.permissions.allow | index("Bash(docker:*)")' .claude/settings.local.json >/dev/null
+}
+
+@test "_add_permission_to_settings: idempotent" {
+    mkdir -p .claude
+    rm -f .claude/settings.local.json
+    _add_permission_to_settings "Bash(npm:*)"
+    _add_permission_to_settings "Bash(npm:*)"
+    local count
+    count=$(jq '.permissions.allow | map(select(. == "Bash(npm:*)")) | length' .claude/settings.local.json)
+    [ "$count" -eq 1 ]
+}
+
+@test "_add_permission_to_settings: returns 1 on unparseable tool" {
+    run _add_permission_to_settings "unknown tool"
+    [ "$status" -eq 1 ]
+}
+
+@test "_prompt_permission_approval: auto-approves safe tool in auto mode" {
+    AUTO_MODE=true
+    mkdir -p .claude
+    rm -f .claude/settings.local.json
+    run _prompt_permission_approval "Bash(ls:*)" "build"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"auto-approving"* ]]
+}
+
+@test "_prompt_permission_approval: refuses unsafe tool in auto mode" {
+    AUTO_MODE=true
+    mkdir -p .claude
+    run _prompt_permission_approval "Bash(docker:*)" "build"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"refusing"* ]]
+}
+
+@test "_prompt_permission_approval: returns 1 in non-interactive terminal" {
+    AUTO_MODE=false
+    run _prompt_permission_approval "Bash(npm:*)" "build"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"Non-interactive"* ]]
+}
+
+@test "run_phase_group wrapper: retries on return code 3" {
+    local attempt_file
+    attempt_file=$(mktemp)
+    echo "0" > "$attempt_file"
+    __run_phase_group_impl() {
+        local count
+        count=$(cat "$attempt_file")
+        count=$(( count + 1 ))
+        echo "$count" > "$attempt_file"
+        if [[ "$count" -eq 1 ]]; then
+            return 3
+        fi
+        return 0
+    }
+    run run_phase_group "build" "test task"
+    [ "$status" -eq 0 ]
+    [ "$(cat "$attempt_file")" = "2" ]
+    [[ "$output" == *"Permission recovered"* ]]
+    rm -f "$attempt_file"
+}
+
+@test "run_phase_group wrapper: caps at one retry for code 3" {
+    __run_phase_group_impl() {
+        return 3
+    }
+    run run_phase_group "build" "test task"
+    [ "$status" -eq 1 ]
+}
