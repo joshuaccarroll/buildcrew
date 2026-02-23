@@ -1020,6 +1020,7 @@ process_task_isolated() {
     # Outer loop: supports circuit breaker re-planning
     # ─────────────────────────────────────────────────────────────────────────
     local __outer_iterations=0
+    local __spec_reviewed=false  # fires once per task, not on replans
     while true; do
         (( ++__outer_iterations ))
         if (( __outer_iterations > 2 )); then
@@ -1093,18 +1094,21 @@ process_task_isolated() {
             fi
         fi
 
-        # Mandatory spec review — always pauses when spec phase runs (unconditional)
-        local spec_review_exit=0
-        handle_spec_review "$task" "$ac_count" || spec_review_exit=$?
-        if [[ $spec_review_exit -eq 1 ]]; then
-            mark_task_blocked "$task" "Skipped during spec review"
-            clear_task_progress
-            return 1
-        elif [[ $spec_review_exit -eq 2 ]]; then
-            touch "$STOP_FILE"
-            mark_task_blocked "$task" "Pipeline stopped during spec review"
-            clear_task_progress
-            return 1
+        # Spec review — fires once per task (not on circuit-breaker replans)
+        if [[ "$__spec_reviewed" == "false" ]]; then
+            local spec_review_exit=0
+            handle_spec_review "$task" "$ac_count" || spec_review_exit=$?
+            if [[ $spec_review_exit -eq 1 ]]; then
+                mark_task_blocked "$task" "Skipped during spec review"
+                clear_task_progress
+                return 1
+            elif [[ $spec_review_exit -eq 2 ]]; then
+                touch "$STOP_FILE"
+                mark_task_blocked "$task" "Pipeline stopped during spec review"
+                clear_task_progress
+                return 1
+            fi
+            __spec_reviewed=true
         fi
 
         __completed_phases="${__completed_phases:+$__completed_phases }spec"
