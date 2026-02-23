@@ -13,7 +13,7 @@ You are orchestrating the **Builder** flow for creating a new project from scrat
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
 │  1. PROJECT SETUP                                                    │
-│     Ask for project name                                            │
+│     Determine project name (default: folder name)                   │
 └─────────────────────────────────────────────────────────────────────┘
                                 │
                                 ▼
@@ -107,14 +107,26 @@ while iteration < 5:
 
 ## Step 1: Project Setup
 
-Start by getting the project name:
+Start by determining the project name:
 
-**Ask the user:**
+1. Derive a default name from the current working directory's basename (e.g., if running inside `~/code/hello-world/`, the default is `hello-world`).
+2. Apply validation to the default: convert to lowercase, replace spaces and underscores with hyphens, strip any characters that are not alphanumeric or hyphens.
+3. If the sanitized default is empty (e.g., running from `/` or a directory whose name is all special characters), skip the suggestion and fall back to the no-default prompt below.
+
+**If a valid default was derived, ask the user:**
 > "Welcome to BuildCrew! Let's create something great together.
 >
-> First, what should we call this project? Give me a short name (e.g., 'task-manager', 'portfolio-site', 'api-gateway')."
+> Based on your current directory, I'd suggest calling this project **'<computed-default>'**.
+> Would you like to use this name, or would you prefer something different? (e.g., 'task-manager', 'portfolio-site', 'api-gateway')"
 
-**Validation:**
+**If no valid default could be derived, ask the user:**
+> "Welcome to BuildCrew! Let's create something great together.
+>
+> What should we call this project? Give me a short name (e.g., 'task-manager', 'portfolio-site', 'api-gateway')."
+
+If the user confirms the suggested default (e.g., responds "yes", "that works", "looks good", etc.), use the computed default name. If the user provides an alternative name, use that instead.
+
+**Validation (applied to both default and user-provided names):**
 - Convert to lowercase with hyphens
 - No spaces or special characters
 - Will be used in filenames: `PROJECT_[name].md`, `DESIGN_[name].md`
