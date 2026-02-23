@@ -266,6 +266,23 @@ handle_human_review() {
     esac
 }
 
+# Extract and display acceptance criteria lines from .claude/spec.md.
+# Used by handle_spec_review for both initial display and post-edit refresh.
+_display_spec_acs() {
+    local ac_lines
+    ac_lines=$(grep '^- \[ \] AC-' ".claude/spec.md" 2>/dev/null) || ac_lines=""
+    if [[ -n "$ac_lines" ]]; then
+        echo ""
+        while IFS= read -r line; do
+            echo -e "  ${CYAN}${line}${NC}"
+        done <<< "$ac_lines"
+    else
+        echo ""
+        echo -e "  ${YELLOW}No acceptance criteria found. Press [e] to edit the spec.${NC}"
+    fi
+    echo ""
+}
+
 # Mandatory spec review — guides the human to evaluate the spec before proceeding.
 # Distinct from handle_human_review(): always fires (not gated on --review), and
 # provides spec-specific framing rather than a generic "approve/skip" prompt.
@@ -273,6 +290,8 @@ handle_human_review() {
 handle_spec_review() {
     local task="$1"
     local ac_count="$2"
+    local task_num="${3:-}"
+    local total_tasks="${4:-}"
 
     # Non-interactive terminals fall through autonomously (same as handle_human_review)
     if [[ ! -t 0 ]]; then
@@ -281,27 +300,16 @@ handle_spec_review() {
     fi
 
     echo -e "\n${YELLOW}${BOLD}┌─────────────────────────────────────────────────────────────┐${NC}"
-    echo -e "${YELLOW}${BOLD}│   SPEC REVIEW                                               │${NC}"
-    echo -e "${YELLOW}│   The spec defines what 'done' means. Get this right.        │${NC}"
+    echo -e "${YELLOW}${BOLD}│   ACCEPTANCE CRITERIA                                       │${NC}"
+    echo -e "${YELLOW}│   Review what 'done' means for this task before building.    │${NC}"
     echo -e "${YELLOW}${BOLD}└─────────────────────────────────────────────────────────────┘${NC}"
     echo ""
-    echo -e "${CYAN}  Task:  $task${NC}"
-    echo -e "${CYAN}  Spec:  .claude/spec.md  ($ac_count acceptance criteria)${NC}"
-    echo ""
-    echo -e "${BOLD}  Before approving, ask yourself:${NC}"
-    echo ""
-    echo -e "  1. ${BOLD}Contractor test${NC}: Could someone build this without asking you"
-    echo -e "     a single question?"
-    echo ""
-    echo -e "  2. ${BOLD}Scope${NC}: Is this ONE focused deliverable? Does 'Out of Scope'"
-    echo -e "     protect against the most likely creep?"
-    echo ""
-    echo -e "  3. ${BOLD}Acceptance criteria${NC}: Are they specific enough to verify by"
-    echo -e "     running a command or checking a file? Or are they still aspirational?"
-    echo ""
-    echo -e "  4. ${BOLD}Coverage${NC}: What behavior would you be upset about if it broke"
-    echo -e "     and wasn't covered by an AC?"
-    echo ""
+    if [[ -n "$task_num" && -n "$total_tasks" ]]; then
+        echo -e "${CYAN}  Task $task_num of $total_tasks:  $task${NC}"
+    else
+        echo -e "${CYAN}  Task:  $task${NC}"
+    fi
+    _display_spec_acs
     echo -e "  ${BOLD}[Enter]${NC} Approve  |  ${BOLD}[e]${NC} Edit spec  |  ${BOLD}[s]${NC} Skip task  |  ${BOLD}[q]${NC} Quit"
     echo ""
 
@@ -313,6 +321,7 @@ handle_spec_review() {
                 ac_count=$(grep -c '^- \[ \] AC-' ".claude/spec.md" 2>/dev/null) || ac_count=0
                 echo ""
                 echo -e "${CYAN}  Spec updated. ($ac_count acceptance criteria)${NC}"
+                _display_spec_acs
                 echo -e "  ${BOLD}[Enter]${NC} Approve  |  ${BOLD}[e]${NC} Edit again  |  ${BOLD}[s]${NC} Skip  |  ${BOLD}[q]${NC} Quit"
                 echo ""
                 ;;
@@ -975,6 +984,8 @@ build_verify_failure_context() {
 
 process_task_isolated() {
     local task="$1"
+    local task_num="${2:-}"
+    local total_tasks="${3:-}"
     local __completed_phases=""
     local __is_resuming=false
     local __replan_count=0           # circuit breaker: how many times we've re-planned
@@ -1097,7 +1108,7 @@ process_task_isolated() {
         # Spec review — fires once per task (not on circuit-breaker replans)
         if [[ "$__spec_reviewed" == "false" ]]; then
             local spec_review_exit=0
-            handle_spec_review "$task" "$ac_count" || spec_review_exit=$?
+            handle_spec_review "$task" "$ac_count" "$task_num" "$total_tasks" || spec_review_exit=$?
             if [[ $spec_review_exit -eq 1 ]]; then
                 mark_task_blocked "$task" "Skipped during spec review"
                 clear_task_progress
@@ -1689,6 +1700,9 @@ main() {
     local failed=0
     local start_time
     start_time=$(date +%s)
+    local total_tasks
+    total_tasks=$(count_tasks pending)
+    local task_num=0
 
     # Show initial status
     print_info "Backlog status:"
@@ -1783,8 +1797,9 @@ main() {
             fi
 
             # Run the appropriate processor
+            ((task_num++))
             local task_result=0
-            if process_task_isolated "$task"; then
+            if process_task_isolated "$task" "$task_num" "$total_tasks"; then
                 task_result=0
             else
                 task_result=1
