@@ -1519,3 +1519,122 @@ EOF
     run load_task_progress
     [ "$status" -eq 1 ]
 }
+
+# ─────────────────────────────────────────────────────────────────────────────
+# --auto flag: parse_args tests
+# ─────────────────────────────────────────────────────────────────────────────
+
+@test "parse_args: --auto sets AUTO_MODE=true" {
+    parse_args --auto
+    [ "$AUTO_MODE" = "true" ]
+}
+
+@test "parse_args: no args leaves AUTO_MODE=false" {
+    parse_args
+    [ "$AUTO_MODE" = "false" ]
+}
+
+@test "parse_args: --auto combined with --review --single" {
+    parse_args --auto --review --single
+    [ "$AUTO_MODE" = "true" ]
+    [ "$HUMAN_REVIEW" = "true" ]
+    [ "$SINGLE_TASK" = "true" ]
+}
+
+@test "parse_args: --help mentions --auto" {
+    run parse_args --help
+    [[ "$output" == *"--auto"* ]]
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# --auto flag: handle_spec_review tests
+# ─────────────────────────────────────────────────────────────────────────────
+
+@test "handle_spec_review: returns 0 immediately when AUTO_MODE=true" {
+    AUTO_MODE=true
+    run handle_spec_review "my task" "3"
+    [ "$status" -eq 0 ]
+}
+
+@test "handle_spec_review: output includes 'Auto mode' when AUTO_MODE=true" {
+    AUTO_MODE=true
+    run handle_spec_review "my task" "3"
+    [[ "$output" == *"Auto mode"* ]]
+}
+
+@test "handle_spec_review: does NOT output 'Non-interactive' when AUTO_MODE=true" {
+    AUTO_MODE=true
+    run handle_spec_review "my task" "3"
+    [[ "$output" != *"Non-interactive terminal"* ]]
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# --auto flag: handle_human_review tests
+# ─────────────────────────────────────────────────────────────────────────────
+
+@test "handle_human_review: returns 0 when AUTO_MODE=true and HUMAN_REVIEW=true" {
+    AUTO_MODE=true
+    HUMAN_REVIEW=true
+    run handle_human_review "task" "description" "artifact"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Auto mode"* ]]
+}
+
+@test "handle_human_review: does NOT output 'Non-interactive' when AUTO_MODE=true HUMAN_REVIEW=true" {
+    AUTO_MODE=true
+    HUMAN_REVIEW=true
+    run handle_human_review "task" "description" "artifact"
+    [[ "$output" != *"Non-interactive terminal"* ]]
+}
+
+@test "handle_human_review: returns 0 when AUTO_MODE=true and --force passed" {
+    AUTO_MODE=true
+    HUMAN_REVIEW=false
+    run handle_human_review "task" "description" "artifact" "--force"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Auto mode"* ]]
+}
+
+@test "handle_human_review: does NOT output 'Non-interactive' when AUTO_MODE=true and --force" {
+    AUTO_MODE=true
+    HUMAN_REVIEW=false
+    run handle_human_review "task" "description" "artifact" "--force"
+    [[ "$output" != *"Non-interactive terminal"* ]]
+}
+
+@test "handle_human_review: no-op when AUTO_MODE=true but HUMAN_REVIEW=false and no force" {
+    AUTO_MODE=true
+    HUMAN_REVIEW=false
+    run handle_human_review "task" "description" "artifact"
+    [ "$status" -eq 0 ]
+    # Early return before HUMAN_REVIEW guard fires — auto-mode never reached
+    [[ "$output" != *"Non-interactive terminal"* ]]
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# --auto flag: load_buildcrew_config AUTO_MODE tests
+# ─────────────────────────────────────────────────────────────────────────────
+
+@test "load_buildcrew_config: sets AUTO_MODE=true from config" {
+    unset AUTO_MODE
+    mkdir -p .buildcrew
+    echo "AUTO_MODE=true" > .buildcrew/config
+    load_buildcrew_config
+    [ "$AUTO_MODE" = "true" ]
+}
+
+@test "load_buildcrew_config: env var takes precedence over AUTO_MODE in config" {
+    mkdir -p .buildcrew
+    echo "AUTO_MODE=true" > .buildcrew/config
+    AUTO_MODE=false
+    load_buildcrew_config
+    [ "$AUTO_MODE" = "false" ]
+}
+
+@test "load_buildcrew_config: invalid AUTO_MODE value ignored with warning" {
+    unset AUTO_MODE
+    mkdir -p .buildcrew
+    echo "AUTO_MODE=yes" > .buildcrew/config
+    run load_buildcrew_config
+    [[ "$output" == *"Warning"*"AUTO_MODE"* ]]
+}

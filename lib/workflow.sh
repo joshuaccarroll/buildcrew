@@ -80,6 +80,15 @@ load_buildcrew_config() {
                         fi
                     fi
                     ;;
+                AUTO_MODE)
+                    if [[ -z "${AUTO_MODE+x}" ]]; then
+                        if [[ "$value" == "true" || "$value" == "false" ]]; then
+                            AUTO_MODE="$value"
+                        else
+                            echo "Warning: invalid AUTO_MODE in .buildcrew/config: $value (ignored, must be true or false)" >&2
+                        fi
+                    fi
+                    ;;
                 # Add future config keys here
             esac
         fi
@@ -100,6 +109,7 @@ load_buildcrew_config
 # 2. Fall back to built-in default if nothing set it
 MAX_INVOCATIONS=${MAX_INVOCATIONS:-15}
 COMPLEXITY_AWARE=${COMPLEXITY_AWARE:-true}
+AUTO_MODE=${AUTO_MODE:-false}
 __INVOCATION_COUNT=0
 __RESUME_PHASES=""
 
@@ -191,6 +201,10 @@ parse_args() {
                 FULL_PIPELINE=true
                 shift
                 ;;
+            --auto)
+                AUTO_MODE=true
+                shift
+                ;;
             --max-invocations)
                 if [[ -z "${2:-}" ]] || ! [[ "$2" =~ ^[1-9][0-9]*$ ]] || [[ ${#2} -gt 5 ]]; then
                     echo "Error: --max-invocations requires a positive integer (1-99999, no leading zeros)"
@@ -214,6 +228,7 @@ parse_args() {
                 echo "  --no-strict  Allow partial acceptance criteria pass — proceed with warnings"
                 echo "  --max-invocations N  Set maximum Claude invocations per run (default: 15)"
                 echo "  --full-pipeline  Force all phases regardless of complexity assessment"
+                echo "  --auto       Run fully unattended — auto-approve all interactive pauses"
                 echo "  --verbose    Show orchestrator decisions, phase verdicts, and invocation counts"
                 echo "  --debug      Alias for --verbose"
                 echo "  --help, -h   Show this help message"
@@ -260,6 +275,11 @@ handle_human_review() {
     local force="${4:-}"
 
     [[ "$HUMAN_REVIEW" == "true" || "$force" == "--force" ]] || return 0
+
+    if [[ "$AUTO_MODE" == "true" ]]; then
+        print_info "Auto mode: auto-approving human review"
+        return 0
+    fi
 
     # Fall back to autonomous if not interactive
     if [[ ! -t 0 ]]; then
@@ -308,6 +328,11 @@ handle_spec_review() {
     local ac_count="$2"
     local task_num="${3:-}"
     local total_tasks="${4:-}"
+
+    if [[ "$AUTO_MODE" == "true" ]]; then
+        print_info "Auto mode: auto-approving spec review"
+        return 0
+    fi
 
     # Non-interactive terminals fall through autonomously (same as handle_human_review)
     if [[ ! -t 0 ]]; then
@@ -1788,7 +1813,7 @@ main() {
         [[ -d ".claude/skills/buildcrew-outcome" ]] && _phase_count=$((_phase_count + 1))
         print_info "Mode: Phase-isolated ($_phase_count invocations per task)"
     fi
-    print_debug "Flags: skip_spec=$SKIP_SPEC strict=$STRICT_MODE review=$HUMAN_REVIEW branch=$GIT_BRANCH resume=$RESUME_MODE full_pipeline=$FULL_PIPELINE complexity_aware=$COMPLEXITY_AWARE"
+    print_debug "Flags: skip_spec=$SKIP_SPEC strict=$STRICT_MODE review=$HUMAN_REVIEW branch=$GIT_BRANCH resume=$RESUME_MODE full_pipeline=$FULL_PIPELINE complexity_aware=$COMPLEXITY_AWARE auto=$AUTO_MODE"
 
     # Git branch setup
     if [[ "$GIT_BRANCH" == "true" ]]; then
