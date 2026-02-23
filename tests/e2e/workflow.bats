@@ -97,13 +97,13 @@ EOF
 # Smart backlog detection E2E tests
 # ─────────────────────────────────────────────────────────────────────────────
 
-@test "e2e: fresh project launches build mode" {
+@test "e2e: fresh project launches discovery mode" {
     "$BUILDCREW_HOME/bin/buildcrew" init
 
     # Keep the template backlog (has "Your first task here")
-    # Running should detect this and launch build mode
+    # Running should detect this and launch discovery mode
 
-    # This test is tricky because build mode is interactive
+    # This test is tricky because discovery mode is interactive
     # We'll just verify the detection logic works
     run bash -c 'source "$BUILDCREW_HOME/lib/workflow.sh" 2>/dev/null; is_fresh_backlog && echo "fresh" || echo "not fresh"'
     [ "$output" = "fresh" ]

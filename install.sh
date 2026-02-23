@@ -289,7 +289,7 @@ main() {
     echo -e "  1. ${CYAN}cd your-project${NC}"
     echo -e "  2. ${CYAN}buildcrew init${NC}"
     echo -e "  3. ${CYAN}buildcrew run${NC}"
-    echo -e "  (Auto-launches build mode if no backlog exists)"
+    echo -e "  (Auto-launches discovery mode if no backlog exists)"
     echo ""
     echo -e "${BOLD}Documentation:${NC} https://github.com/joshuaccarroll/buildcrew"
     echo ""

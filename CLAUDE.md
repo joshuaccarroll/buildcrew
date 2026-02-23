@@ -80,3 +80,12 @@ When context is compacted, always preserve:
 5. **test** — Code review + refactor + run tests
 6. **outcome** — Verify implementation against spec acceptance criteria
 7. **verify** — Security audit + commit
+
+## Modes
+
+BuildCrew has two runtime modes:
+
+- **Discovery mode** — Interactive Product Manager flow for project definition and backlog creation. Triggered when `buildcrew run` finds an empty backlog or all tasks complete. Launches the `/build` command (builder skill).
+- **Execution mode** — Autonomous pipeline that processes pending BACKLOG.md tasks through the phase sequence above.
+
+Note: "Chunked Build Mode" is a separate concept (sub-mode within the build phase for large builds). It is unrelated to the modes above.

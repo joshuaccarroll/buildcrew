@@ -64,7 +64,7 @@ buildcrew init
 buildcrew run
 ```
 
-That's it. If you don't have a backlog yet, BuildCrew launches the Product Manager to help you define your project. Once you have tasks, it processes each one through the full persona pipeline.
+That's it. BuildCrew has two modes: **Discovery mode** launches the Product Manager to help you define your project when no backlog exists. **Execution mode** processes each task through the full persona pipeline.
 
 **Ad-hoc usage:** Invoke any persona directly with `/buildcrew <persona-name>` (e.g., `/buildcrew security-engineer` for a security audit).
 

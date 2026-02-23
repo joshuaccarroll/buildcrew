@@ -4,8 +4,8 @@
 # https://github.com/joshuaccarroll/buildcrew
 # ═══════════════════════════════════════════════════════════════════════════════
 #
-# This script orchestrates an autonomous development workflow using Claude Code.
-# It reads tasks from BACKLOG.md and processes each one through phase groups:
+# This script orchestrates BuildCrew's execution mode — the autonomous development
+# pipeline. It reads tasks from BACKLOG.md and processes each one through phase groups:
 #
 # Phase-isolated mode (up to 8 separate Claude invocations):
 #   spec (optional, skipped with --skip-spec)
@@ -655,16 +655,16 @@ check_prerequisites() {
         exit 1
     fi
 
-    # Fresh backlog - launch build mode to define the project
+    # Fresh backlog - launch discovery mode to define the project
     if is_fresh_backlog; then
-        print_info "Empty backlog. Launching build mode..."
+        print_info "Empty backlog. Launching discovery mode..."
         echo ""
         exec claude "Run /build to help define this project and create a backlog."
     fi
 
     # Completed phase - existing project, no pending tasks
     if is_completed_phase; then
-        print_info "All tasks complete! Launching build mode to add scope..."
+        print_info "All tasks complete! Launching discovery mode to add scope..."
         echo ""
         exec claude "Run /build to add new tasks to this project."
     fi
