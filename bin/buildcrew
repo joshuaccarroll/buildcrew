@@ -720,10 +720,22 @@ EOF
   }
 }
 EOF
+        local tmp_settings
+        tmp_settings=$(jq --arg cmd "$BUILDCREW_HOME/lib/statusline.sh" \
+            '. + {statusLine: {type: "command", command: $cmd}}' .claude/settings.json)
+        printf '%s\n' "$tmp_settings" > .claude/settings.json
         echo -e "  ${GREEN}✓${NC} Created .claude/settings.json with autonomous permissions"
         echo -e "  ${YELLOW}⚠${NC}  Review .claude/settings.json - these permissions enable autonomous operation"
     else
-        echo -e "  ${YELLOW}○${NC} .claude/settings.json exists"
+        if ! jq -e '.statusLine' .claude/settings.json >/dev/null 2>&1; then
+            local tmp_settings
+            tmp_settings=$(jq --arg cmd "$BUILDCREW_HOME/lib/statusline.sh" \
+                '. + {statusLine: {type: "command", command: $cmd}}' .claude/settings.json)
+            printf '%s\n' "$tmp_settings" > .claude/settings.json
+            echo -e "  ${GREEN}+${NC} Added statusLine to .claude/settings.json"
+        else
+            echo -e "  ${YELLOW}○${NC} .claude/settings.json exists (statusLine already configured)"
+        fi
     fi
 
     echo ""

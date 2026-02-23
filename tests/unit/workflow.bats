@@ -316,3 +316,73 @@ EOF
     run count_tasks "pending"
     [ "$output" = "0" ]
 }
+
+# ─────────────────────────────────────────────────────────────────────────────
+# update_workflow_state / clear_workflow_state tests
+# ─────────────────────────────────────────────────────────────────────────────
+
+@test "update_workflow_state: creates state file with correct key=value pairs" {
+    mkdir -p .buildcrew
+    __INVOCATION_COUNT=3
+    MAX_INVOCATIONS=15
+    __WF_TASK_NUM=2
+    __WF_TOTAL_TASKS=5
+    __WF_TASK_NAME="Build the auth system"
+    update_workflow_state "research" "running"
+    [ -f ".buildcrew/.workflow-state" ]
+    grep -q "^PHASE=research$" .buildcrew/.workflow-state
+    grep -q "^PHASE_STATUS=running$" .buildcrew/.workflow-state
+    grep -q "^TASK_NUM=2$" .buildcrew/.workflow-state
+    grep -q "^TOTAL_TASKS=5$" .buildcrew/.workflow-state
+    grep -q "^INVOCATION_COUNT=3$" .buildcrew/.workflow-state
+    grep -q "^MAX_INVOCATIONS=15$" .buildcrew/.workflow-state
+}
+
+@test "update_workflow_state: write is atomic (no partial file visible)" {
+    mkdir -p .buildcrew
+    __INVOCATION_COUNT=1
+    MAX_INVOCATIONS=15
+    __WF_TASK_NUM=1
+    __WF_TOTAL_TASKS=1
+    __WF_TASK_NAME="test task"
+    update_workflow_state "build" "running"
+    # Only the final state file should exist; temp files should be cleaned up
+    [ -f ".buildcrew/.workflow-state" ]
+    # No orphaned temp files should remain
+    run bash -c 'ls .buildcrew/.workflow-state.tmp.* 2>/dev/null'
+    [ "$output" = "" ]
+}
+
+@test "update_workflow_state: stores INVOCATION_COUNT and MAX_INVOCATIONS correctly" {
+    mkdir -p .buildcrew
+    __INVOCATION_COUNT=7
+    MAX_INVOCATIONS=20
+    __WF_TASK_NUM=""
+    __WF_TOTAL_TASKS=""
+    __WF_TASK_NAME=""
+    update_workflow_state "test" "complete"
+    grep -q "^INVOCATION_COUNT=7$" .buildcrew/.workflow-state
+    grep -q "^MAX_INVOCATIONS=20$" .buildcrew/.workflow-state
+}
+
+@test "clear_workflow_state: removes state file" {
+    mkdir -p .buildcrew
+    touch .buildcrew/.workflow-state
+    clear_workflow_state
+    [ ! -f ".buildcrew/.workflow-state" ]
+}
+
+@test "clear_workflow_state: is safe when no state file exists" {
+    run clear_workflow_state
+    [ "$status" -eq 0 ]
+}
+
+@test "clear_workflow_state: removes orphaned temp files" {
+    mkdir -p .buildcrew
+    touch ".buildcrew/.workflow-state.tmp.12345"
+    touch ".buildcrew/.workflow-state.tmp.67890"
+    clear_workflow_state
+    # No temp files should remain
+    run bash -c 'ls .buildcrew/.workflow-state.tmp.* 2>/dev/null'
+    [ "$output" = "" ]
+}

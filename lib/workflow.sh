@@ -278,6 +278,7 @@ print_human_review_banner() {
 # Cleanup handler for EXIT/INT/TERM
 cleanup() {
     stop_file_monitor
+    clear_workflow_state
     rm -f "$LOCKFILE"
 }
 
@@ -758,6 +759,36 @@ clear_task_progress() {
     rm -f "$PROGRESS_FILE"
 }
 
+WORKFLOW_STATE_FILE=".buildcrew/.workflow-state"
+__WF_TASK_NUM=""
+__WF_TOTAL_TASKS=""
+__WF_TASK_NAME=""
+
+# Write current workflow state atomically to the state file.
+update_workflow_state() {
+    local phase="$1"
+    local status="$2"
+    local tmp
+    tmp="${WORKFLOW_STATE_FILE}.tmp.$$"
+    mkdir -p .buildcrew
+    {
+        echo "TASK_NUM=${__WF_TASK_NUM:-}"
+        echo "TOTAL_TASKS=${__WF_TOTAL_TASKS:-}"
+        echo "TASK_NAME=${__WF_TASK_NAME:-}"
+        echo "PHASE=$phase"
+        echo "PHASE_STATUS=$status"
+        echo "INVOCATION_COUNT=$__INVOCATION_COUNT"
+        echo "MAX_INVOCATIONS=$MAX_INVOCATIONS"
+        echo "TIMESTAMP=$(date +%s)"
+    } > "$tmp"
+    mv -f "$tmp" "$WORKFLOW_STATE_FILE"
+}
+
+# Remove workflow state file and any orphaned temp files.
+clear_workflow_state() {
+    rm -f "$WORKFLOW_STATE_FILE" "${WORKFLOW_STATE_FILE}.tmp."* 2>/dev/null || true
+}
+
 # Check if a phase was already completed in a previous run.
 # Usage: if phase_completed "research"; then skip; fi
 phase_completed() {
@@ -1037,6 +1068,7 @@ run_phase_group() {
     # Start file watcher
     start_file_monitor "$PHASE_RESULT_FILE" "claude.*buildcrew-$phase"
 
+    update_workflow_state "$phase" "running"
     __INVOCATION_COUNT=$(( __INVOCATION_COUNT + 1 ))
     print_debug "Invoking claude for phase: $phase (invocation $__INVOCATION_COUNT/$MAX_INVOCATIONS, max_turns=$max_turns)"
     log_msg "=== PHASE: $phase started (max_turns=$max_turns, invocation=$__INVOCATION_COUNT/$MAX_INVOCATIONS) ==="
@@ -1065,6 +1097,7 @@ run_phase_group() {
 
         start_file_monitor "$PHASE_RESULT_FILE" "claude.*buildcrew-$phase"
 
+        update_workflow_state "$phase" "running"
         __INVOCATION_COUNT=$(( __INVOCATION_COUNT + 1 ))
         print_debug "Phase $phase produced no result file — retrying (invocation $__INVOCATION_COUNT/$MAX_INVOCATIONS)"
         log_msg "=== PHASE: $phase retry (invocation=$__INVOCATION_COUNT/$MAX_INVOCATIONS) ==="
@@ -1081,6 +1114,7 @@ run_phase_group() {
 
         if [[ ! -f "$PHASE_RESULT_FILE" ]] || ! jq -e . "$PHASE_RESULT_FILE" >/dev/null 2>&1; then
             print_error "Phase $phase failed after retry"
+            update_workflow_state "$phase" "failed"
             return 1
         fi
     fi
@@ -1089,6 +1123,7 @@ run_phase_group() {
     verdict=$(jq -r '.verdict // "unknown"' "$PHASE_RESULT_FILE")
     print_debug "Phase result: verdict=$verdict, details=$(jq -r '.details // "none"' "$PHASE_RESULT_FILE")"
     print_success "Phase $phase complete — verdict: $verdict"
+    update_workflow_state "$phase" "complete"
     log_msg "=== PHASE: $phase ended (verdict: $verdict) ==="
 }
 
@@ -1171,6 +1206,9 @@ process_task_isolated() {
     # Track current task for future archiving
     mkdir -p .buildcrew
     echo "$task" > "$CURRENT_TASK_FILE"
+    __WF_TASK_NUM="$task_num"
+    __WF_TOTAL_TASKS="$total_tasks"
+    __WF_TASK_NAME="$task"
 
     # ─────────────────────────────────────────────────────────────────────────
     # Outer loop: supports circuit breaker re-planning
@@ -1214,8 +1252,10 @@ process_task_isolated() {
 
     if [[ "$SKIP_SPEC" == "true" ]]; then
         print_info "Skipping phase: spec (--skip-spec flag set)"
+        update_workflow_state "spec" "skipped"
     elif [[ "$task_complexity" == "trivial" || "$task_complexity" == "simple" ]]; then
         print_info "Skipping phase: spec (complexity: $task_complexity)"
+        update_workflow_state "spec" "skipped"
     elif [[ "$__run_spec" == "true" ]]; then
         run_phase_group "spec" "$task" "${__replan_context:+Re-planning context: $__replan_context}" || { mark_task_blocked "$task" "spec phase failed to produce a valid result"; clear_task_progress; return 1; }
 
@@ -1273,6 +1313,7 @@ process_task_isolated() {
         save_task_progress "$task" "$__completed_phases" "$__INVOCATION_COUNT"
     elif [[ "$__spec_skill_available" == "true" ]] && phase_completed "spec"; then
         print_info "Skipping phase: spec (completed in previous run)"
+        update_workflow_state "spec" "skipped"
         if [[ -f ".claude/spec.md" ]]; then
             __spec_context="Specification available at .claude/spec.md — read it for acceptance criteria."
         fi
@@ -1282,8 +1323,10 @@ process_task_isolated() {
     # --- research + plan ---
     if phase_completed "research"; then
         print_info "Skipping phase: research (completed in previous run)"
+        update_workflow_state "research" "skipped"
     elif [[ "$task_complexity" == "trivial" ]]; then
         print_info "Skipping phase: research (complexity: trivial)"
+        update_workflow_state "research" "skipped"
         if [[ "$HUMAN_REVIEW" == "true" ]]; then
             print_info "Note: --review has no effect for trivial tasks (research and review phases are skipped)"
         fi
@@ -1323,8 +1366,10 @@ process_task_isolated() {
     # --- plan-review (max 3 external cycles, circuit breaker at 2 consecutive failures) ---
     if phase_completed "review"; then
         print_info "Skipping phase: review (completed in previous run)"
+        update_workflow_state "review" "skipped"
     elif [[ "$task_complexity" == "trivial" || "$task_complexity" == "simple" ]]; then
         print_info "Skipping phase: review (complexity: $task_complexity)"
+        update_workflow_state "review" "skipped"
     else
         local plan_review_cycle=0
         local consecutive_review_failures=0
@@ -1395,6 +1440,7 @@ process_task_isolated() {
                         __need_replan=true
                         __completed_phases=""
                         clear_task_progress
+                        update_workflow_state "replanning" "running"
                         rm -f .claude/plan-review-prev.md .claude/review-pass1-pe-prev.md .claude/review-pass2-pm-prev.md
                         break
                     fi
@@ -1418,6 +1464,7 @@ process_task_isolated() {
     # --- build → codereview → test (with rebuild loop, circuit breaker) ---
     if phase_completed "build"; then
         print_info "Skipping phase: build+codereview+test (completed in previous run)"
+        update_workflow_state "build" "skipped"
     else
         local consecutive_build_failures=0
         while true; do
@@ -1440,6 +1487,7 @@ process_task_isolated() {
             local cr_verdict
             if [[ "$task_complexity" == "trivial" || "$task_complexity" == "simple" ]]; then
                 print_info "Skipping phase: codereview (complexity: $task_complexity)"
+                update_workflow_state "codereview" "skipped"
                 cr_verdict="approved"
             else
                 run_phase_group "codereview" "$task" "${__spec_context}" || { mark_task_blocked "$task" "codereview phase failed to produce a valid result"; clear_task_progress; return 1; }
@@ -1472,6 +1520,7 @@ process_task_isolated() {
                         __need_replan=true
                         __completed_phases=""
                         clear_task_progress
+                        update_workflow_state "replanning" "running"
                         break
                     fi
                     local cr_fail_details
@@ -1489,6 +1538,7 @@ process_task_isolated() {
 
             if [[ "$task_complexity" == "trivial" ]]; then
                 print_info "Skipping phase: test (complexity: trivial)"
+                update_workflow_state "test" "skipped"
                 consecutive_build_failures=0
                 break
             fi
@@ -1525,6 +1575,7 @@ process_task_isolated() {
                         __need_replan=true
                         __completed_phases=""
                         clear_task_progress
+                        update_workflow_state "replanning" "running"
                         break
                     fi
                     local first_fail_details
@@ -1556,6 +1607,7 @@ process_task_isolated() {
                         __need_replan=true
                         __completed_phases=""
                         clear_task_progress
+                        update_workflow_state "replanning" "running"
                         break
                     fi
                     local smoke_fail_details
@@ -1580,8 +1632,10 @@ process_task_isolated() {
     # --- outcome (validates against spec acceptance criteria) ---
     if phase_completed "outcome"; then
         print_info "Skipping phase: outcome (completed in previous run)"
+        update_workflow_state "outcome" "skipped"
     elif [[ "$task_complexity" == "trivial" || "$task_complexity" == "simple" ]]; then
         print_info "Skipping phase: outcome (complexity: $task_complexity)"
+        update_workflow_state "outcome" "skipped"
     elif [[ -d ".claude/skills/buildcrew-outcome" ]] && [[ "$SKIP_SPEC" != "true" ]]; then
         local outcome_attempt=0
         local consecutive_outcome_failures=0
@@ -1632,6 +1686,7 @@ process_task_isolated() {
                             __need_replan=true
                             __completed_phases=""
                             clear_task_progress
+                            update_workflow_state "replanning" "running"
                             break
                         fi
                         # Rebuild to fix failing criteria
@@ -1687,6 +1742,7 @@ process_task_isolated() {
                         __need_replan=true
                         __completed_phases=""
                         clear_task_progress
+                        update_workflow_state "replanning" "running"
                         break
                     fi
                     local rebuild_ctx
@@ -1766,6 +1822,7 @@ process_task_isolated() {
                     __need_replan=true
                     __completed_phases=""
                     clear_task_progress
+                    update_workflow_state "replanning" "running"
                     break
                 fi
 
@@ -1897,6 +1954,7 @@ main() {
     start_time=$(date +%s)
     local total_tasks
     total_tasks=$(count_tasks pending)
+    __WF_TOTAL_TASKS="$total_tasks"
     local task_num=0
 
     # Show initial status
@@ -2012,6 +2070,7 @@ main() {
 
             # Run the appropriate processor
             ((task_num++))
+            __WF_TASK_NUM="$task_num"
             local task_result=0
             if process_task_isolated "$task" "$task_num" "$total_tasks" "$task_complexity"; then
                 task_result=0
@@ -2084,6 +2143,7 @@ main() {
         print_success "All backlog tasks processed!"
     fi
 
+    clear_workflow_state
     cleanup_log "$failed"
 }
 

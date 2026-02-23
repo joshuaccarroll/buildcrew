@@ -127,3 +127,56 @@ teardown() {
     [ "$status" -eq 0 ]
     [ -L ".claude/skills" ]
 }
+
+# ─────────────────────────────────────────────────────────────────────────────
+# statusLine configuration tests
+# ─────────────────────────────────────────────────────────────────────────────
+
+@test "init: settings.json contains statusLine config" {
+    run "$BUILDCREW_HOME/bin/buildcrew" init
+    [ "$status" -eq 0 ]
+    grep -q '"statusLine"' .claude/settings.json
+}
+
+@test "init: statusLine command points to statusline.sh" {
+    run "$BUILDCREW_HOME/bin/buildcrew" init
+    [ "$status" -eq 0 ]
+    grep -q 'statusline.sh' .claude/settings.json
+}
+
+@test "init: statusLine command is resolved path not literal variable" {
+    run "$BUILDCREW_HOME/bin/buildcrew" init
+    [ "$status" -eq 0 ]
+    # Should not contain literal $BUILDCREW_HOME string
+    ! grep -q '\$BUILDCREW_HOME' .claude/settings.json
+}
+
+@test "init: re-running init adds statusLine when missing from existing settings.json" {
+    mkdir -p .claude
+    echo '{"permissions": {"allow": []}}' > .claude/settings.json
+    run "$BUILDCREW_HOME/bin/buildcrew" init
+    [ "$status" -eq 0 ]
+    grep -q '"statusLine"' .claude/settings.json
+}
+
+@test "init: re-running init does not overwrite existing statusLine config" {
+    mkdir -p .claude
+    printf '{"statusLine": {"type": "command", "command": "/my/custom/statusline.sh"}}\n' > .claude/settings.json
+    run "$BUILDCREW_HOME/bin/buildcrew" init
+    [ "$status" -eq 0 ]
+    grep -q '/my/custom/statusline.sh' .claude/settings.json
+}
+
+@test "init: re-running init on fully initialized project preserves statusLine" {
+    # First init
+    run "$BUILDCREW_HOME/bin/buildcrew" init
+    [ "$status" -eq 0 ]
+    local first_cmd
+    first_cmd=$(jq -r '.statusLine.command' .claude/settings.json)
+    # Second init
+    run "$BUILDCREW_HOME/bin/buildcrew" init
+    [ "$status" -eq 0 ]
+    local second_cmd
+    second_cmd=$(jq -r '.statusLine.command' .claude/settings.json)
+    [ "$first_cmd" = "$second_cmd" ]
+}
