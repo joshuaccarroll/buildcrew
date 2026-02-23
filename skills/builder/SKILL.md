@@ -241,6 +241,13 @@ If this is **adding scope** (existing project with completed tasks):
    - Each phase should be independently verifiable before proceeding to the next
 5. Generate or update `BACKLOG.md` in the format below. Be extremely concise. Sacrifice grammar for the sake of concision.
 
+Tag each task with its complexity profile using a `{trivial}` or `{simple}` suffix (no tag = standard):
+- `{trivial}` — file creation, chmod, typo fix, version bump, rename, delete, move, copy (build + verify only)
+- `{simple}` — config change, small bug fix, small update, enable/disable setting (research + build + test + verify)
+- no tag — anything substantial, requiring research, planning, and full review
+
+Combine trivially related tasks into a single backlog item when they form a natural atomic unit.
+
 ```markdown
 # Backlog
 
@@ -249,7 +256,7 @@ If this is **adding scope** (existing project with completed tasks):
 
 ## Phase 1: [Phase Name]
 
-- [ ] [Task 1 from Phase 1]
+- [ ] [Task 1 from Phase 1] {trivial}
 - [ ] [Task 2 from Phase 1]
 
 ## Phase 2: [Phase Name]

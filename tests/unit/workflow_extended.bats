@@ -1284,3 +1284,238 @@ EOF
     grep -q "review" "$blocked_file"
     rm -f "$blocked_file"
 }
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Complexity-aware phase skipping: helper functions
+# ─────────────────────────────────────────────────────────────────────────────
+
+@test "get_task_tag: extracts trivial tag at end of string" {
+    run get_task_tag "Create hello.txt {trivial}"
+    [ "$output" = "trivial" ]
+}
+
+@test "get_task_tag: extracts simple tag at end of string" {
+    run get_task_tag "Update config setting {simple}"
+    [ "$output" = "simple" ]
+}
+
+@test "get_task_tag: extracts standard tag at end of string" {
+    run get_task_tag "Build new feature {standard}"
+    [ "$output" = "standard" ]
+}
+
+@test "get_task_tag: returns empty when no tag present" {
+    run get_task_tag "Build new authentication system"
+    [ "$output" = "" ]
+}
+
+@test "get_task_tag: ignores mid-string complexity words" {
+    run get_task_tag "Fix {trivial} issue in the codebase"
+    [ "$output" = "" ]
+}
+
+@test "get_task_tag: ignores unrecognized tags" {
+    run get_task_tag "Do something {fast}"
+    [ "$output" = "" ]
+}
+
+@test "get_task_tag: handles trailing whitespace after tag" {
+    run get_task_tag "Create file {trivial}   "
+    [ "$output" = "trivial" ]
+}
+
+@test "strip_task_tag: removes trivial tag and trailing space" {
+    run strip_task_tag "Create hello.txt {trivial}"
+    [ "$output" = "Create hello.txt" ]
+}
+
+@test "strip_task_tag: removes simple tag" {
+    run strip_task_tag "Update config {simple}"
+    [ "$output" = "Update config" ]
+}
+
+@test "strip_task_tag: leaves string unchanged when no tag" {
+    run strip_task_tag "Build authentication system"
+    [ "$output" = "Build authentication system" ]
+}
+
+@test "strip_task_tag: does not strip mid-string tag" {
+    run strip_task_tag "Fix {trivial} issue"
+    [ "$output" = "Fix {trivial} issue" ]
+}
+
+@test "strip_task_tag: handles trailing whitespace after tag" {
+    run strip_task_tag "Create file {trivial}   "
+    [ "$output" = "Create file" ]
+}
+
+@test "assess_task_complexity: explicit trivial tag wins" {
+    run assess_task_complexity "Build complex auth system {trivial}"
+    [ "$output" = "trivial" ]
+}
+
+@test "assess_task_complexity: explicit simple tag wins" {
+    run assess_task_complexity "Architect database schema {simple}"
+    [ "$output" = "simple" ]
+}
+
+@test "assess_task_complexity: explicit standard tag wins" {
+    run assess_task_complexity "Create file {standard}"
+    [ "$output" = "standard" ]
+}
+
+@test "assess_task_complexity: trivial verb short task returns trivial" {
+    run assess_task_complexity "Create hello.txt"
+    [ "$output" = "trivial" ]
+}
+
+@test "assess_task_complexity: rename short task returns trivial" {
+    run assess_task_complexity "Rename config.js to config.ts"
+    [ "$output" = "trivial" ]
+}
+
+@test "assess_task_complexity: bump version returns trivial" {
+    run assess_task_complexity "Bump version to 2.5.0"
+    [ "$output" = "trivial" ]
+}
+
+@test "assess_task_complexity: simple verb medium task returns simple" {
+    run assess_task_complexity "Update the default timeout value"
+    [ "$output" = "simple" ]
+}
+
+@test "assess_task_complexity: enable feature returns simple" {
+    run assess_task_complexity "Enable dark mode in settings"
+    [ "$output" = "simple" ]
+}
+
+@test "assess_task_complexity: complexity indicator forces standard despite trivial verb" {
+    run assess_task_complexity "Create database schema"
+    [ "$output" = "standard" ]
+}
+
+@test "assess_task_complexity: complexity indicator forces standard despite simple verb" {
+    run assess_task_complexity "Update authentication flow"
+    [ "$output" = "standard" ]
+}
+
+@test "assess_task_complexity: long task defaults to standard" {
+    run assess_task_complexity "Create a comprehensive multi-tenant user management module with role-based access control permissions"
+    [ "$output" = "standard" ]
+}
+
+@test "assess_task_complexity: unknown verb returns standard" {
+    run assess_task_complexity "Implement new feature"
+    [ "$output" = "standard" ]
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Complexity-aware phase skipping: parse_args --full-pipeline
+# ─────────────────────────────────────────────────────────────────────────────
+
+@test "parse_args: --full-pipeline sets FULL_PIPELINE=true" {
+    parse_args --full-pipeline
+    [ "$FULL_PIPELINE" = "true" ]
+}
+
+@test "parse_args: no args leaves FULL_PIPELINE=false" {
+    parse_args
+    [ "$FULL_PIPELINE" = "false" ]
+}
+
+@test "parse_args: --full-pipeline combined with other flags" {
+    parse_args --full-pipeline --dry-run
+    [ "$FULL_PIPELINE" = "true" ]
+    [ "$DRY_RUN" = "true" ]
+}
+
+@test "parse_args: --help mentions --full-pipeline" {
+    run parse_args --help
+    [[ "$output" == *"--full-pipeline"* ]]
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Complexity-aware phase skipping: load_buildcrew_config COMPLEXITY_AWARE
+# ─────────────────────────────────────────────────────────────────────────────
+
+@test "load_buildcrew_config: sets COMPLEXITY_AWARE=false from config" {
+    unset COMPLEXITY_AWARE
+    mkdir -p .buildcrew
+    echo "COMPLEXITY_AWARE=false" > .buildcrew/config
+    load_buildcrew_config
+    [ "$COMPLEXITY_AWARE" = "false" ]
+}
+
+@test "load_buildcrew_config: sets COMPLEXITY_AWARE=true from config" {
+    unset COMPLEXITY_AWARE
+    mkdir -p .buildcrew
+    echo "COMPLEXITY_AWARE=true" > .buildcrew/config
+    load_buildcrew_config
+    [ "$COMPLEXITY_AWARE" = "true" ]
+}
+
+@test "load_buildcrew_config: env var takes precedence over COMPLEXITY_AWARE in config" {
+    mkdir -p .buildcrew
+    echo "COMPLEXITY_AWARE=false" > .buildcrew/config
+    COMPLEXITY_AWARE=true
+    load_buildcrew_config
+    [ "$COMPLEXITY_AWARE" = "true" ]
+}
+
+@test "load_buildcrew_config: invalid COMPLEXITY_AWARE value ignored with warning" {
+    unset COMPLEXITY_AWARE
+    mkdir -p .buildcrew
+    echo "COMPLEXITY_AWARE=yes" > .buildcrew/config
+    run load_buildcrew_config
+    [[ "$output" == *"Warning"*"COMPLEXITY_AWARE"* ]]
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Complexity-aware phase skipping: mark_task_complete with tags
+# ─────────────────────────────────────────────────────────────────────────────
+
+@test "mark_task_complete: strips trivial tag on completion" {
+    echo "- [ ] Create hello.txt {trivial}" > BACKLOG.md
+    mark_task_complete "Create hello.txt"
+    grep -q "\[x\] Create hello.txt" BACKLOG.md
+    ! grep -q "{trivial}" BACKLOG.md
+}
+
+@test "mark_task_complete: strips simple tag on completion" {
+    echo "- [ ] Update config {simple}" > BACKLOG.md
+    mark_task_complete "Update config"
+    grep -q "\[x\] Update config" BACKLOG.md
+    ! grep -q "{simple}" BACKLOG.md
+}
+
+@test "mark_task_complete: backward compat — still marks untagged task" {
+    echo "- [ ] Build auth system" > BACKLOG.md
+    mark_task_complete "Build auth system"
+    grep -q "\[x\] Build auth system" BACKLOG.md
+}
+
+@test "mark_task_complete: does not match when task text differs" {
+    echo "- [ ] Create hello.txt {trivial}" > BACKLOG.md
+    mark_task_complete "Create world.txt"
+    grep -q "\[ \] Create hello.txt" BACKLOG.md
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Complexity-aware phase skipping: load_task_progress with tagged backlog
+# ─────────────────────────────────────────────────────────────────────────────
+
+@test "load_task_progress: validates stripped task against tagged backlog line" {
+    echo "- [ ] Create hello.txt {trivial}" > BACKLOG.md
+    mkdir -p .buildcrew
+    echo '{"task": "Create hello.txt", "completed_phases": ["build"], "invocation_count": 1}' > "$PROGRESS_FILE"
+    load_task_progress
+    [ "$__RESUME_TASK" = "Create hello.txt" ]
+}
+
+@test "load_task_progress: returns 1 when stripped task not in tagged backlog" {
+    echo "- [ ] Create world.txt {trivial}" > BACKLOG.md
+    mkdir -p .buildcrew
+    echo '{"task": "Create hello.txt", "completed_phases": ["build"], "invocation_count": 1}' > "$PROGRESS_FILE"
+    run load_task_progress
+    [ "$status" -eq 1 ]
+}

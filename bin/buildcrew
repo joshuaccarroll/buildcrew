@@ -69,6 +69,7 @@ print_help() {
     echo "    --strict      (default) Require ALL acceptance criteria to pass before commit (with 'run')"
     echo "    --no-strict   Allow partial acceptance criteria pass — proceed with warnings (with 'run')"
     echo "    --max-invocations N  Max Claude invocations per run (default: 15, with 'run')"
+    echo "    --full-pipeline  Force all phases regardless of complexity assessment (with 'run')"
     echo "    --verbose     Show orchestrator decisions, phase verdicts, and invocation counts"
     echo "    --debug       Alias for --verbose"
     echo ""
@@ -264,6 +265,10 @@ EOF
 
 # Maximum Claude invocations per buildcrew run (default: 15)
 # MAX_INVOCATIONS=15
+
+# Auto-detect task complexity and skip unnecessary phases (default: true)
+# Set to false to always run all phases (equivalent to --full-pipeline)
+# COMPLEXITY_AWARE=true
 EOF
         echo -e "  ${GREEN}✓${NC} Created .buildcrew/config.example"
     else

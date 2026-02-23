@@ -71,6 +71,15 @@ load_buildcrew_config() {
                         fi
                     fi
                     ;;
+                COMPLEXITY_AWARE)
+                    if [[ -z "${COMPLEXITY_AWARE+x}" ]]; then
+                        if [[ "$value" == "true" || "$value" == "false" ]]; then
+                            COMPLEXITY_AWARE="$value"
+                        else
+                            echo "Warning: invalid COMPLEXITY_AWARE in .buildcrew/config: $value (ignored, must be true or false)" >&2
+                        fi
+                    fi
+                    ;;
                 # Add future config keys here
             esac
         fi
@@ -90,6 +99,7 @@ PAUSE_BETWEEN_TASKS=5
 load_buildcrew_config
 # 2. Fall back to built-in default if nothing set it
 MAX_INVOCATIONS=${MAX_INVOCATIONS:-15}
+COMPLEXITY_AWARE=${COMPLEXITY_AWARE:-true}
 __INVOCATION_COUNT=0
 __RESUME_PHASES=""
 
@@ -126,6 +136,7 @@ SKIP_SPEC=false
 STRICT_MODE=true
 STRICT_EXPLICIT=false   # true only when --strict or --no-strict is passed explicitly
 VERBOSE=false
+FULL_PIPELINE=false
 
 parse_args() {
     while [[ $# -gt 0 ]]; do
@@ -176,6 +187,10 @@ parse_args() {
                 VERBOSE=true
                 shift
                 ;;
+            --full-pipeline)
+                FULL_PIPELINE=true
+                shift
+                ;;
             --max-invocations)
                 if [[ -z "${2:-}" ]] || ! [[ "$2" =~ ^[1-9][0-9]*$ ]] || [[ ${#2} -gt 5 ]]; then
                     echo "Error: --max-invocations requires a positive integer (1-99999, no leading zeros)"
@@ -198,6 +213,7 @@ parse_args() {
                 echo "  --strict     (default) Require ALL acceptance criteria to pass before commit"
                 echo "  --no-strict  Allow partial acceptance criteria pass — proceed with warnings"
                 echo "  --max-invocations N  Set maximum Claude invocations per run (default: 15)"
+                echo "  --full-pipeline  Force all phases regardless of complexity assessment"
                 echo "  --verbose    Show orchestrator decisions, phase verdicts, and invocation counts"
                 echo "  --debug      Alias for --verbose"
                 echo "  --help, -h   Show this help message"
@@ -541,10 +557,66 @@ get_task_by_target() {
     fi
 }
 
+# Extract complexity tag from the END of a task string.
+# Matches {trivial}, {simple}, {standard} only at end of string (ignores mid-string occurrences).
+# Returns tag name or empty string.
+get_task_tag() {
+    local task="$1"
+    echo "$task" | sed -nE 's/.*\{(trivial|simple|standard)\}[[:space:]]*$/\1/p'
+}
+
+# Strip complexity tag suffix and trailing whitespace from task text.
+strip_task_tag() {
+    local task="$1"
+    echo "$task" | sed -E 's/[[:space:]]*\{(trivial|simple|standard)\}[[:space:]]*$//'
+}
+
+# Assess task complexity: returns "trivial", "simple", or "standard".
+# 1. Explicit tag wins (via get_task_tag)
+# 2. Fall back to keyword heuristic
+assess_task_complexity() {
+    local task="$1"
+    local tag
+    tag=$(get_task_tag "$task")
+    if [[ -n "$tag" ]]; then
+        echo "$tag"
+        return
+    fi
+
+    local task_lower
+    task_lower=$(echo "$task" | tr '[:upper:]' '[:lower:]')
+    local task_len=${#task}
+
+    # Complexity indicators force standard classification
+    local complexity_indicators="system|architect|database|schema|auth|integrat|migrat|redesign|refactor|test|api"
+    if echo "$task_lower" | grep -qE "$complexity_indicators"; then
+        echo "standard"
+        return
+    fi
+
+    # Trivial: short task with trivial verb
+    if (( task_len < 80 )); then
+        if echo "$task_lower" | grep -qE '^(create|chmod|fix typo|rename|delete|bump version|set permission|move|copy) '; then
+            echo "trivial"
+            return
+        fi
+    fi
+
+    # Simple: medium task with simple verb
+    if (( task_len < 120 )); then
+        if echo "$task_lower" | grep -qE '^(config|update|change|fix bug|refactor|add .* to|install|enable|disable) '; then
+            echo "simple"
+            return
+        fi
+    fi
+
+    echo "standard"
+}
+
 # Mark a task as completed in the backlog
 mark_task_complete() {
     local task="$1"
-    TASK="$task" perl -i -pe 's/^- \[ \] \Q$ENV{TASK}\E$/- [x] $ENV{TASK}/' "$BACKLOG_FILE"
+    TASK="$task" perl -i -pe 's/^- \[ \] \Q$ENV{TASK}\E(\s*\{(?:trivial|simple|standard)\})?$/- [x] $ENV{TASK}/' "$BACKLOG_FILE"
 }
 
 # Mark a task as blocked in the backlog
@@ -606,7 +678,7 @@ load_task_progress() {
     fi
 
     # Validate saved task is still pending in backlog
-    if ! TASK="$saved_task" perl -ne 'if (/^- \[ \] \Q$ENV{TASK}\E$/) { $f=1; last } END { exit($f ? 0 : 1) }' "$BACKLOG_FILE"; then
+    if ! TASK="$saved_task" perl -ne 'if (/^- \[ \] \Q$ENV{TASK}\E(\s*\{(?:trivial|simple|standard)\})?$/) { $f=1; last } END { exit($f ? 0 : 1) }' "$BACKLOG_FILE"; then
         print_warning "Saved task no longer pending in backlog — clearing progress"
         clear_task_progress
         return 1
@@ -987,6 +1059,7 @@ process_task_isolated() {
     local task="$1"
     local task_num="${2:-}"
     local total_tasks="${3:-}"
+    local task_complexity="${4:-standard}"
     local __completed_phases=""
     local __is_resuming=false
     local __replan_count=0           # circuit breaker: how many times we've re-planned
@@ -1015,6 +1088,9 @@ process_task_isolated() {
     fi
 
     print_info "Running in phase-isolated mode"
+    if [[ "$task_complexity" != "standard" ]]; then
+        print_info "Complexity profile: $task_complexity (skipping non-essential phases)"
+    fi
 
     if [[ "$__is_resuming" != "true" ]]; then
         # Archive artifacts from any previous task before cleanup
@@ -1070,6 +1146,8 @@ process_task_isolated() {
 
     if [[ "$SKIP_SPEC" == "true" ]]; then
         print_info "Skipping phase: spec (--skip-spec flag set)"
+    elif [[ "$task_complexity" == "trivial" || "$task_complexity" == "simple" ]]; then
+        print_info "Skipping phase: spec (complexity: $task_complexity)"
     elif [[ "$__run_spec" == "true" ]]; then
         run_phase_group "spec" "$task" "${__replan_context:+Re-planning context: $__replan_context}" || { mark_task_blocked "$task" "spec phase failed to produce a valid result"; clear_task_progress; return 1; }
 
@@ -1136,6 +1214,11 @@ process_task_isolated() {
     # --- research + plan ---
     if phase_completed "research"; then
         print_info "Skipping phase: research (completed in previous run)"
+    elif [[ "$task_complexity" == "trivial" ]]; then
+        print_info "Skipping phase: research (complexity: trivial)"
+        if [[ "$HUMAN_REVIEW" == "true" ]]; then
+            print_info "Note: --review has no effect for trivial tasks (research and review phases are skipped)"
+        fi
     else
         local research_extra="${__spec_context}"
         if [[ -n "$__replan_context" ]]; then
@@ -1172,6 +1255,8 @@ process_task_isolated() {
     # --- plan-review (max 3 external cycles, circuit breaker at 2 consecutive failures) ---
     if phase_completed "review"; then
         print_info "Skipping phase: review (completed in previous run)"
+    elif [[ "$task_complexity" == "trivial" || "$task_complexity" == "simple" ]]; then
+        print_info "Skipping phase: review (complexity: $task_complexity)"
     else
         local plan_review_cycle=0
         local consecutive_review_failures=0
@@ -1284,10 +1369,14 @@ process_task_isolated() {
             run_phase_group "build" "$task" "$build_context" || { mark_task_blocked "$task" "build phase failed to produce a valid result"; clear_task_progress; return 1; }
 
             # --- code review (independent phase) ---
-            run_phase_group "codereview" "$task" "${__spec_context}" || { mark_task_blocked "$task" "codereview phase failed to produce a valid result"; clear_task_progress; return 1; }
-
             local cr_verdict
-            cr_verdict=$(jq -r '.verdict' "$PHASE_RESULT_FILE")
+            if [[ "$task_complexity" == "trivial" || "$task_complexity" == "simple" ]]; then
+                print_info "Skipping phase: codereview (complexity: $task_complexity)"
+                cr_verdict="approved"
+            else
+                run_phase_group "codereview" "$task" "${__spec_context}" || { mark_task_blocked "$task" "codereview phase failed to produce a valid result"; clear_task_progress; return 1; }
+                cr_verdict=$(jq -r '.verdict' "$PHASE_RESULT_FILE")
+            fi
             case "$cr_verdict" in
                 approved)
                     : # fall through to test
@@ -1329,6 +1418,12 @@ process_task_isolated() {
                     clear_task_progress
                     return 1 ;;
             esac
+
+            if [[ "$task_complexity" == "trivial" ]]; then
+                print_info "Skipping phase: test (complexity: trivial)"
+                consecutive_build_failures=0
+                break
+            fi
 
             local test_extra="${__spec_context}"
             run_phase_group "test" "$task" "$test_extra" || { mark_task_blocked "$task" "test phase failed to produce a valid result"; clear_task_progress; return 1; }
@@ -1417,6 +1512,8 @@ process_task_isolated() {
     # --- outcome (validates against spec acceptance criteria) ---
     if phase_completed "outcome"; then
         print_info "Skipping phase: outcome (completed in previous run)"
+    elif [[ "$task_complexity" == "trivial" || "$task_complexity" == "simple" ]]; then
+        print_info "Skipping phase: outcome (complexity: $task_complexity)"
     elif [[ -d ".claude/skills/buildcrew-outcome" ]] && [[ "$SKIP_SPEC" != "true" ]]; then
         local outcome_attempt=0
         local consecutive_outcome_failures=0
@@ -1476,13 +1573,19 @@ process_task_isolated() {
                             "Partial acceptance at outcome stage means the implementation is incomplete — re-read the specific failing criteria in the spec"
                         ((build_attempt++))
                         run_phase_group "build" "$task" "OUTCOME FIX: $partial_details | $__spec_context" || { mark_task_blocked "$task" "build phase failed during outcome fix"; clear_task_progress; return 1; }
-                        run_phase_group "codereview" "$task" "${__spec_context}" || { mark_task_blocked "$task" "codereview phase failed to produce a valid result"; clear_task_progress; return 1; }
-                        cr_verdict=$(jq -r '.verdict' "$PHASE_RESULT_FILE")
+                        if [[ "$task_complexity" == "trivial" || "$task_complexity" == "simple" ]]; then
+                            cr_verdict="approved"
+                        else
+                            run_phase_group "codereview" "$task" "${__spec_context}" || { mark_task_blocked "$task" "codereview phase failed to produce a valid result"; clear_task_progress; return 1; }
+                            cr_verdict=$(jq -r '.verdict' "$PHASE_RESULT_FILE")
+                        fi
                         if [[ "$cr_verdict" == "needs_rebuild" ]]; then
                             mark_task_blocked "$task" "Code review rejected rebuild at outcome stage"
                             clear_task_progress; return 1
                         fi
-                        run_phase_group "test" "$task" "$__spec_context" || { mark_task_blocked "$task" "test phase failed during outcome fix"; clear_task_progress; return 1; }
+                        if [[ "$task_complexity" != "trivial" ]]; then
+                            run_phase_group "test" "$task" "$__spec_context" || { mark_task_blocked "$task" "test phase failed during outcome fix"; clear_task_progress; return 1; }
+                        fi
                         continue
                     else
                         local partial_details
@@ -1527,13 +1630,19 @@ process_task_isolated() {
                         "Always run the feature against its acceptance criteria before consider it done"
                     ((build_attempt++))
                     run_phase_group "build" "$task" "OUTCOME FIX: $rebuild_ctx | $__spec_context" || { mark_task_blocked "$task" "build phase failed during outcome fix"; clear_task_progress; return 1; }
-                    run_phase_group "codereview" "$task" "${__spec_context}" || { mark_task_blocked "$task" "codereview phase failed to produce a valid result"; clear_task_progress; return 1; }
-                    cr_verdict=$(jq -r '.verdict' "$PHASE_RESULT_FILE")
+                    if [[ "$task_complexity" == "trivial" || "$task_complexity" == "simple" ]]; then
+                        cr_verdict="approved"
+                    else
+                        run_phase_group "codereview" "$task" "${__spec_context}" || { mark_task_blocked "$task" "codereview phase failed to produce a valid result"; clear_task_progress; return 1; }
+                        cr_verdict=$(jq -r '.verdict' "$PHASE_RESULT_FILE")
+                    fi
                     if [[ "$cr_verdict" == "needs_rebuild" ]]; then
                         mark_task_blocked "$task" "Code review rejected rebuild at outcome stage"
                         clear_task_progress; return 1
                     fi
-                    run_phase_group "test" "$task" "$__spec_context" || { mark_task_blocked "$task" "test phase failed during outcome fix"; clear_task_progress; return 1; }
+                    if [[ "$task_complexity" != "trivial" ]]; then
+                        run_phase_group "test" "$task" "$__spec_context" || { mark_task_blocked "$task" "test phase failed during outcome fix"; clear_task_progress; return 1; }
+                    fi
                     continue ;;
                 *)
                     mark_task_blocked "$task" "Unexpected outcome verdict: $outcome_verdict"
@@ -1671,11 +1780,15 @@ main() {
         error "Phase-isolated skills not found. Run 'buildcrew init' to install them."
     fi
 
-    local _phase_count=6
-    [[ "$SKIP_SPEC" != "true" ]] && [[ -d ".claude/skills/buildcrew-spec" ]] && _phase_count=$((_phase_count + 1))
-    [[ -d ".claude/skills/buildcrew-outcome" ]] && _phase_count=$((_phase_count + 1))
-    print_info "Mode: Phase-isolated ($_phase_count invocations per task)"
-    print_debug "Flags: skip_spec=$SKIP_SPEC strict=$STRICT_MODE review=$HUMAN_REVIEW branch=$GIT_BRANCH resume=$RESUME_MODE"
+    if [[ "$COMPLEXITY_AWARE" == "true" ]] && [[ "$FULL_PIPELINE" != "true" ]]; then
+        print_info "Mode: Phase-isolated (complexity-aware: 2-8 invocations per task)"
+    else
+        local _phase_count=6
+        [[ "$SKIP_SPEC" != "true" ]] && [[ -d ".claude/skills/buildcrew-spec" ]] && _phase_count=$((_phase_count + 1))
+        [[ -d ".claude/skills/buildcrew-outcome" ]] && _phase_count=$((_phase_count + 1))
+        print_info "Mode: Phase-isolated ($_phase_count invocations per task)"
+    fi
+    print_debug "Flags: skip_spec=$SKIP_SPEC strict=$STRICT_MODE review=$HUMAN_REVIEW branch=$GIT_BRANCH resume=$RESUME_MODE full_pipeline=$FULL_PIPELINE complexity_aware=$COMPLEXITY_AWARE"
 
     # Git branch setup
     if [[ "$GIT_BRANCH" == "true" ]]; then
@@ -1769,6 +1882,13 @@ main() {
             break
         fi
 
+        # Assess complexity and strip tag before processing
+        local task_complexity="standard"
+        if [[ "$FULL_PIPELINE" != "true" ]] && [[ "$COMPLEXITY_AWARE" == "true" ]]; then
+            task_complexity=$(assess_task_complexity "$task")
+        fi
+        task=$(strip_task_tag "$task")
+
         print_task_start "$task"
 
         if [[ "$DRY_RUN" == "true" ]]; then
@@ -1780,14 +1900,26 @@ main() {
                 skip_phases=$(jq -r '.completed_phases // [] | join(", ")' "$PROGRESS_FILE" 2>/dev/null)
                 print_info "[DRY RUN] Would resume task, skipping phases: ${skip_phases:-none}"
             else
-                local phase_list="research review build test verify"
-                if [[ "$SKIP_SPEC" != "true" ]]; then
-                    phase_list="spec $phase_list"
-                fi
-                # Insert codereview between build and test (before outcome insertion)
-                phase_list="${phase_list/build test/build codereview test}"
-                if [[ -d ".claude/skills/buildcrew-outcome" ]]; then
-                    phase_list="${phase_list/test verify/test outcome verify}"
+                local phase_list
+                case "$task_complexity" in
+                    trivial)
+                        phase_list="build verify"
+                        ;;
+                    simple)
+                        phase_list="research build test verify"
+                        ;;
+                    *)
+                        phase_list="research review build codereview test verify"
+                        if [[ "$SKIP_SPEC" != "true" ]] && [[ -d ".claude/skills/buildcrew-spec" ]]; then
+                            phase_list="spec $phase_list"
+                        fi
+                        if [[ -d ".claude/skills/buildcrew-outcome" ]]; then
+                            phase_list="${phase_list/test verify/test outcome verify}"
+                        fi
+                        ;;
+                esac
+                if [[ "$task_complexity" != "standard" ]]; then
+                    print_info "[DRY RUN] Complexity: $task_complexity"
                 fi
                 print_info "[DRY RUN] Would execute phases: $phase_list"
             fi
@@ -1810,7 +1942,7 @@ main() {
             # Run the appropriate processor
             ((task_num++))
             local task_result=0
-            if process_task_isolated "$task" "$task_num" "$total_tasks"; then
+            if process_task_isolated "$task" "$task_num" "$total_tasks" "$task_complexity"; then
                 task_result=0
             else
                 task_result=1
