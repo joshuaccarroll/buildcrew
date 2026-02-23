@@ -934,6 +934,7 @@ EOF
     save_task_progress()     { :; }
     append_lesson()          { :; }
     handle_human_review()    { return 0; }
+    handle_plan_review()     { return 0; }
     mark_task_blocked()      { echo "$*" > "$blocked_file"; }
     # Always fail: both build and test return needs_rebuild
     run_phase_group() {
@@ -968,6 +969,7 @@ EOF
     save_task_progress()     { :; }
     append_lesson()          { :; }
     handle_human_review()    { return 0; }
+    handle_plan_review()     { return 0; }
     handle_spec_review()     { return 0; }  # required: spec re-run calls this
     mark_task_blocked()      { :; }
     # Mock load_task_progress: inject resume state with spec+downstream complete
@@ -1017,6 +1019,7 @@ EOF
     save_task_progress()     { :; }
     append_lesson()          { :; }
     handle_human_review()    { return 0; }
+    handle_plan_review()     { return 0; }
     mark_task_blocked()      { echo "$*" > "$blocked_file"; }
     # Outcome always returns partial; rebuild calls (build/test) return approved
     run_phase_group() {
@@ -1222,6 +1225,7 @@ EOF
     save_task_progress()     { :; }
     append_lesson()          { :; }
     handle_human_review()    { return 0; }
+    handle_plan_review()     { return 0; }
     handle_spec_review()     { return 0; }
     mark_task_blocked()      { echo "$*" > "$blocked_file"; }
     run_phase_group()        { return 1; }
@@ -1249,6 +1253,7 @@ EOF
     save_task_progress()     { :; }
     append_lesson()          { :; }
     handle_human_review()    { return 0; }
+    handle_plan_review()     { return 0; }
     mark_task_blocked()      { echo "$*" > "$blocked_file"; }
     run_phase_group()        { return 1; }
 
@@ -1275,6 +1280,7 @@ EOF
     save_task_progress()     { :; }
     append_lesson()          { :; }
     handle_human_review()    { return 0; }
+    handle_plan_review()     { return 0; }
     mark_task_blocked()      { echo "$*" > "$blocked_file"; }
     run_phase_group()        { return 1; }
 
@@ -1566,6 +1572,71 @@ EOF
     AUTO_MODE=true
     run handle_spec_review "my task" "3"
     [[ "$output" != *"Non-interactive terminal"* ]]
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# handle_plan_review early-return path tests
+# ─────────────────────────────────────────────────────────────────────────────
+
+@test "handle_plan_review: returns 0 when HUMAN_REVIEW=false (no force)" {
+    HUMAN_REVIEW=false
+    run handle_plan_review "task" "description"
+    [ "$status" -eq 0 ]
+}
+
+@test "handle_plan_review: returns 0 with warning when non-interactive" {
+    HUMAN_REVIEW=true
+    run handle_plan_review "task" "description"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Non-interactive terminal"* ]]
+}
+
+@test "handle_plan_review: --force bypasses HUMAN_REVIEW=false guard" {
+    HUMAN_REVIEW=false
+    run handle_plan_review "task" "description" "--force"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Non-interactive terminal"* ]]
+}
+
+@test "handle_plan_review: AUTO_MODE=true auto-approves" {
+    AUTO_MODE=true
+    HUMAN_REVIEW=true
+    run handle_plan_review "task" "description"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Auto mode"* ]]
+}
+
+@test "handle_plan_review: AUTO_MODE=true does NOT output 'Non-interactive'" {
+    AUTO_MODE=true
+    HUMAN_REVIEW=true
+    run handle_plan_review "task" "description"
+    [[ "$output" != *"Non-interactive terminal"* ]]
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# _display_plan tests
+# ─────────────────────────────────────────────────────────────────────────────
+
+@test "_display_plan: shows warning when plan file missing" {
+    run _display_plan
+    [[ "$output" == *"No plan file found"* ]]
+}
+
+@test "_display_plan: shows full plan when under 60 lines" {
+    mkdir -p .claude
+    printf 'line %d\n' $(seq 1 10) > .claude/current-plan.md
+    run _display_plan
+    [[ "$output" == *"line 1"* ]]
+    [[ "$output" == *"line 10"* ]]
+    [[ "$output" != *"more lines"* ]]
+}
+
+@test "_display_plan: truncates plan over 60 lines with indicator" {
+    mkdir -p .claude
+    printf 'line %d\n' $(seq 1 100) > .claude/current-plan.md
+    run _display_plan
+    [[ "$output" == *"line 1"* ]]
+    [[ "$output" == *"40 more lines"* ]]
 }
 
 # ─────────────────────────────────────────────────────────────────────────────

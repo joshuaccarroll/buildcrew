@@ -233,7 +233,7 @@ parse_args() {
                 echo "Options:"
                 echo "  --dry-run    Show what would be done without executing"
                 echo "  --single     Process only one task then exit"
-                echo "  --review     Pause for human review after plan and plan review"
+                echo "  --review     Pause for human review before build (shows plan inline)"
                 echo "  --branch     Create a feature branch per task with optional PR"
                 echo "  --task NAME  Target a specific task by name or number (implies --single)"
                 echo "  --resume     Resume an interrupted task from where it left off"
@@ -298,6 +298,9 @@ cleanup_log() {
 }
 
 # Pause for human review when --review is set
+# NOTE: This function has no callers in the current orchestration flow (removed in
+# the "consolidate review gates" change). Kept for test compatibility and as a
+# general-purpose utility — candidate for removal in a future cleanup task.
 # Returns: 0 = continue, 1 = skip task, 2 = quit pipeline
 handle_human_review() {
     local task="$1"
@@ -348,6 +351,80 @@ _display_spec_acs() {
         echo -e "  ${YELLOW}No acceptance criteria found. Press [e] to edit the spec.${NC}"
     fi
     echo ""
+}
+
+# Display the current implementation plan (.claude/current-plan.md) inline,
+# truncated to max_lines. Used by handle_plan_review().
+_display_plan() {
+    local plan_file=".claude/current-plan.md"
+    local max_lines=60
+    if [[ ! -f "$plan_file" ]]; then
+        echo ""
+        echo -e "  ${YELLOW}No plan file found at $plan_file${NC}"
+        echo ""
+        return
+    fi
+    local total_lines
+    total_lines=$(wc -l < "$plan_file" | tr -d ' ')
+    echo ""
+    if (( total_lines <= max_lines )); then
+        while IFS= read -r line; do
+            echo -e "  ${CYAN}${line}${NC}"
+        done < "$plan_file"
+    else
+        local shown=0
+        while IFS= read -r line && (( shown < max_lines )); do
+            echo -e "  ${CYAN}${line}${NC}"
+            ((shown++))
+        done < "$plan_file"
+        echo ""
+        echo -e "  ${YELLOW}... ($((total_lines - max_lines)) more lines -- press [e] to view full plan in editor)${NC}"
+    fi
+    echo ""
+}
+
+# Pre-build plan review — shows the plan inline and allows editing.
+# Fires when --review is set, or when force="--force" (AI-recommended review).
+# Returns: 0 = approved, 1 = skip task, 2 = quit pipeline
+handle_plan_review() {
+    local task="$1"
+    local description="$2"
+    local force="${3:-}"
+
+    [[ "$HUMAN_REVIEW" == "true" || "$force" == "--force" ]] || return 0
+
+    if [[ "$AUTO_MODE" == "true" ]]; then
+        print_info "Auto mode: auto-approving plan review"
+        return 0
+    fi
+
+    if [[ ! -t 0 ]]; then
+        print_warning "Non-interactive terminal — skipping plan review pause"
+        return 0
+    fi
+
+    print_human_review_banner
+    echo -e "${CYAN}  $description${NC}"
+    _display_plan
+    echo -e "  ${BOLD}[Enter]${NC} Approve  |  ${BOLD}[e]${NC} Edit plan  |  ${BOLD}[s]${NC} Skip task  |  ${BOLD}[q]${NC} Quit"
+    echo ""
+
+    while true; do
+        read -r plan_response
+        case "$plan_response" in
+            e|E)
+                ${EDITOR:-vi} ".claude/current-plan.md"
+                echo ""
+                echo -e "${CYAN}  Plan updated.${NC}"
+                _display_plan
+                echo -e "  ${BOLD}[Enter]${NC} Approve  |  ${BOLD}[e]${NC} Edit again  |  ${BOLD}[s]${NC} Skip  |  ${BOLD}[q]${NC} Quit"
+                echo ""
+                ;;
+            s|S) return 1 ;;
+            q|Q) return 2 ;;
+            *) return 0 ;;
+        esac
+    done
 }
 
 # Mandatory spec review — guides the human to evaluate the spec before proceeding.
@@ -1339,27 +1416,10 @@ process_task_isolated() {
         __completed_phases="${__completed_phases:+$__completed_phases }research"
         save_task_progress "$task" "$__completed_phases" "$__INVOCATION_COUNT"
 
-        # Human review pause: automatic if AI recommends it, or if --review flag set
-        local hr_exit=0
+        # Extract AI-recommended review signal — acted upon at the consolidated pre-build gate
         if [[ -f "$PHASE_RESULT_FILE" ]] && jq -e '.human_review == true' "$PHASE_RESULT_FILE" >/dev/null 2>&1; then
             needs_human_review=true
             hr_reason=$(jq -r '.human_review_reason // "AI recommended review"' "$PHASE_RESULT_FILE")
-        fi
-
-        if [[ "$needs_human_review" == "true" ]]; then
-            handle_human_review "$task" "Implementation plan ready — $hr_reason" ".claude/current-plan.md" "--force" || hr_exit=$?
-        elif [[ "$HUMAN_REVIEW" == "true" ]]; then
-            handle_human_review "$task" "Implementation plan ready" ".claude/current-plan.md" || hr_exit=$?
-        fi
-        if [[ $hr_exit -eq 1 ]]; then
-            mark_task_blocked "$task" "Skipped during human review"
-            clear_task_progress
-            return 1
-        elif [[ $hr_exit -eq 2 ]]; then
-            touch "$STOP_FILE"
-            mark_task_blocked "$task" "Pipeline stopped by human review"
-            clear_task_progress
-            return 1
         fi
     fi
 
@@ -1370,6 +1430,26 @@ process_task_isolated() {
     elif [[ "$task_complexity" == "trivial" || "$task_complexity" == "simple" ]]; then
         print_info "Skipping phase: review (complexity: $task_complexity)"
         update_workflow_state "review" "skipped"
+        # Simple tasks skip review but DO run research, so a plan exists.
+        # Fire the consolidated plan review gate here (trivial tasks have no plan, so skip them).
+        if [[ "$task_complexity" == "simple" ]]; then
+            local hr_exit=0
+            if [[ "$needs_human_review" == "true" ]]; then
+                handle_plan_review "$task" "Plan ready (review skipped for simple task) — $hr_reason" "--force" || hr_exit=$?
+            elif [[ "$HUMAN_REVIEW" == "true" ]]; then
+                handle_plan_review "$task" "Plan ready (review skipped for simple task) — review before build" || hr_exit=$?
+            fi
+            if [[ $hr_exit -eq 1 ]]; then
+                mark_task_blocked "$task" "Skipped during plan review"
+                clear_task_progress
+                return 1
+            elif [[ $hr_exit -eq 2 ]]; then
+                touch "$STOP_FILE"
+                mark_task_blocked "$task" "Pipeline stopped during plan review"
+                clear_task_progress
+                return 1
+            fi
+        fi
     else
         local plan_review_cycle=0
         local consecutive_review_failures=0
@@ -1392,17 +1472,17 @@ process_task_isolated() {
                     consecutive_review_failures=0
                     local hr_exit=0
                     if [[ "$needs_human_review" == "true" ]]; then
-                        handle_human_review "$task" "Plan approved (review recommended by AI)" ".claude/plan-review.md" "--force" || hr_exit=$?
+                        handle_plan_review "$task" "Plan approved — $hr_reason" "--force" || hr_exit=$?
                     elif [[ "$HUMAN_REVIEW" == "true" ]]; then
-                        handle_human_review "$task" "Plan approved — review before build" ".claude/plan-review.md" || hr_exit=$?
+                        handle_plan_review "$task" "Plan approved — review before build" || hr_exit=$?
                     fi
                     if [[ $hr_exit -eq 1 ]]; then
-                        mark_task_blocked "$task" "Skipped during human review"
+                        mark_task_blocked "$task" "Skipped during plan review"
                         clear_task_progress
                         return 1
                     elif [[ $hr_exit -eq 2 ]]; then
                         touch "$STOP_FILE"
-                        mark_task_blocked "$task" "Pipeline stopped by human review"
+                        mark_task_blocked "$task" "Pipeline stopped during plan review"
                         clear_task_progress
                         return 1
                     fi

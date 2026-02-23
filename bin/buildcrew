@@ -61,7 +61,7 @@ print_help() {
     echo -e "${BOLD}OPTIONS:${NC}"
     echo "    --single      Process only one task (with 'run')"
     echo "    --dry-run     Preview without executing (with 'run')"
-    echo "    --review      Pause for human review at plan checkpoints (with 'run')"
+    echo "    --review      Pause for human review before build, shows plan inline (with 'run')"
     echo "    --branch      Create a feature branch per task with optional PR (with 'run')"
     echo "    --resume      Resume an interrupted task from where it left off (with 'run')"
     echo "    --task N      Target a specific task by name or number (with 'run')"
