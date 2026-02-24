@@ -97,6 +97,34 @@ while iteration < 5:
 
 ---
 
+## Playground Review (Optional)
+
+**Availability check**: Use Bash to check if the playground plugin is installed:
+```bash
+grep -q '"playground@' "$HOME/.claude/plugins/installed_plugins.json" 2>/dev/null
+```
+If this check returns non-zero (file missing or no playground entry), skip the playground offers entirely — do not mention the playground at all.
+
+If available, offer interactive playground review at these moments:
+
+- **After Step 2** (PROJECT doc created and sub-agent reviewed): Before presenting to user for approval, offer:
+  > "I can also generate an interactive playground where you can review each section of the project plan in your browser — approve, reject, or comment on individual items. Want me to create one?"
+
+- **After Step 4/4b** (DESIGN doc + mockups complete): Before moving to backlog generation, offer:
+  > "Want to review the design spec in an interactive playground before we generate the backlog?"
+
+When the user accepts:
+1. Use the playground skill to generate a document-critique playground from the relevant document
+2. Write it to `.claude/[doc-name]-playground.html`
+3. Open it in the browser (use Bash: `open` on macOS, `xdg-open` on Linux)
+4. Ask the user to review and paste any feedback (from the playground's Copy button) via AskUserQuestion
+5. Apply the feedback to update the source document
+6. Leave the playground HTML in `.claude/` — do not delete it (the user may want to re-open it)
+
+When the user declines, continue the normal flow.
+
+---
+
 ## Step 0: Existing Project Detection
 
 **Before starting, check for an existing project:**

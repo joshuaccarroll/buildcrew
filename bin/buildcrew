@@ -148,6 +148,22 @@ cmd_init() {
         _ensure_skill_symlinks
     fi
 
+    # ─── Install playground plugin ──────────────────────────────────────────────
+    if command -v claude >/dev/null 2>&1; then
+        local plugins_json="$HOME/.claude/plugins/installed_plugins.json"
+        if [[ -f "$plugins_json" ]] && grep -q '"playground@' "$plugins_json" 2>/dev/null; then
+            echo -e "  ${YELLOW}○${NC} Playground plugin already installed"
+        else
+            # Ensure marketplace is registered (idempotent — || true absorbs "already exists")
+            claude plugin marketplace add https://github.com/anthropics/claude-plugins-official >/dev/null 2>&1 || true
+            if claude plugin install playground@claude-plugins-official >/dev/null 2>&1; then
+                echo -e "  ${GREEN}✓${NC} Installed playground plugin"
+            else
+                echo -e "  ${YELLOW}⚠${NC} Playground plugin not installed (install manually: claude plugin install playground@claude-plugins-official)"
+            fi
+        fi
+    fi
+
     # Create .buildcrew directory for project-specific overrides
     mkdir -p .buildcrew/rules
 
@@ -1626,6 +1642,30 @@ cmd_repair() {
         fi
     else
         echo -e "  ${GREEN}✓${NC} .buildcrew/ structure — OK"
+    fi
+
+    # ─── C7: Playground plugin ───────────────────────────────────────────────────
+    if command -v claude >/dev/null 2>&1; then
+        local plugins_json="$HOME/.claude/plugins/installed_plugins.json"
+        if ! ([[ -f "$plugins_json" ]] && grep -q '"playground@' "$plugins_json" 2>/dev/null); then
+            __REPAIR_ISSUES=$((__REPAIR_ISSUES + 1))
+            echo -e "  ${YELLOW}⚠${NC} Playground plugin not installed"
+            if [[ "$fix_mode" == "true" ]]; then
+                claude plugin marketplace add https://github.com/anthropics/claude-plugins-official >/dev/null 2>&1 || true
+                if claude plugin install playground@claude-plugins-official >/dev/null 2>&1; then
+                    echo -e "    ${GREEN}✓${NC} Installed playground plugin"
+                else
+                    echo -e "    ${RED}✗${NC} Failed to install playground plugin"
+                    __REPAIR_REMAINING=$((__REPAIR_REMAINING + 1))
+                fi
+            else
+                __REPAIR_REMAINING=$((__REPAIR_REMAINING + 1))
+            fi
+        else
+            echo -e "  ${GREEN}✓${NC} Playground plugin installed"
+        fi
+    else
+        echo -e "  ${CYAN}○${NC} Playground plugin — claude CLI not found, skipped"
     fi
 
     # ─── Footer ──────────────────────────────────────────────────────────────────

@@ -17,6 +17,7 @@ PLUGIN_REGISTRY=(
     "python-lsp|Python language intelligence with Pyright|python|lsp|https://code.claude.com/docs/en/discover-plugins"
     "go-lsp|Go language intelligence with gopls|go|lsp|https://code.claude.com/docs/en/discover-plugins"
     "rust-lsp|Rust language intelligence with rust-analyzer|rust|lsp|https://code.claude.com/docs/en/discover-plugins"
+    "playground|Interactive document critique and review playgrounds|any|mcp|https://github.com/anthropics/claude-plugins-official"
 )
 
 # Detect project characteristics
