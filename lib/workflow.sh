@@ -134,7 +134,7 @@ get_phase_max_turns() {
         codereview) echo 40 ;;
         test)       echo 60 ;;
         outcome)    echo 40 ;;
-        verify)     echo 30 ;;
+        verify)     echo 50 ;;
         *)          echo 30 ;;
     esac
 }
