@@ -86,6 +86,7 @@ That's it. BuildCrew has two modes: **Discovery mode** launches the Product Mana
 
 - Applies 7 core design principles
 - Creates comprehensive design specs
+- Generates HTML mockups and iterates with you until the visual design is right
 - Champions accessibility from the start
 - **Invoked via**: `/build` (optional) or `/buildcrew ux-designer`
 

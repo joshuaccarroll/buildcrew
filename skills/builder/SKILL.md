@@ -40,6 +40,15 @@ You are orchestrating the **Builder** flow for creating a new project from scrat
 │     Output: DESIGN_[name].md    │   │
 └────────────────────────────────┘   │
                          │           │
+                         ▼           │
+┌────────────────────────────────┐   │
+│  4b. MOCKUP REVISION ROUND     │   │
+│     Generate HTML mockups via   │   │
+│     sub-agent, then interactive │   │
+│     review loop with user       │   │
+│     Output: mockups/*.html      │   │
+└────────────────────────────────┘   │
+                         │           │
                          ▼           ▼
 ┌─────────────────────────────────────────────────────────────────────┐
 │  5. BACKLOG GENERATION                                               │
@@ -227,6 +236,123 @@ If not available, inform the user:
 
 ---
 
+## Step 4b: Mockup Revision Round (if design was created)
+
+After the design spec is complete and reviewed, transition automatically into mockup generation.
+
+### a) Announce Mockup Phase
+
+Use AskUserQuestion:
+> "Now I'll generate HTML mockups based on this design spec so you can review the visual design in your browser. This usually takes a minute. Sound good?"
+
+This is opt-out phrasing -- the default is yes. If the user explicitly declines (e.g., "skip that", "no thanks", "no"), go directly to Step 5. Any affirmative response, or any response that does not explicitly decline, means proceed to part (b).
+
+### b) Generate Initial Mockups
+
+**Screen count limit**: If the design spec identifies more than 8 key screens, generate mockups for only the 5 most critical screens (as identified by the design spec's primary user flows). Note to the user that remaining screens can be added during the build phase.
+
+Spawn a Task sub-agent with this prompt (substitute the actual project name for `[name]` before spawning):
+
+```
+Read DESIGN_[name].md and PROJECT_[name].md for full project context.
+
+Check if .claude/skills/frontend-design/ exists or if the frontend-design skill is available.
+If it is, use the frontend-design skill for generating the HTML. If not, generate HTML directly.
+
+Create one self-contained HTML file per key screen identified in the design spec, in a mockups/
+directory (create if it does not exist). Each file must:
+- Use the exact color palette, typography, and spacing from the design spec
+- Use inline CSS only (no external stylesheets, no CDN links, no JavaScript frameworks)
+- Be responsive (mobile-first, works at 320px through 1440px)
+- Use realistic placeholder content (not lorem ipsum)
+- Include hover and focus states for interactive elements
+- Include navigation links to other mockup screens (use relative hrefs like href="dashboard.html")
+- Meet WCAG 2.1 AA: sufficient color contrast, visible focus indicators, semantic HTML,
+  alt text on images, proper heading hierarchy
+
+Also create mockups/index.html as a navigation hub linking to all screen files with
+a brief description of each.
+
+Files to create: mockups/index.html, mockups/[screen-name].html for each key screen.
+```
+
+Note: Task sub-agents do NOT inherit the builder session's context. The sub-agent prompt includes its own `frontend-design` skill check because the sub-agent needs to discover the skill independently.
+
+**Important**: The sub-agent prompt must use the actual project name, not the literal `[name]` placeholder. The builder session knows the project name from Step 1; substitute it before spawning.
+
+### c) Verify and Present
+
+After the sub-agent completes, verify that `mockups/index.html` exists (use Glob for `mockups/*.html`).
+
+**If no files were created**: Tell the user there was an issue and attempt generation once more with a fresh sub-agent using the same prompt. If it fails again, inform the user, skip mockups entirely, and proceed to Step 5.
+
+**If files exist**: List the created files for the user.
+
+### d) Conversational Review Loop
+
+Present the mockup file paths to the user via AskUserQuestion, then enter an interactive review loop:
+
+**Opening prompt**: Tell the user to open `mockups/index.html` in their browser, then ask:
+> "What's your first impression? Does the overall look and feel match what you had in mind?"
+
+**UX coaching questions** (ask one at a time via AskUserQuestion, adapt based on responses -- pick the most relevant 2-3, do not ask all of them):
+- Visual hierarchy: "Where does your eye go first? Is that the most important element?"
+- User flow: "Try clicking through from landing to [key action]. Does it feel natural?"
+- Information density: "Does this feel too busy, too empty, or about right?"
+- Call to action: "Is the primary action obvious? Could a new user figure out what to do in 3 seconds?"
+- Consistency: "Do the screens feel like they belong to the same product?"
+- Mobile: "How do you imagine this on a phone?"
+- Accessibility: "Can you read all the text easily? Colors comfortable?"
+- Emotional response: "What feeling does this give you? Is that what you want users to feel?"
+
+**When user gives feedback**: Acknowledge, offer brief UX perspective on trade-offs, then spawn a Task sub-agent to implement changes (substitute actual project name for `[name]` before spawning):
+
+```
+Read DESIGN_[name].md and PROJECT_[name].md for design context.
+Read the current contents of the mockup files being changed before editing them.
+
+Make the following changes to the mockup files:
+[specific changes requested by user]
+
+Files to modify: [list specific files]
+
+Requirements:
+- Maintain inline-CSS-only approach (no external dependencies)
+- Maintain WCAG 2.1 AA compliance
+- Maintain responsive behavior
+- Maintain consistent styling across all mockup files
+- Keep navigation links between screens working
+- If a change affects shared elements (header, nav, footer, color scheme), apply it across ALL mockup files, not just the one the user mentioned
+```
+
+After the sub-agent finishes, tell the user to refresh their browser and ask what they think of the changes.
+
+**Soft convergence nudge**: After 3 revision sub-agent spawns (NOT counting the initial generation in part b), suggest wrapping up via AskUserQuestion:
+> "We've made good progress -- want to do one more round of changes, or lock these in?"
+
+Continue if the user has more feedback; proceed to part (e) if they are satisfied.
+
+**Exit detection**: Watch for natural satisfaction signals ("looks good", "let's move on", "done", "happy with it"). When detected, confirm explicitly via AskUserQuestion:
+> "Great, shall we lock in these mockups and move on to generating the backlog?"
+
+Only proceed to part (e) after explicit confirmation.
+
+**Abandon vs. accept-as-is**: Distinguish between "I don't want mockups at all" (delete `mockups/`, skip consolidation, proceed to Step 5) and "these are fine, stop iterating" (proceed to part e). If ambiguous, ask via AskUserQuestion:
+> "Would you like to keep the current mockups as-is, or skip mockups entirely?"
+
+### e) Final Consolidation
+
+Update `DESIGN_[name].md` by appending an "HTML Mockups" section at the end containing:
+- A table: Screen Name | File | Description
+- Navigation index path: `mockups/index.html`
+- Revision notes: brief summary of key changes made during the review round
+
+Then run the **Document Review Protocol** on the updated `DESIGN_[name].md`.
+
+Note: The existing Step 4 already runs the Document Review Protocol on `DESIGN_[name].md` after initial creation. That stays as-is -- it reviews the design spec before mockups begin. This second invocation reviews the spec after the mockup reference table has been appended. Both are intentional.
+
+---
+
 ## Step 5: Backlog Generation
 
 Convert the project plan into an executable backlog.
@@ -252,6 +378,7 @@ If this is **adding scope** (existing project with completed tasks):
    - For migrations: zero-change migration phase before feature-change phases
    - Each phase should be independently verifiable before proceeding to the next
 5. Generate or update `BACKLOG.md` in the format below. Be extremely concise. Sacrifice grammar for the sake of concision.
+6. If `mockups/index.html` exists, read it to identify screen names and reference specific mockup files in relevant backlog tasks (e.g., 'Implement dashboard page per mockups/dashboard.html').
 
 Tag each task with its complexity profile using a `{trivial}` or `{simple}` suffix (no tag = standard):
 - `{trivial}` — file creation, chmod, typo fix, version bump, rename, delete, move, copy (build + verify only)
@@ -292,6 +419,12 @@ Combine trivially related tasks into a single backlog item when they form a natu
 *Use frontend-design skill for UI implementation*
 ```
 
+**If mockups were generated** (mockups/ directory exists), also add:
+```markdown
+*HTML Mockups: mockups/ (index: mockups/index.html)*
+*Mockups are the visual reference for UI implementation*
+```
+
 After generating or updating `BACKLOG.md`, run the **Document Review Protocol** on `BACKLOG.md` (spawn up to 5 Task sub-agents for iterative review, stop on convergence). Focus especially on whether each task is specific enough for autonomous execution by the buildcrew workflow.
 
 ### Generate or Update README
@@ -321,6 +454,7 @@ After creating BACKLOG.md, provide this completion message and then STOP:
 ### Created:
 - `PROJECT_[name].md` - Project plan with [X] phases
 - `DESIGN_[name].md` - Design specification (if applicable)
+- `mockups/` - HTML mockups for visual design review (if applicable)
 - `BACKLOG.md` - [Y] tasks ready for execution
 - `README.md` - Initial project documentation
 

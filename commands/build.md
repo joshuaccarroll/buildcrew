@@ -16,7 +16,9 @@ This command guides you through:
    - Component inventory
    - Accessibility considerations
 
-3. **Backlog Generation** - Converts your plan into executable tasks for `./workflow.sh`
+3. **Mockup Revision Round** (optional, follows Design Discovery) - Generates self-contained HTML mockups for each key screen, then enters an interactive review loop where you give feedback and sub-agents apply changes until you're satisfied.
+
+4. **Backlog Generation** - Converts your plan into executable tasks for `./workflow.sh`
 
 ---
 
@@ -29,4 +31,5 @@ Begin by asking for the project name, then guide through the full builder flow w
 Output files will be created at the project root:
 - `PROJECT_[name].md` - Full project plan
 - `DESIGN_[name].md` - Design specification (if UI is needed)
+- `mockups/` - HTML mockups for visual design review (if design discovery was run)
 - `BACKLOG.md` - Tasks ready for workflow execution
