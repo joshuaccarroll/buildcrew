@@ -134,36 +134,43 @@ That's it. BuildCrew has two modes: **Discovery mode** launches the Product Mana
 │   (PM)                            (3-Pass:        (Feature)        │
 │                                   adversarial)                     │
 │                                                                    │
-│   COMMIT ◄── VERIFY ◄── OUTCOME ◄── CODE REVIEW ◄── TEST          │
-│              (Security   (Acceptance  (adversarial    (QA)          │
-│               blocks!)    criteria)   + elegance)                  │
+│   COMMIT ◄── VERIFY ◄── OUTCOME ◄── TEST ◄── CODE REVIEW          │
+│              (Security   (Acceptance   (QA)   (adversarial         │
+│               blocks!)    criteria)           + elegance)          │
 │                                                                    │
 └───────────────────────────────────────────────────────────────────┘
 ```
 
-Each task runs through **up to 7 isolated Claude invocations** (phase-isolated mode), keeping context focused per phase:
+Each task runs through **up to 8 isolated Claude invocations** (phase-isolated mode), keeping context focused per phase:
 
-| Invocation | Phase | Description |
-|------------|-------|-------------|
-| 0 | Spec | PM converts raw backlog item to testable acceptance criteria (skip with `--skip-spec`) |
-| 1 | Research + Plan | Gather context, create implementation plan |
-| 2 | Plan Review (3-pass) | Adversarial review: find the most serious flaw |
-| 3 | Build | Feature Engineer implements the plan |
-| 4 | Code Review + Refactor + Test | Adversarial review + elegance check + tests |
-| 4.5 | Outcome Verification | QA validates each acceptance criterion from the spec |
-| 5 | Verify (incl. Security Audit) + Commit | Final gate; Security blocks commit |
+| # | Phase | Description |
+|---|-------|-------------|
+| 1 | Spec | PM converts raw backlog item to testable acceptance criteria (skip with `--skip-spec`) |
+| 2 | Research + Plan | Gather context, create implementation plan |
+| 3 | Plan Review (3-pass) | Adversarial review: find the most serious flaw |
+| 4 | Build | Feature Engineer implements the plan |
+| 5 | Code Review | Adversarial review + elegance check; may request rebuild |
+| 6 | Test | QA Engineer writes and runs tests |
+| 7 | Outcome Verification | QA validates each acceptance criterion from the spec |
+| 8 | Verify (incl. Security Audit) + Commit | Final gate; Security blocks commit |
 
 **Key features:**
 - **Specification first** - PM writes testable acceptance criteria before any code is planned
 - **Adversarial reviews** - reviewers are asked to find flaws, not to approve quickly
+- **Consolidated human review** (`--review`) - single pre-build gate with inline plan display; press Enter to proceed, `s` to skip, `q` to quit
+- **Complexity-aware phase skipping** - simple tasks automatically skip unnecessary phases; use `--full-pipeline` to force all phases
 - **Outcome verification** - QA validates acceptance criteria directly, not just test suite pass
 - **Circuit breaker** - if any phase fails twice consecutively, re-plan from scratch with failure context
 - **Lessons system** - failures are automatically recorded and injected into future runs
 - **Quality gates** at every phase
 - **Automatic iteration** when reviews find issues
 - **Blocking security** - no commit until vulnerabilities are fixed
-- **Human review** (`--review`) - pause at plan checkpoints for human inspection before proceeding
 - **Feature branches** (`--branch`) - create a branch per task with automatic PR creation
+- **Activity logging** - full activity log kept on failure; use `--keep-logs` to retain after success
+- **Auto mode** (`--auto`) - fully unattended; auto-approves all interactive pauses
+- **Chunked phase execution** - large builds that hit max-turns are automatically split and retried
+- **Interactive permission recovery** - if a phase is blocked by missing permissions, BuildCrew prompts for recovery before continuing
+- **Status line integration** - wired in via `buildcrew init` for real-time progress in Claude Code
 - **Document Review Protocol** - sub-agent iterative review on all plans (up to 5 iterations or convergence)
 - **Customizable** - modify phases or remove them entirely
 
@@ -242,11 +249,23 @@ buildcrew init               # Link project to BuildCrew
 buildcrew run                # Run workflow on BACKLOG.md
 buildcrew run --single       # Process one task and stop
 buildcrew run --dry-run      # Preview without executing
-buildcrew run --review       # Pause for human review at plan checkpoints
+buildcrew run --review       # Pause for human review (single pre-build gate, shows plan inline)
 buildcrew run --branch       # Create a feature branch per task with PR
 buildcrew run --skip-spec    # Skip the spec phase (task already has detailed spec)
-buildcrew run --strict       # Require ALL acceptance criteria to pass before commit
+buildcrew run --strict       # (default) Require ALL acceptance criteria to pass before commit
+buildcrew run --no-strict    # Allow partial acceptance criteria pass — proceed with warnings
+buildcrew run --resume       # Resume an interrupted task from where it left off
+buildcrew run --task N       # Target a specific task by name or number
+buildcrew run --auto         # Run fully unattended — auto-approve all interactive pauses
+buildcrew run --full-pipeline  # Force all phases regardless of complexity assessment
+buildcrew run --keep-logs    # Retain the activity log after a successful run
+buildcrew run --max-invocations N  # Set max Claude invocations per run (default: 15)
+buildcrew run --verbose      # Show orchestrator decisions, phase verdicts, and invocation counts
+buildcrew status             # Show backlog stats and last workflow result
 buildcrew stop               # Stop after current task completes
+buildcrew reset              # Clear blocked tasks and clean up artifacts
+buildcrew repair             # Check installation health
+buildcrew repair --fix       # Check and auto-fix installation health
 buildcrew lessons            # List recorded lessons from past failures
 buildcrew lessons promote N  # Graduate lesson N to permanent project rules
 buildcrew lessons prune      # Interactively remove stale lessons
@@ -262,12 +281,42 @@ buildcrew uninstall          # Remove BuildCrew
 |------|-------------|
 | `--single` | Process one task then exit |
 | `--dry-run` | Preview what would happen without executing |
-| `--review` | Pause after plan creation and after plan review for human inspection. Press Enter to continue, `s` to skip, `q` to quit. |
+| `--review` | Single pre-build gate: shows the plan inline and pauses for human inspection. Press Enter to continue, `s` to skip, `q` to quit. |
 | `--branch` | Create a `buildcrew/<slug>` feature branch per task. Pushes to remote and creates a PR via `gh` if available. Each task branches independently from the base branch. |
+| `--resume` | Resume an interrupted task from where it left off |
+| `--task N` | Target a specific task by name or number |
 | `--skip-spec` | Skip the spec phase. Use when the backlog item already contains a detailed spec with acceptance criteria. |
-| `--strict` | Require ALL acceptance criteria to pass during Outcome Verification before the commit is allowed. Without `--strict`, unmet criteria trigger a warning but don't block the commit. |
+| `--strict` | (default) Require ALL acceptance criteria to pass during Outcome Verification before the commit is allowed. |
+| `--no-strict` | Allow partial acceptance criteria pass — unmet criteria trigger a warning but don't block the commit. |
+| `--full-pipeline` | Force all phases regardless of complexity assessment |
+| `--auto` | Run fully unattended — auto-approve all interactive pauses |
+| `--keep-logs` | Retain the activity log after a successful run (the log is always kept on failure) |
+| `--max-invocations N` | Set max Claude invocations per run (default: 15) |
+| `--verbose` / `--debug` | Show orchestrator decisions, phase verdicts, and invocation counts |
 
 Flags can be combined: `buildcrew run --single --review --branch`
+
+---
+
+## Configuration
+
+Project-level configuration lives in `.buildcrew/config` (created from `.buildcrew/config.example` by `buildcrew init`). Each key is a shell variable that overrides the default:
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `MAX_INVOCATIONS` | `15` | Maximum Claude invocations per `buildcrew run`. Equivalent to `--max-invocations N`. |
+| `COMPLEXITY_AWARE` | `true` | Auto-detect task complexity and skip unnecessary phases. Set to `false` to always run all phases (equivalent to `--full-pipeline`). |
+| `AUTO_MODE` | `false` | Run fully unattended — auto-approve all interactive pauses. Equivalent to `--auto`. |
+| `KEEP_LOGS` | `false` | Retain the activity log after a successful run. Equivalent to `--keep-logs`. |
+
+Example `.buildcrew/config`:
+
+```bash
+MAX_INVOCATIONS=20
+COMPLEXITY_AWARE=true
+AUTO_MODE=false
+KEEP_LOGS=true
+```
 
 ---
 
@@ -359,7 +408,7 @@ The local file merges with the global settings. Deny rules always win.
 ### Safety Features
 
 - **No auto-push** - Commits stay local until you review and push (unless `--branch` is used, which pushes feature branches only)
-- **Human review** (`--review`) - pauses the pipeline at plan checkpoints so you can inspect and edit plans before proceeding
+- **Human review** (`--review`) - single pre-build gate: displays the plan inline and pauses for inspection before proceeding
 - **Blocking gates** - Security issues must be fixed before commit
 - **Deny-list protection** - System directories protected even when `rm` is allowed
 

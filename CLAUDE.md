@@ -3,7 +3,7 @@
 ## Architecture
 
 - The shell orchestrator (`lib/workflow.sh`) launches `claude -p` once per phase in **phase-isolated mode**.
-- Each phase is a separate skill: `skills/buildcrew-*/SKILL.md` (spec, research, review, build, test, outcome, verify).
+- Each phase is a separate skill: `skills/buildcrew-*/SKILL.md` (spec, research, review, build, codereview, test, outcome, verify).
 - All orchestrator↔Claude communication is **file-based only** — no pipes, no env vars, no return values.
 
 ## Signal Flow
@@ -20,15 +20,16 @@ Every phase must write `.claude/phase-result.json` with these required fields:
 
 An unknown verdict hits the catch-all and marks the task blocked:
 
-| Phase    | Valid verdicts                               |
-|----------|----------------------------------------------|
-| spec     | `complete`, `vague`                          |
-| research | `complete`                                   |
-| review   | `approved`, `needs_revision`, `rejected`     |
-| build    | `complete`                                   |
-| test     | `approved`, `needs_rebuild`, `test_failure`  |
-| outcome  | `passed`, `partial`, `failed`                |
-| verify   | `complete`, `blocked`                        |
+| Phase      | Valid verdicts                               |
+|------------|----------------------------------------------|
+| spec       | `complete`, `vague`                          |
+| research   | `complete`                                   |
+| review     | `approved`, `needs_revision`, `rejected`     |
+| build      | `complete`                                   |
+| codereview | `approved`, `needs_rebuild`                  |
+| test       | `approved`, `needs_rebuild`, `test_failure`  |
+| outcome    | `passed`, `partial`, `failed`                |
+| verify     | `complete`, `blocked`                        |
 
 ## Key Files
 
@@ -36,6 +37,9 @@ An unknown verdict hits the catch-all and marks the task blocked:
 |------|---------|
 | `lib/workflow.sh` | Phase orchestrator — reads verdicts, drives retry/circuit breaker logic |
 | `lib/common.sh` | Shared utilities, file monitor, print helpers |
+| `lib/statusline.sh` | Status line integration for Claude Code status bar |
+| `lib/version.sh` | Version management |
+| `lib/update.sh` | Update checker |
 | `skills/buildcrew-*/SKILL.md` | Per-phase skill prompts |
 | `BACKLOG.md` | Task queue (`- [ ]` pending, `- [x]` done, `- [!]` blocked) |
 | `.buildcrew/lessons.md` | Failure lessons — injected into every phase's context |
@@ -77,9 +81,10 @@ When context is compacted, always preserve:
 2. **research** — Explore codebase, write implementation plan
 3. **review** — 3-pass adversarial plan review
 4. **build** — Implement per plan
-5. **test** — Code review + refactor + run tests
-6. **outcome** — Verify implementation against spec acceptance criteria
-7. **verify** — Security audit + commit
+5. **codereview** — Adversarial code review + elegance check; may request rebuild
+6. **test** — QA Engineer writes and runs tests
+7. **outcome** — Verify implementation against spec acceptance criteria
+8. **verify** — Security audit + commit
 
 ## Modes
 

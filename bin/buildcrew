@@ -274,6 +274,9 @@ EOF
 
 # Run fully unattended — auto-approve all interactive pauses (default: false)
 # AUTO_MODE=false
+
+# Retain the activity log after a successful run (log is always kept on failure) (default: false)
+# KEEP_LOGS=false
 EOF
         echo -e "  ${GREEN}✓${NC} Created .buildcrew/config.example"
     else
