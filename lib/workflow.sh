@@ -451,6 +451,8 @@ handle_plan_review() {
     echo -e "  ${BOLD}[Enter]${NC} Approve  |  ${BOLD}[e]${NC} Edit plan  |  ${BOLD}[s]${NC} Skip task  |  ${BOLD}[q]${NC} Quit"
     echo ""
 
+    update_workflow_state "review" "awaiting_input"
+    print_info "Awaiting user input: plan review"
     while true; do
         read -r plan_response
         case "$plan_response" in
@@ -504,6 +506,8 @@ handle_spec_review() {
     echo -e "  ${BOLD}[Enter]${NC} Approve  |  ${BOLD}[e]${NC} Edit spec  |  ${BOLD}[s]${NC} Skip task  |  ${BOLD}[q]${NC} Quit"
     echo ""
 
+    update_workflow_state "spec" "awaiting_input"
+    print_info "Awaiting user input: spec review"
     while true; do
         read -r spec_response
         case "$spec_response" in
