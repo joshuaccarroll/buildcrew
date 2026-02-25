@@ -991,6 +991,7 @@ update_workflow_state() {
         echo "INVOCATION_COUNT=$__INVOCATION_COUNT"
         echo "MAX_INVOCATIONS=$MAX_INVOCATIONS"
         echo "TIMESTAMP=$(date +%s)"
+        echo "AUTO_MODE=${AUTO_MODE:-false}"
     } > "$tmp"
     mv -f "$tmp" "$WORKFLOW_STATE_FILE"
 }

@@ -328,6 +328,7 @@ EOF
     __WF_TASK_NUM=2
     __WF_TOTAL_TASKS=5
     __WF_TASK_NAME="Build the auth system"
+    unset AUTO_MODE
     update_workflow_state "research" "running"
     [ -f ".buildcrew/.workflow-state" ]
     grep -q "^PHASE=research$" .buildcrew/.workflow-state
@@ -336,6 +337,18 @@ EOF
     grep -q "^TOTAL_TASKS=5$" .buildcrew/.workflow-state
     grep -q "^INVOCATION_COUNT=3$" .buildcrew/.workflow-state
     grep -q "^MAX_INVOCATIONS=15$" .buildcrew/.workflow-state
+    grep -q "^AUTO_MODE=false$" .buildcrew/.workflow-state
+}
+
+@test "update_workflow_state: persists AUTO_MODE=true when set" {
+    mkdir -p .buildcrew
+    __INVOCATION_COUNT=1
+    MAX_INVOCATIONS=10
+    __WF_TASK_NUM=1
+    __WF_TOTAL_TASKS=1
+    __WF_TASK_NAME="auto mode task"
+    AUTO_MODE=true update_workflow_state "build" "running"
+    grep -q "^AUTO_MODE=true$" .buildcrew/.workflow-state
 }
 
 @test "update_workflow_state: write is atomic (no partial file visible)" {
