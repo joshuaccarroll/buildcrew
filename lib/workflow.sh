@@ -122,6 +122,7 @@ AUTO_MODE=${AUTO_MODE:-false}
 KEEP_LOGS=${KEEP_LOGS:-false}
 __INVOCATION_COUNT=0
 __RESUME_PHASES=""
+__DISCOVERY_HEARTBEAT_PID=""
 
 # Max turns per phase group (used in isolated mode)
 # Uses a function instead of declare -A for bash 3.2 (macOS) compatibility
@@ -134,7 +135,7 @@ get_phase_max_turns() {
         codereview) echo 40 ;;
         test)       echo 60 ;;
         outcome)    echo 40 ;;
-        verify)     echo 50 ;;
+        verify)     echo 30 ;;
         *)          echo 30 ;;
     esac
 }
@@ -295,6 +296,47 @@ cleanup_log() {
         rm -f "$__LOG_FILE"
         print_debug "Activity log removed (no failures; use --keep-logs to retain)"
     fi
+}
+
+# Cleanup handler for discovery mode EXIT/INT/TERM trap.
+# Kills heartbeat if running, clears state, removes lockfile.
+_discovery_cleanup() {
+    if [[ -n "${__DISCOVERY_HEARTBEAT_PID:-}" ]]; then
+        kill "$__DISCOVERY_HEARTBEAT_PID" 2>/dev/null || true
+        wait "$__DISCOVERY_HEARTBEAT_PID" 2>/dev/null || true
+    fi
+    clear_workflow_state
+    rm -f "$LOCKFILE"
+}
+
+# Launch Claude in discovery mode, emitting state files for buildcrew-dash visibility.
+# Unlike the former approach (which used exec), this keeps the shell alive so the
+# heartbeat and cleanup trap can fire.
+enter_discovery_mode() {
+    local prompt="$1"
+    mkdir -p .buildcrew
+    log_init
+    __WF_TASK_NUM=0
+    __WF_TOTAL_TASKS=0
+    __WF_TASK_NAME="Discovery mode"
+    __INVOCATION_COUNT=0
+    echo $$ > "$LOCKFILE"
+    update_workflow_state "discovery" "running"
+    trap '_discovery_cleanup' EXIT INT TERM
+    ( while kill -0 $$ 2>/dev/null; do sleep 5; update_workflow_state "discovery" "running"; done ) &
+    export __DISCOVERY_HEARTBEAT_PID=$!
+    claude "$prompt" || true
+    # Inline cleanup (normal exit path)
+    kill "$__DISCOVERY_HEARTBEAT_PID" 2>/dev/null || true
+    wait "$__DISCOVERY_HEARTBEAT_PID" 2>/dev/null || true
+    __DISCOVERY_HEARTBEAT_PID=""
+    clear_workflow_state
+    rm -f "$LOCKFILE"
+    if [[ "$KEEP_LOGS" != "true" ]]; then
+        rm -f "$__LOG_FILE"
+    fi
+    trap - EXIT INT TERM
+    exit 0
 }
 
 # Pause for human review when --review is set
@@ -659,14 +701,14 @@ check_prerequisites() {
     if is_fresh_backlog; then
         print_info "Empty backlog. Launching discovery mode..."
         echo ""
-        exec claude "Run /build to help define this project and create a backlog."
+        enter_discovery_mode "Run /build to help define this project and create a backlog."
     fi
 
     # Completed phase - existing project, no pending tasks
     if is_completed_phase; then
         print_info "All tasks complete! Launching discovery mode to add scope..."
         echo ""
-        exec claude "Run /build to add new tasks to this project."
+        enter_discovery_mode "Run /build to add new tasks to this project."
     fi
 }
 

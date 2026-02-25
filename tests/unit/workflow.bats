@@ -386,3 +386,111 @@ EOF
     run bash -c 'ls .buildcrew/.workflow-state.tmp.* 2>/dev/null'
     [ "$output" = "" ]
 }
+
+# ─────────────────────────────────────────────────────────────────────────────
+# enter_discovery_mode tests
+# ─────────────────────────────────────────────────────────────────────────────
+
+@test "check_prerequisites: contains no exec claude calls" {
+    run grep -c 'exec claude' "$BUILDCREW_ROOT/lib/workflow.sh"
+    [ "$output" = "0" ]
+}
+
+@test "enter_discovery_mode: creates lockfile and log file before claude runs" {
+    mkdir -p .buildcrew
+    mkdir -p "$TEST_DIR/bin"
+    cat > "$TEST_DIR/bin/claude" << 'EOF'
+#!/bin/bash
+# Check both files exist while "running"
+[ -f ".buildcrew/.workflow-lock" ] && touch .buildcrew/.lock_existed
+ls .buildcrew/logs/buildcrew-*.log 2>/dev/null | head -1 | xargs -I{} sh -c '[ -f "{}" ] && touch .buildcrew/.log_existed'
+exit 0
+EOF
+    chmod +x "$TEST_DIR/bin/claude"
+    export PATH="$TEST_DIR/bin:$PATH"
+    run enter_discovery_mode "test prompt"
+    [ -f ".buildcrew/.lock_existed" ]
+    [ -f ".buildcrew/.log_existed" ]
+}
+
+@test "enter_discovery_mode: state file contains PHASE=discovery while claude is running" {
+    mkdir -p .buildcrew
+    mkdir -p "$TEST_DIR/bin"
+    cat > "$TEST_DIR/bin/claude" << 'EOF'
+#!/bin/bash
+grep -q "^PHASE=discovery$" .buildcrew/.workflow-state 2>/dev/null && touch .buildcrew/.phase_sentinel
+grep -q "^TIMESTAMP=[0-9]" .buildcrew/.workflow-state 2>/dev/null && touch .buildcrew/.timestamp_sentinel
+exit 0
+EOF
+    chmod +x "$TEST_DIR/bin/claude"
+    export PATH="$TEST_DIR/bin:$PATH"
+    run enter_discovery_mode "test prompt"
+    [ -f ".buildcrew/.phase_sentinel" ]
+    [ -f ".buildcrew/.timestamp_sentinel" ]
+}
+
+@test "enter_discovery_mode: state and lockfile are absent after normal exit" {
+    mkdir -p .buildcrew
+    mkdir -p "$TEST_DIR/bin"
+    cat > "$TEST_DIR/bin/claude" << 'EOF'
+#!/bin/bash
+exit 0
+EOF
+    chmod +x "$TEST_DIR/bin/claude"
+    export PATH="$TEST_DIR/bin:$PATH"
+    run enter_discovery_mode "test prompt"
+    [ ! -f ".buildcrew/.workflow-state" ]
+    [ ! -f ".buildcrew/.workflow-lock" ]
+}
+
+@test "enter_discovery_mode: heartbeat process is dead after normal exit" {
+    mkdir -p .buildcrew
+    mkdir -p "$TEST_DIR/bin"
+    cat > "$TEST_DIR/bin/claude" << 'EOF'
+#!/bin/bash
+echo "$__DISCOVERY_HEARTBEAT_PID" > .buildcrew/.hb_pid
+exit 0
+EOF
+    chmod +x "$TEST_DIR/bin/claude"
+    export PATH="$TEST_DIR/bin:$PATH"
+    run enter_discovery_mode "test prompt"
+    [ -f ".buildcrew/.hb_pid" ]
+    saved_pid=$(<.buildcrew/.hb_pid)
+    [ -n "$saved_pid" ]
+    run kill -0 "$saved_pid"
+    [ "$status" -ne 0 ]
+}
+
+@test "ERR-02: check_prerequisites calls enter_discovery_mode exactly twice" {
+    count=$(awk '/^check_prerequisites\(\)/,/^\}/' "$BUILDCREW_ROOT/lib/workflow.sh" | grep -c 'enter_discovery_mode')
+    [ "$count" -eq 2 ]
+}
+
+@test "EDGE-02: _discovery_cleanup kills heartbeat process if PID is set" {
+    mkdir -p .buildcrew
+    # Start a long-lived background process to simulate the heartbeat
+    sleep 100 &
+    hb_pid=$!
+    __DISCOVERY_HEARTBEAT_PID="$hb_pid"
+    _discovery_cleanup
+    # The process should be dead after cleanup
+    run kill -0 "$hb_pid"
+    [ "$status" -ne 0 ]
+}
+
+@test "EDGE-03: enter_discovery_mode preserves log file when KEEP_LOGS=true" {
+    mkdir -p .buildcrew
+    mkdir -p "$TEST_DIR/bin"
+    cat > "$TEST_DIR/bin/claude" << 'EOF'
+#!/bin/bash
+exit 0
+EOF
+    chmod +x "$TEST_DIR/bin/claude"
+    export PATH="$TEST_DIR/bin:$PATH"
+    export KEEP_LOGS=true
+    run enter_discovery_mode "test prompt"
+    # Log file should still exist (not removed by enter_discovery_mode when KEEP_LOGS=true)
+    log_count=$(ls .buildcrew/logs/buildcrew-*.log 2>/dev/null | wc -l)
+    [ "$log_count" -gt 0 ]
+    unset KEEP_LOGS
+}
