@@ -159,6 +159,13 @@ STRICT_EXPLICIT=false   # true only when --strict or --no-strict is passed expli
 VERBOSE=false
 FULL_PIPELINE=false
 
+if command -v python3 &>/dev/null; then
+    __ACTIVITY_TRACKING=true
+else
+    print_warning "python3 not found — subagent activity tracking disabled"
+    __ACTIVITY_TRACKING=false
+fi
+
 parse_args() {
     while [[ $# -gt 0 ]]; do
         case $1 in
@@ -1472,13 +1479,22 @@ __run_phase_group_impl() {
     fi
     if [[ -n "$__LOG_FILE" ]]; then
         log_msg "--- claude output start: $phase ---"
-        claude -p "$prompt" --max-turns "$max_turns" 2>&1 | tee -a "$__LOG_FILE" || true
+        if [[ "$__ACTIVITY_TRACKING" == "true" ]]; then
+            claude -p "$prompt" --max-turns "$max_turns" --output-format stream-json --verbose 2>&1 | python3 "$BUILDCREW_HOME/lib/stream_processor.py" --activity-file ".buildcrew/.agent-activity" --max-turns "$max_turns" | tee -a "$__LOG_FILE" || true
+        else
+            claude -p "$prompt" --max-turns "$max_turns" 2>&1 | tee -a "$__LOG_FILE" || true
+        fi
         log_msg "--- claude output end: $phase ---"
     else
-        claude -p "$prompt" --max-turns "$max_turns" || true
+        if [[ "$__ACTIVITY_TRACKING" == "true" ]]; then
+            claude -p "$prompt" --max-turns "$max_turns" --output-format stream-json --verbose 2>&1 | python3 "$BUILDCREW_HOME/lib/stream_processor.py" --activity-file ".buildcrew/.agent-activity" --max-turns "$max_turns" || true
+        else
+            claude -p "$prompt" --max-turns "$max_turns" || true
+        fi
     fi
 
     stop_file_monitor
+    rm -f ".buildcrew/.agent-activity"
     # Restore terminal state in case claude modified it before being killed
     [[ -n "$__saved_stty" ]] && stty "$__saved_stty" 2>/dev/null || true
 
@@ -1520,13 +1536,22 @@ __run_phase_group_impl() {
         fi
         if [[ -n "$__LOG_FILE" ]]; then
             log_msg "--- claude output start: $phase ---"
-            claude -p "$prompt" --max-turns "$max_turns" 2>&1 | tee -a "$__LOG_FILE" || true
+            if [[ "$__ACTIVITY_TRACKING" == "true" ]]; then
+                claude -p "$prompt" --max-turns "$max_turns" --output-format stream-json --verbose 2>&1 | python3 "$BUILDCREW_HOME/lib/stream_processor.py" --activity-file ".buildcrew/.agent-activity" --max-turns "$max_turns" | tee -a "$__LOG_FILE" || true
+            else
+                claude -p "$prompt" --max-turns "$max_turns" 2>&1 | tee -a "$__LOG_FILE" || true
+            fi
             log_msg "--- claude output end: $phase ---"
         else
-            claude -p "$prompt" --max-turns "$max_turns" || true
+            if [[ "$__ACTIVITY_TRACKING" == "true" ]]; then
+                claude -p "$prompt" --max-turns "$max_turns" --output-format stream-json --verbose 2>&1 | python3 "$BUILDCREW_HOME/lib/stream_processor.py" --activity-file ".buildcrew/.agent-activity" --max-turns "$max_turns" || true
+            else
+                claude -p "$prompt" --max-turns "$max_turns" || true
+            fi
         fi
 
         stop_file_monitor
+        rm -f ".buildcrew/.agent-activity"
         [[ -n "$__saved_stty" ]] && stty "$__saved_stty" 2>/dev/null || true
 
         if [[ ! -f "$PHASE_RESULT_FILE" ]] || ! jq -e . "$PHASE_RESULT_FILE" >/dev/null 2>&1; then
