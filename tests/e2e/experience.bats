@@ -146,3 +146,62 @@ RELEASE_CMD="/Users/joshcarroll/code/buildcrew-dev/.claude/commands/release-gith
     grep -q 'version = "0.2.0"' /Users/joshcarroll/code/buildcrew-dev/buildcrew-dash/pyproject.toml
     grep -q 'version = "0.2.0"' /Users/joshcarroll/code/buildcrew-dev/buildcrew-dash/uv.lock
 }
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Task: Persona dispatch for /buildcrew command and buildcrew skill
+# ─────────────────────────────────────────────────────────────────────────────
+BUILDCREW_CMD="/Users/joshcarroll/code/buildcrew-dev/buildcrew/commands/buildcrew.md"
+BUILDCREW_SKILL="/Users/joshcarroll/code/buildcrew-dev/buildcrew/skills/buildcrew/SKILL.md"
+
+# HP-06 / EDGE-07: command file slug table contains all 6 valid persona slugs.
+@test "experience: buildcrew command file contains all 6 persona slugs in slug table" {
+    grep -q 'product-manager' "$BUILDCREW_CMD"
+    grep -q 'principal-engineer' "$BUILDCREW_CMD"
+    grep -q 'feature-engineer' "$BUILDCREW_CMD"
+    grep -q 'qa-engineer' "$BUILDCREW_CMD"
+    grep -q 'security-engineer' "$BUILDCREW_CMD"
+    grep -q 'ux-designer' "$BUILDCREW_CMD"
+}
+
+# HP-06 / EDGE-07: SKILL.md slug table contains the same 6 persona slugs — tables must stay in sync (AC-10).
+@test "experience: buildcrew SKILL.md contains all 6 persona slugs matching command file" {
+    grep -q 'product-manager' "$BUILDCREW_SKILL"
+    grep -q 'principal-engineer' "$BUILDCREW_SKILL"
+    grep -q 'feature-engineer' "$BUILDCREW_SKILL"
+    grep -q 'qa-engineer' "$BUILDCREW_SKILL"
+    grep -q 'security-engineer' "$BUILDCREW_SKILL"
+    grep -q 'ux-designer' "$BUILDCREW_SKILL"
+}
+
+# ERR-01: command file persona mode error instructs user to run install.sh — ensures
+# users with missing rules files see an actionable message, not a silent failure.
+@test "experience: buildcrew command file error message references install.sh" {
+    grep -q 'install.sh' "$BUILDCREW_CMD"
+}
+
+# ERR-03: SKILL.md persona mode error also references install.sh — both dispatch
+# paths must carry the same recovery instruction (AC-07a/b).
+@test "experience: buildcrew SKILL.md error message references install.sh" {
+    grep -q 'install.sh' "$BUILDCREW_SKILL"
+}
+
+# Adversarial: command file must NOT contain phase-isolation or allowed-tools keys —
+# command files have a different frontmatter schema than skill files (AC-12).
+@test "experience: buildcrew command file frontmatter has no phase-isolation or allowed-tools keys" {
+    # Extract frontmatter block (between first two --- lines) and check it contains neither key
+    frontmatter=$(awk '/^---/{c++; if(c==2) exit} c==1' "$BUILDCREW_CMD")
+    ! echo "$frontmatter" | grep -q 'phase-isolation'
+    ! echo "$frontmatter" | grep -q 'allowed-tools'
+}
+
+# Adversarial: SKILL.md must NOT contain ## Current Task section — confirms the old
+# entry-point section was removed and replaced with ## Prompt Dispatch.
+@test "experience: buildcrew SKILL.md does not contain old ## Current Task section" {
+    ! grep -q '## Current Task' "$BUILDCREW_SKILL"
+}
+
+# Happy path: SKILL.md contains ## Prompt Dispatch section — confirms new dispatch
+# logic is present and the pipeline entry-point wording is updated.
+@test "experience: buildcrew SKILL.md contains ## Prompt Dispatch section" {
+    grep -q '## Prompt Dispatch' "$BUILDCREW_SKILL"
+}

@@ -1,6 +1,6 @@
 ---
 name: buildcrew
-description: Execute a complete development workflow for a backlog task. Use this when asked to execute the buildcrew workflow or process a backlog item through research, plan, plan review, build, code review, test, verify, and commit phases.
+description: Execute a complete development workflow for a backlog task, or adopt a BuildCrew persona for ad-hoc tasks using persona:request syntax
 allowed-tools: Read, Write, Edit, Glob, Grep, Bash, Task, Skill, WebSearch, WebFetch
 phase-isolation: v1
 ---
@@ -31,11 +31,47 @@ You are executing an autonomous development workflow. Follow each phase in order
               └────────────┘   └─────────────┘
 ```
 
-## Current Task
+## Prompt Dispatch
 
-The task you are working on was provided in the prompt. Parse it and understand what needs to be built.
+The task or persona request was provided in the prompt.
 
----
+### Step 1: Empty input check
+
+If no task description was provided (input is absent or empty), output the list of available personas and stop. Do not proceed to pipeline phases.
+
+### Step 2: Slug detection
+
+Trim leading and trailing whitespace from the input. Normalize to lowercase for matching only. Use the following slug table:
+
+| Slug | Rules file |
+|---|---|
+| `product-manager` | `product-manager-rules.md` |
+| `principal-engineer` | `principal-engineer-rules.md` |
+| `feature-engineer` | `feature-engineer-rules.md` |
+| `qa-engineer` | `qa-engineer-rules.md` |
+| `security-engineer` | `security-engineer-rules.md` |
+| `ux-designer` | `ux-designer-rules.md` |
+
+Apply detection in this exact order:
+
+1. **Exact slug match**: Lowercased input is exactly one of the 6 slugs (single token, no colon, no spaces) → **persona mode**; request is empty string
+2. **Slug-colon prefix**: Lowercased input starts with `<slug>:` → **persona mode**; extract text after first colon as request (may be empty)
+3. **Slug-space prefix**: First whitespace-delimited token is a valid slug but no colon appears anywhere → **pipeline mode**
+4. **No slug match**: No valid slug → **pipeline mode**
+
+### Step 3: Route
+
+#### Persona mode
+
+1. Read `~/.buildcrew/rules/core-principles.md` via Read tool. If missing, tell user to run `install.sh` from the repo root and stop.
+2. Read `~/.buildcrew/rules/<slug>-rules.md` via Read tool. If missing, tell user to run `install.sh` from the repo root and stop.
+3. Adopt the persona fully. If request is non-empty, work on it. If request is empty (bare slug or `<slug>:` with nothing after the colon), introduce the persona by name and domain and invite the user to provide a task.
+4. Stay in this persona for the entire conversation.
+5. **Do NOT write `.claude/` status files. Do NOT enter pipeline phases.**
+
+#### Pipeline mode (default)
+
+Parse the task description as the task to implement. Proceed to the `## RESEARCH` section below.
 
 ## Document Review Protocol
 
