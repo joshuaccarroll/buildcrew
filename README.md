@@ -24,13 +24,16 @@ When you let AI code without guardrails, you get:
 
 BuildCrew is an autonomous development pipeline where **expert AI personas review each other's work**.
 
-Every feature goes through:
+**Discovery mode** (new projects) guides you through:
 1. A **Product Manager** who challenges scope and finds the real problem
-2. A **UX Designer** who creates intuitive, accessible interfaces
-3. A **Feature Engineer** who ships pragmatic, user-focused code
-4. A **Principal Engineer** who reviews plans and code for quality
-5. A **QA Engineer** who writes tests that actually catch bugs
-6. A **Security Engineer** who blocks vulnerabilities before they ship
+2. A **UX Designer** who creates intuitive, accessible interfaces *(Discovery only)*
+
+**Execution mode** (backlog tasks) runs every task through:
+1. A **Product Manager** who refines acceptance criteria before anything is planned
+2. A **Feature Engineer** who ships pragmatic, user-focused code
+3. A **Principal Engineer** who reviews plans and code for quality
+4. A **QA Engineer** who writes tests that actually catch bugs
+5. A **Security Engineer** who blocks vulnerabilities before they ship
 
 **No single AI agent has the final say.** Each persona has expertise, standards, and veto power.
 
@@ -64,9 +67,14 @@ buildcrew init
 buildcrew run
 ```
 
-That's it. BuildCrew has two modes: **Discovery mode** launches the Product Manager to help you define your project when no backlog exists. **Execution mode** processes each task through the full persona pipeline.
+That's it. BuildCrew has two modes:
 
-**Ad-hoc usage:** Invoke any persona directly with `/buildcrew <persona-name>` (e.g., `/buildcrew security-engineer` for a security audit).
+- **Discovery mode** — if no `BACKLOG.md` exists (or all tasks are complete), the Product Manager launches and guides you through defining your project and creating a backlog.
+- **Execution mode** — once tasks are in your `BACKLOG.md` (as `- [ ] task description`), `buildcrew run` processes each one through the full persona pipeline.
+
+If you're starting fresh, Discovery mode runs automatically. Once it creates your backlog, run `buildcrew run` again to enter Execution mode.
+
+**Ad-hoc usage:** Invoke any persona directly with `/buildcrew <persona>:<task>` (e.g., `/buildcrew security-engineer:audit the API endpoints`). Run `/buildcrew` alone to see available personas.
 
 ---
 
@@ -78,17 +86,17 @@ That's it. BuildCrew has two modes: **Discovery mode** launches the Product Mana
 - Challenges scope and finds the real problem
 - Pushes back on over-complication
 - Creates phased implementation plans
-- Reviews plans from the user's perspective (plan-review phase, Pass 2)
-- **Invoked via**: `/build` or `/buildcrew product-manager`
+- Reviews plans from the user's perspective during the Plan Review phase
+- **Invoked via**: `/build` or `/buildcrew product-manager:<task>`
 
 ### UX Designer
 *"Good design is invisible. Users shouldn't have to think."*
 
 - Applies 7 core design principles
 - Creates comprehensive design specs
-- Generates HTML mockups and iterates with you until the visual design is right
+- Generates HTML mockups and iterates with you through revision rounds until the visual design is right
 - Champions accessibility from the start
-- **Invoked via**: `/build` (optional) or `/buildcrew ux-designer`
+- **Invoked via**: `/build` (optional) or `/buildcrew ux-designer:<task>`
 
 ### Feature Engineer
 *"A feature in production is worth 10 features in planning."*
@@ -97,6 +105,7 @@ That's it. BuildCrew has two modes: **Discovery mode** launches the Product Mana
 - Follows existing codebase patterns
 - Balances velocity with quality
 - **Will avoid**: Scope creep, gold-plating, premature abstraction
+- **Invoked via**: Build phase (automatic) or `/buildcrew feature-engineer:<task>`
 
 ### Principal Engineer
 *"The best code is the code you don't have to write."*
@@ -105,6 +114,7 @@ That's it. BuildCrew has two modes: **Discovery mode** launches the Product Mana
 - Reviews code for quality and patterns
 - Blocks over-engineering and code smells
 - **Will reject**: Functions > 20 lines, files > 300 lines, deep nesting, magic numbers
+- **Invoked via**: Plan Review and Code Review phases (automatic) or `/buildcrew principal-engineer:<task>`
 
 ### QA Engineer
 *"A test that can't fail is worthless."*
@@ -113,6 +123,7 @@ That's it. BuildCrew has two modes: **Discovery mode** launches the Product Mana
 - Writes tests that fail meaningfully
 - Covers happy paths AND edge cases
 - **Will catch**: Untested business logic, false positives, missing boundaries
+- **Invoked via**: Test phase (automatic) or `/buildcrew qa-engineer:<task>`
 
 ### Security Engineer
 *"Security is not a feature. It's a foundation."*
@@ -121,6 +132,7 @@ That's it. BuildCrew has two modes: **Discovery mode** launches the Product Mana
 - Detects hardcoded secrets
 - Validates input handling
 - **Will block**: Any critical/high vulnerabilities before commit
+- **Invoked via**: Verify phase (automatic) or `/buildcrew security-engineer:<task>`
 
 ---
 
@@ -131,9 +143,9 @@ That's it. BuildCrew has two modes: **Discovery mode** launches the Product Mana
 │                         BuildCrew Pipeline                         │
 ├───────────────────────────────────────────────────────────────────┤
 │                                                                    │
-│   SPEC ──► RESEARCH ──► PLAN ──► PLAN REVIEW ──► BUILD            │
-│   (PM)                            (3-Pass:        (Feature)        │
-│                                   adversarial)                     │
+│   SPEC ──► RESEARCH+PLAN ──► PLAN REVIEW ──► BUILD                │
+│   (PM)     (Research Agent)   (3-Pass:        (Feature)            │
+│                               adversarial)                         │
 │                                                                    │
 │   COMMIT ◄── VERIFY ◄── OUTCOME ◄── TEST ◄── CODE REVIEW          │
 │              (Security   (Acceptance   (QA)   (adversarial         │
@@ -142,7 +154,7 @@ That's it. BuildCrew has two modes: **Discovery mode** launches the Product Mana
 └───────────────────────────────────────────────────────────────────┘
 ```
 
-Each task runs through **up to 8 isolated Claude invocations** (phase-isolated mode), keeping context focused per phase:
+Each task runs through **up to 8 distinct phases** (each a separate, isolated Claude invocation), keeping context focused per phase. Total invocations are bounded by `MAX_INVOCATIONS` (default: 15) — retries, chunked builds, and re-plans all count toward this ceiling:
 
 | # | Phase | Description |
 |---|-------|-------------|
@@ -156,10 +168,10 @@ Each task runs through **up to 8 isolated Claude invocations** (phase-isolated m
 | 8 | Verify (incl. Security Audit) + Commit | Final gate; Security blocks commit |
 
 **Key features:**
-- **Specification first** - PM writes testable acceptance criteria before any code is planned
+- **Specification first** - PM writes testable acceptance criteria before any code is planned; after each spec, BuildCrew pauses for you to review and approve (or edit) the acceptance criteria before proceeding — pass `--auto` to skip this pause
 - **Adversarial reviews** - reviewers are asked to find flaws, not to approve quickly
-- **Consolidated human review** (`--review`) - single pre-build gate with inline plan display; press Enter to proceed, `s` to skip, `q` to quit
-- **Complexity-aware phase skipping** - simple tasks automatically skip unnecessary phases; use `--full-pipeline` to force all phases
+- **Consolidated human review** (`--review`) - single pre-build gate with inline plan display; opens your `$EDITOR` to review or edit the plan; has no effect for `trivial`-complexity tasks
+- **Complexity-aware phase skipping** - tasks tagged `{trivial}` skip most phases (only build and verify run); `{simple}` skip spec, review, codereview, and outcome — research, build, test, and verify still run; `{standard}` run all phases. BuildCrew also auto-detects complexity from the task description. Use `--full-pipeline` to force all phases regardless
 - **Outcome verification** - QA validates acceptance criteria directly, not just test suite pass
 - **Circuit breaker** - if any phase fails twice consecutively, re-plan from scratch with failure context
 - **Lessons system** - failures are automatically recorded and injected into future runs
@@ -167,12 +179,12 @@ Each task runs through **up to 8 isolated Claude invocations** (phase-isolated m
 - **Automatic iteration** when reviews find issues
 - **Blocking security** - no commit until vulnerabilities are fixed
 - **Feature branches** (`--branch`) - create a branch per task with automatic PR creation
-- **Activity logging** - full activity log kept on failure; use `--keep-logs` to retain after success
+- **Activity logging** - full activity log kept on failure at `.buildcrew/activity.log`; use `--keep-logs` to retain after success
 - **Auto mode** (`--auto`) - fully unattended; auto-approves all interactive pauses
 - **Chunked phase execution** - large builds that hit max-turns are automatically split and retried
 - **Interactive permission recovery** - if a phase is blocked by missing permissions, BuildCrew prompts for recovery before continuing
 - **Status line integration** - wired in via `buildcrew init` for real-time progress in Claude Code
-- **Document Review Protocol** - sub-agent iterative review on all plans (up to 5 iterations or convergence)
+- **Iterative sub-agent review** - research documents and test plans are refined through up to 5 sub-agent improvement passes before proceeding (or until convergence)
 - **Customizable** - modify phases or remove them entirely
 
 ---
@@ -184,7 +196,7 @@ Each task runs through **up to 8 isolated Claude invocations** (phase-isolated m
 Skip phases, add new ones, or change the flow:
 
 ```bash
-# Copy the example and edit
+# Requires buildcrew init to have been run first
 cp .buildcrew/workflow.md.example .buildcrew/workflow.md
 ```
 
@@ -198,16 +210,18 @@ agent: feature-engineer
 ### TEST
 agent: qa-engineer
 
-### COMMIT
+### VERIFY + COMMIT
 agent: none
 ```
+
+`agent: none` means the orchestrator handles the phase directly — no persona is invoked.
 
 ### Project Rules
 
 Add your team's standards:
 
 ```bash
-# Copy the example and edit
+# Requires buildcrew init to have been run first
 cp .buildcrew/rules/project-rules.md.example .buildcrew/rules/project-rules.md
 ```
 
@@ -232,7 +246,7 @@ See `.buildcrew/rules/project-rules.md.example` for more examples.
 Give BuildCrew context about your users, principles, and domain:
 
 ```bash
-# Copy the examples you want and edit
+# Requires buildcrew init to have been run first
 cp .buildcrew/context/users.md.example .buildcrew/context/users.md
 cp .buildcrew/context/principles.md.example .buildcrew/context/principles.md
 cp .buildcrew/context/domain.md.example .buildcrew/context/domain.md
@@ -250,7 +264,7 @@ buildcrew init               # Link project to BuildCrew
 buildcrew run                # Run workflow on BACKLOG.md
 buildcrew run --single       # Process one task and stop
 buildcrew run --dry-run      # Preview without executing
-buildcrew run --review       # Pause for human review (single pre-build gate, shows plan inline)
+buildcrew run --review       # Pause for human review before build — shows plan inline, opens editor
 buildcrew run --branch       # Create a feature branch per task with PR
 buildcrew run --skip-spec    # Skip the spec phase (task already has detailed spec)
 buildcrew run --strict       # (default) Require ALL acceptance criteria to pass before commit
@@ -262,6 +276,7 @@ buildcrew run --full-pipeline  # Force all phases regardless of complexity asses
 buildcrew run --keep-logs    # Retain the activity log after a successful run
 buildcrew run --max-invocations N  # Set max Claude invocations per run (default: 15)
 buildcrew run --verbose      # Show orchestrator decisions, phase verdicts, and invocation counts
+buildcrew run --debug        # Alias for --verbose
 buildcrew status             # Show backlog stats and last workflow result
 buildcrew stop               # Stop after current task completes
 buildcrew reset              # Clear blocked tasks and clean up artifacts
@@ -271,6 +286,10 @@ buildcrew lessons            # List recorded lessons from past failures
 buildcrew lessons promote N  # Graduate lesson N to permanent project rules
 buildcrew lessons prune      # Interactively remove stale lessons
 buildcrew plugins            # Show recommended plugins
+buildcrew dash               # Launch the terminal dashboard (installs if needed)
+buildcrew dash install       # Install buildcrew-dash
+buildcrew dash update        # Update buildcrew-dash
+buildcrew dash uninstall     # Remove buildcrew-dash
 buildcrew update             # Update BuildCrew
 buildcrew version            # Show installed version
 buildcrew uninstall          # Remove BuildCrew
@@ -282,12 +301,12 @@ buildcrew uninstall          # Remove BuildCrew
 |------|-------------|
 | `--single` | Process one task then exit |
 | `--dry-run` | Preview what would happen without executing |
-| `--review` | Single pre-build gate: shows the plan inline and pauses for human inspection. Press Enter to continue, `s` to skip, `q` to quit. |
+| `--review` | Single pre-build gate: displays the plan inline and opens `$EDITOR` for optional edits before proceeding. Has no effect for `trivial`-complexity tasks. For `simple` tasks, the gate still fires but no adversarial review will have run — the plan is unvetted. |
 | `--branch` | Create a `buildcrew/<slug>` feature branch per task. Pushes to remote and creates a PR via `gh` if available. Each task branches independently from the base branch. |
 | `--resume` | Resume an interrupted task from where it left off |
 | `--task N` | Target a specific task by name or number |
 | `--skip-spec` | Skip the spec phase. Use when the backlog item already contains a detailed spec with acceptance criteria. |
-| `--strict` | (default) Require ALL acceptance criteria to pass during Outcome Verification before the commit is allowed. |
+| `--strict` | (default) Require ALL acceptance criteria to pass during Outcome Verification before the commit is allowed. Has no effect whenever the outcome phase is skipped — e.g., for `{trivial}` or `{simple}` tasks. |
 | `--no-strict` | Allow partial acceptance criteria pass — unmet criteria trigger a warning but don't block the commit. |
 | `--full-pipeline` | Force all phases regardless of complexity assessment |
 | `--auto` | Run fully unattended — auto-approve all interactive pauses |
@@ -350,11 +369,26 @@ The re-plan gets **one attempt**. If it hits the circuit breaker again, the task
 
 ---
 
+## Terminal Dashboard
+
+BuildCrew ships with an optional terminal dashboard (`buildcrew-dash`) that gives you a live view of workflow progress.
+
+```bash
+buildcrew dash          # Launch (prompts to install if not present)
+buildcrew dash install  # Install separately
+```
+
+The dashboard shows the current phase, agent activity (tool calls, turn counts), and workflow state in real time. It reads from `.buildcrew/.agent-activity`, which BuildCrew writes automatically during each phase when Python 3 is available. If Python 3 is not installed, activity tracking degrades gracefully — the pipeline runs normally, the dashboard just won't show per-tool detail.
+
+---
+
 ## How It Works
 
-1. **Install once** to `~/.buildcrew/` with all personas, rules, and workflows
-2. **Link any project** with `buildcrew init` (creates `.buildcrew/` for your customizations)
-3. **Rules merge** in order: global defaults → persona rules → your project rules
+1. **Install once** to `~/.buildcrew/` — contains all persona skill files, default rules, and the workflow orchestrator
+2. **Link any project** with `buildcrew init` — creates `.buildcrew/` (your customizations), symlinks skills/commands into `.claude/`, and writes `.claude/settings.json` with autonomous operation permissions
+3. **Rules merge** in order: global defaults → persona rules → your project rules (`.buildcrew/rules/project-rules.md`)
+4. **Communication is file-based** — the orchestrator and each Claude invocation share state through files in `.buildcrew/` and `.claude/`. No pipes, no env vars between phases. Each phase writes a `phase-result.json` verdict that drives the next orchestrator decision
+5. **Phases are isolated** — each phase is a fresh `claude -p` invocation with only the context it needs, preventing context bleed between roles
 
 ---
 
@@ -408,7 +442,7 @@ The local file merges with the global settings. Deny rules always win.
 
 ### Safety Features
 
-- **No auto-push** - Commits stay local until you review and push (unless `--branch` is used, which pushes feature branches only)
+- **No auto-push** - Commits stay local until you review and push (unless `--branch` is used — feature branches are pushed automatically and a PR is created via `gh`)
 - **Human review** (`--review`) - single pre-build gate: displays the plan inline and pauses for inspection before proceeding
 - **Blocking gates** - Security issues must be fixed before commit
 - **Deny-list protection** - System directories protected even when `rm` is allowed
@@ -419,6 +453,8 @@ The local file merges with the global settings. Deny rules always win.
 
 - **Claude Code CLI** installed and authenticated
 - **jq** for JSON parsing (`brew install jq`)
+- **Python 3** in your `PATH` (optional — enables real-time activity tracking for `buildcrew-dash`; degrades gracefully if absent)
+- **gh CLI** (optional — required for PR creation with `--branch`; `brew install gh`)
 
 ---
 
