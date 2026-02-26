@@ -36,9 +36,9 @@ teardown() {
     [ "$output" = "60" ]
 }
 
-@test "get_phase_max_turns: verify returns 30" {
+@test "get_phase_max_turns: verify returns 50" {
     run get_phase_max_turns "verify"
-    [ "$output" = "30" ]
+    [ "$output" = "50" ]
 }
 
 @test "get_phase_max_turns: unknown phase returns 30" {

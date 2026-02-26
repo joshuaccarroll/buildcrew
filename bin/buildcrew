@@ -54,6 +54,7 @@ print_help() {
     echo "    lessons prune    Interactively remove stale lessons"
     echo "    plugins          Show recommended plugins for your project"
     echo "    update           Check for and install updates"
+    echo "    dash             Manage the buildcrew-dash terminal dashboard"
     echo "    version          Show version information"
     echo "    uninstall        Remove BuildCrew from system"
     echo "    help             Show this help message"
@@ -79,6 +80,7 @@ print_help() {
     echo -e "    1. Run ${CYAN}buildcrew init${NC} in your project"
     echo -e "    2. Run ${CYAN}buildcrew run${NC} to start"
     echo -e "    (Auto-launches discovery mode if no backlog exists)"
+    echo -e "    3. Run ${CYAN}buildcrew dash${NC} for a live terminal dashboard"
     echo ""
     echo -e "${BOLD}DOCUMENTATION:${NC}"
     echo "    https://github.com/joshuaccarroll/buildcrew"
@@ -1855,6 +1857,126 @@ cmd_uninstall() {
     fi
 }
 
+_dash_download_and_run() {
+    local script_path="$1"
+    shift
+    (
+        set -e
+        local tmp_dir
+        tmp_dir=$(mktemp -d)
+        trap "rm -rf \"$tmp_dir\"" EXIT
+        echo -e "${BOLD}Downloading buildcrew-dash...${NC}"
+        if ! curl -fsSL "https://github.com/joshuaccarroll/buildcrew-dash/archive/refs/heads/main.tar.gz" -o "$tmp_dir/buildcrew-dash.tar.gz"; then
+            echo "Error: Download failed"
+            exit 1
+        fi
+        tar -xzf "$tmp_dir/buildcrew-dash.tar.gz" -C "$tmp_dir"
+        if [[ ! -d "$tmp_dir/buildcrew-dash-main" ]]; then
+            echo "Error: Extracted directory not found"
+            exit 1
+        fi
+        "$tmp_dir/buildcrew-dash-main/$script_path" "$@"
+    )
+}
+
+_dash_install()   { _dash_download_and_run "install.sh"; }
+_dash_upgrade()   { _dash_download_and_run "install.sh" --upgrade; }
+_dash_uninstall() { _dash_download_and_run "uninstall.sh"; }
+
+cmd_dash() {
+    local subcommand="${1:-}"
+
+    # Detect installation
+    local dash_bin=""
+    if [[ -x "$HOME/.buildcrew-dash/.venv/bin/buildcrew-dash" ]]; then
+        dash_bin="$HOME/.buildcrew-dash/.venv/bin/buildcrew-dash"
+    elif command -v buildcrew-dash &>/dev/null; then
+        dash_bin="$(command -v buildcrew-dash)"
+    fi
+
+    case "$subcommand" in
+        "")
+            if [[ -n "$dash_bin" ]]; then
+                exec "$dash_bin"
+            else
+                if [ -t 0 ]; then
+                    echo -e "${BOLD}buildcrew-dash${NC} — Terminal dashboard for BuildCrew"
+                    echo "buildcrew-dash is not installed."
+                    echo ""
+                    read -p "Install now? [y/N] " -n 1 -r
+                    echo ""
+                    if [[ $REPLY =~ ^[Yy]$ ]]; then
+                        _dash_install
+                    else
+                        echo "To install later: buildcrew dash install"
+                    fi
+                fi
+            fi
+            ;;
+        install)
+            if [[ -n "$dash_bin" ]]; then
+                echo -e "${YELLOW}Note:${NC} buildcrew-dash is already installed at $dash_bin"
+                echo "To update: buildcrew dash update"
+                exit 0
+            fi
+            _dash_install
+            ;;
+        update)
+            if [[ -z "$dash_bin" ]]; then
+                echo -e "${RED}Error:${NC} buildcrew-dash is not installed."
+                echo "Install with: buildcrew dash install"
+                exit 1
+            fi
+            _dash_upgrade
+            ;;
+        uninstall)
+            if [[ -z "$dash_bin" ]]; then
+                echo -e "${RED}Error:${NC} buildcrew-dash is not installed."
+                echo "Install with: buildcrew dash install"
+                exit 1
+            fi
+            _dash_uninstall
+            ;;
+        status)
+            if [[ -n "$dash_bin" ]]; then
+                echo -e "${GREEN}Installed:${NC} $dash_bin"
+                local pyproject="$HOME/.buildcrew-dash/pyproject.toml"
+                local version=""
+                if [[ -f "$pyproject" ]]; then
+                    version=$(grep '^version = "' "$pyproject" | head -1 | sed 's/.*"\(.*\)".*/\1/')
+                fi
+                if [[ -z "$version" ]]; then
+                    version="version unknown"
+                fi
+                echo "$version"
+            else
+                echo -e "${YELLOW}Not installed${NC}"
+                echo "Install with: buildcrew dash install"
+            fi
+            ;;
+        --help|-h|help)
+            echo -e "${BOLD}buildcrew dash${NC} — Manage the buildcrew-dash terminal dashboard"
+            echo ""
+            echo "USAGE:"
+            echo "    buildcrew dash [subcommand]"
+            echo ""
+            echo "SUBCOMMANDS:"
+            echo "    install      Download and install buildcrew-dash"
+            echo "    update       Update buildcrew-dash to the latest version"
+            echo "    uninstall    Remove buildcrew-dash"
+            echo "    status       Show installation status and version"
+            echo "    help         Show this help message"
+            echo ""
+            echo "Run 'buildcrew dash' with no arguments to launch the TUI (if installed)."
+            ;;
+        *)
+            echo -e "${RED}Error: Unknown dash subcommand '$subcommand'${NC}"
+            echo "Run 'buildcrew dash help' for usage."
+            exit 1
+            ;;
+    esac
+}
+
 # Main command dispatch
 case "${1:-}" in
     init)
@@ -1889,6 +2011,10 @@ case "${1:-}" in
     update)
         shift
         cmd_update "$@"
+        ;;
+    dash)
+        shift
+        cmd_dash "$@"
         ;;
     version|--version|-v)
         cmd_version
