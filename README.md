@@ -172,7 +172,7 @@ Each task runs through **up to 9 distinct phases** (each a separate, isolated Cl
 - **Specification first** - PM writes testable acceptance criteria before any code is planned; after each spec, BuildCrew pauses for you to review and approve (or edit) the acceptance criteria before proceeding — pass `--auto` to skip this pause
 - **Adversarial reviews** - reviewers are asked to find flaws, not to approve quickly
 - **Consolidated human review** (`--review`) - single pre-build gate with inline plan display; opens your `$EDITOR` to review or edit the plan; has no effect for `trivial`-complexity tasks
-- **Complexity-aware phase skipping** - tasks tagged `{trivial}` skip most phases (only build and verify run); `{simple}` skip spec, review, codereview, and outcome — research, build, test, and verify still run; `{standard}` run all phases. BuildCrew also auto-detects complexity from the task description. Use `--full-pipeline` to force all phases regardless
+- **Complexity-aware phase skipping** - tag tasks in your `BACKLOG.md` with `{trivial}`, `{simple}`, or `{standard}` (e.g., `- [ ] Fix typo in footer {trivial}`). `{trivial}` skips most phases (only build and verify run); `{simple}` skips spec, review, codereview, and outcome — research, build, test, and verify still run; `{standard}` runs all phases. BuildCrew also auto-detects complexity from the task description when no tag is present. Use `--full-pipeline` to force all phases regardless
 - **Outcome verification** - QA validates acceptance criteria directly, not just test suite pass
 - **Circuit breaker** - if any phase fails twice consecutively, re-plan from scratch with failure context
 - **Lessons system** - failures are automatically recorded and injected into future runs

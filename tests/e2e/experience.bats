@@ -205,3 +205,98 @@ BUILDCREW_SKILL="/Users/joshcarroll/code/buildcrew-dev/buildcrew/skills/buildcre
 @test "experience: buildcrew SKILL.md contains ## Prompt Dispatch section" {
     grep -q '## Prompt Dispatch' "$BUILDCREW_SKILL"
 }
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Task: Reframe circuit breaker re-plan prompts with "scrap and reimagine"
+# ─────────────────────────────────────────────────────────────────────────────
+WORKFLOW_SH="$BUILDCREW_ROOT/lib/workflow.sh"
+
+# HP-01: All 7 circuit breaker assignments use the new directive ending.
+@test "experience: exactly 7 circuit breaker prompts contain scrap-and-reimagine directive" {
+    count=$(grep -c 'scrap this and implement the elegant solution' "$WORKFLOW_SH")
+    [ "$count" -eq 7 ]
+}
+
+# HP-02: 5 non-outcome occurrences use standard phrasing without spec reference.
+@test "experience: 5 circuit breaker prompts use standard directive (no spec ref)" {
+    count=$(grep 'Knowing everything you know now, scrap this' "$WORKFLOW_SH" | grep -vc 'spec')
+    [ "$count" -eq 5 ]
+}
+
+# HP-03: 2 outcome occurrences preserve the spec reference before the directive.
+@test "experience: 2 outcome circuit breakers preserve spec reference before directive" {
+    count=$(grep -c 'Re-read the spec in .claude/spec.md. Knowing everything you know now, scrap this' "$WORKFLOW_SH")
+    [ "$count" -eq 2 ]
+    # Both must be outcome-related
+    non_outcome=$(grep 'Re-read the spec in .claude/spec.md. Knowing everything' "$WORKFLOW_SH" | grep -vc 'Outcome verification' || true)
+    [ "$non_outcome" -eq 0 ]
+}
+
+# HP-04 through HP-09: Each circuit breaker's leading context is intact.
+@test "experience: plan review circuit breaker has correct leading context" {
+    grep -q 'Plan review failed twice.*Previous approach:.*failure_summary.*Knowing everything' "$WORKFLOW_SH"
+}
+
+@test "experience: code review circuit breaker has correct leading context" {
+    grep -q 'Code review NEEDS_REBUILD twice.*Previous failure:.*failure_summary.*Knowing everything' "$WORKFLOW_SH"
+}
+
+@test "experience: build/test circuit breaker has correct leading context" {
+    grep -q 'Build/test failed twice.*Previous failure:.*failure_summary.*Knowing everything' "$WORKFLOW_SH"
+}
+
+@test "experience: smoke test circuit breaker has correct leading context" {
+    grep -q 'Smoke test NEEDS_REBUILD twice.*Failure:.*failure_summary.*Knowing everything' "$WORKFLOW_SH"
+}
+
+@test "experience: outcome circuit breakers have correct leading context with Unmet criteria" {
+    count=$(grep -c 'Outcome verification failed twice.*Unmet criteria:.*failure_summary.*Re-read the spec' "$WORKFLOW_SH")
+    [ "$count" -eq 2 ]
+}
+
+@test "experience: verify circuit breaker uses failure_details variable (not failure_summary)" {
+    grep -q 'Verification failed twice on.*failing.*failure_details.*Knowing everything' "$WORKFLOW_SH"
+}
+
+# REG-01 through REG-05: Old directive sentences are completely removed.
+@test "experience: no old directive 'Try a fundamentally different approach' remains" {
+    ! grep -q 'Try a fundamentally different approach' "$WORKFLOW_SH"
+}
+
+@test "experience: no old directive 're-plan with a different strategy' remains" {
+    ! grep -q 're-plan with a different strategy' "$WORKFLOW_SH"
+}
+
+@test "experience: no old directive 'Re-plan with a different implementation strategy' remains" {
+    ! grep -q 'Re-plan with a different implementation strategy' "$WORKFLOW_SH"
+}
+
+@test "experience: no old directive 'and plan differently' remains" {
+    ! grep -q 'and plan differently' "$WORKFLOW_SH"
+}
+
+@test "experience: no old directive 'Plan a different approach that avoids this issue' remains" {
+    ! grep -q 'Plan a different approach that avoids this issue' "$WORKFLOW_SH"
+}
+
+# EDGE-01: No line has the directive phrase duplicated.
+@test "experience: no line contains duplicate 'Knowing everything' phrase" {
+    count=$(grep -c 'Knowing everything.*Knowing everything' "$WORKFLOW_SH" || true)
+    [ "$count" -eq 0 ]
+}
+
+# EDGE-02: Spec reference appears only in outcome circuit breakers.
+@test "experience: spec reference in replan context appears only in outcome lines" {
+    # Lines containing both "spec" and "scrap" in __replan_context
+    spec_scrap_lines=$(grep '__replan_context=.*spec.*scrap\|__replan_context=.*scrap.*spec' "$WORKFLOW_SH" | wc -l | tr -d ' ')
+    [ "$spec_scrap_lines" -eq 2 ]
+    # All such lines must mention "Outcome verification"
+    non_outcome=$(grep '__replan_context=.*spec.*scrap\|__replan_context=.*scrap.*spec' "$WORKFLOW_SH" | grep -vc 'Outcome verification' || true)
+    [ "$non_outcome" -eq 0 ]
+}
+
+# Adversarial: someone accidentally pastes the directive twice in a single assignment.
+@test "experience: no circuit breaker line contains 'elegant solution' more than once" {
+    dupes=$(grep 'CIRCUIT BREAKER:' "$WORKFLOW_SH" | grep -c 'elegant solution.*elegant solution' || true)
+    [ "$dupes" -eq 0 ]
+}
