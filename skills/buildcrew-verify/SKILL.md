@@ -26,12 +26,48 @@ The task was provided in the prompt. All prior artifacts are available in `.clau
 
 Run `git diff --name-only HEAD` to discover changed files for audit.
 
+### Gather Evidence
+
+Before running the checklist, gather fresh execution proof. This ensures the verify agent uses current test results — NOT stale artifacts from earlier phases.
+
+**Step 1: Run the project's test command.** Detect by checking in order (use the first match):
+
+1. `test.sh` in project root — if `[ -x test.sh ]`, run `./test.sh`
+2. `Makefile` exists and has a test target — if `grep -q '^test[:\t ]' Makefile`, run `make test`
+3. `package.json` exists and has a test script — if `grep -q '"test"' package.json`, run `npm test`
+4. `pyproject.toml` exists AND `command -v pytest` succeeds — run `pytest`
+5. `Cargo.toml` exists AND `command -v cargo` succeeds — run `cargo test`
+
+If none found, note "No test runner detected" and skip test execution — do NOT fail the Test Suite check on that basis alone.
+
+Capture full stdout+stderr from the test command. Record the exit code.
+
+**Step 2: Capture changed files.** Run `git diff --stat HEAD` (changes are uncommitted at verify time — this shows both staged and unstaged changes relative to the last commit; evidence gathering runs BEFORE `git add`/commit).
+
+**Step 3: Write `.claude/verify-evidence.md`** with these sections:
+
+```markdown
+## Test Output
+
+<full stdout+stderr from test command, or "No test runner detected">
+
+## Changed Files
+
+<git diff --stat HEAD output, or "No changes detected">
+```
+
+**Output truncation**: if test output exceeds 500 lines, keep the first 50 lines and last 200 lines with a `... (N lines truncated) ...` marker between them. This prevents the evidence file from blowing up context windows on verbose test suites while preserving the summary/failure lines that typically appear at the end.
+
+**If the test command exits non-zero**, the Test Suite check in the checklist below automatically fails — use the captured output as the failure reason.
+
+`.claude/verify-evidence.md` is a transient artifact — it will be committed alongside the code changes.
+
 ### Verify Checklist
 
 All items must be checked and pass:
 
 #### 1. Test Suite Verification
-- [ ] All tests pass (zero failures)
+- [ ] All tests pass — use results from Gather Evidence step above (`.claude/verify-evidence.md`), not `.claude/test-report.md`
 - [ ] Coverage meets project threshold (if configured)
 - [ ] No skipped tests without justification
 
@@ -115,6 +151,11 @@ Write verification status to `.claude/verify-report.md`:
 ### Architecture
 - **Status**: [VALID | INVALID]
 - **Notes**: [Any architectural concerns]
+
+### Evidence
+- **Source**: `.claude/verify-evidence.md`
+- **Test Result**: [PASS | FAIL | NO TEST RUNNER]
+- **Files Changed**: [count from diff stat]
 
 ---
 
