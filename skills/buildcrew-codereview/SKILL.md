@@ -16,6 +16,9 @@ The task was provided in the prompt. The approved plan is in `.claude/current-pl
 
 > Run `git diff --name-only HEAD` to discover what was built. Read the actual
 > files. Your context is clean — you are seeing this code for the first time.
+>
+> Note: A simplify pass may have already applied targeted improvements. Review
+> the current state of the code, not what it looked like before simplify ran.
 
 ---
 

@@ -6,7 +6,7 @@ allowed-tools: Read, Write, Edit, Glob, Grep, Bash, Task, Skill
 
 # BuildCrew — Build
 
-`[Phase: build | Input: .claude/current-plan.md | Output: working code | Next: code-review]`
+`[Phase: build | Input: .claude/current-plan.md | Output: working code | Next: simplify]`
 
 You are executing the build phase of the BuildCrew autonomous development workflow.
 

@@ -87,6 +87,21 @@ The Feature Engineer:
 
 ---
 
+### SIMPLIFY (non-blocking)
+**agent**: none
+**description**: Review changed code for reuse, quality, and efficiency improvements; apply targeted fixes
+**output**: .claude/simplify-report.md (optional)
+**blocking**: false — always proceeds to code-review regardless of findings
+
+The Simplify phase:
+1. Discovers changed files via `git diff --name-only HEAD`
+2. Reviews for unnecessary complexity, duplicated logic, and efficiency issues
+3. Applies surgical fixes directly (only what is genuinely simpler — no style changes)
+4. Writes a brief summary to `.claude/simplify-report.md`
+5. Always writes verdict `complete` — this phase never blocks the pipeline
+
+---
+
 ### CODE-REVIEW (Adversarial)
 **agent**: principal-engineer
 **description**: Adversarial code review — find the most serious flaw in the implementation

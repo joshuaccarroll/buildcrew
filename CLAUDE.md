@@ -3,7 +3,7 @@
 ## Architecture
 
 - The shell orchestrator (`lib/workflow.sh`) launches `claude -p` once per phase in **phase-isolated mode**.
-- Each phase is a separate skill: `skills/buildcrew-*/SKILL.md` (spec, research, review, build, codereview, test, outcome, verify).
+- Each phase is a separate skill: `skills/buildcrew-*/SKILL.md` (spec, research, review, build, simplify, codereview, test, outcome, verify).
 - All orchestrator↔Claude communication is **file-based only** — no pipes, no env vars, no return values.
 
 ## Signal Flow
@@ -26,6 +26,7 @@ An unknown verdict hits the catch-all and marks the task blocked:
 | research   | `complete`                                   |
 | review     | `approved`, `needs_revision`, `rejected`     |
 | build      | `complete`                                   |
+| simplify   | `complete`                                   |
 | codereview | `approved`, `needs_rebuild`                  |
 | test       | `approved`, `needs_rebuild`, `test_failure`  |
 | outcome    | `passed`, `partial`, `failed`                |
@@ -81,10 +82,11 @@ When context is compacted, always preserve:
 2. **research** — Explore codebase, write implementation plan
 3. **review** — 3-pass adversarial plan review
 4. **build** — Implement per plan
-5. **codereview** — Adversarial code review + elegance check; may request rebuild
-6. **test** — QA Engineer writes and runs tests
-7. **outcome** — Verify implementation against spec acceptance criteria
-8. **verify** — Security audit + commit
+5. **simplify** — Non-blocking review: apply targeted simplifications before formal review
+6. **codereview** — Adversarial code review + elegance check; may request rebuild
+7. **test** — QA Engineer writes and runs tests
+8. **outcome** — Verify implementation against spec acceptance criteria
+9. **verify** — Security audit + commit
 
 ## Modes
 

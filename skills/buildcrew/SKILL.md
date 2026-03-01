@@ -12,21 +12,21 @@ You are executing an autonomous development workflow. Follow each phase in order
 ## Workflow Overview
 
 ```
-┌───────────┐   ┌─────────┐   ┌─────────────┐   ┌─────────┐   ┌─────────────┐
-│1.RESEARCH │──▶│ 2.PLAN  │──▶│3.PLAN REVIEW│──▶│ 4.BUILD │──▶│5.CODE REVIEW│
-└───────────┘   └─────────┘   │ (3-Pass:    │   │(Feature │   │ (Principal) │
-                               │  PE→PM→PE)  │   │Engineer)│   └──────┬──────┘
-                               └─────────────┘   └────▲────┘          │
-                                                      │        ┌──────▼──────┐
-┌──────────┐   ┌──────────┐                          │        │ 6.REFACTOR  │
-│10.SIGNAL │◀──│ 9.COMMIT │                          │        │ or REBUILD  │
-└──────────┘   └──────────┘                          │        └──────┬──────┘
-                    ▲                                 │               │
-              ┌─────┴──────┐                         └───────────────┘
-              │ 8.VERIFY   │                         (REBUILD loops to BUILD)
+┌───────────┐   ┌─────────┐   ┌─────────────┐   ┌─────────┐   ┌──────────┐   ┌─────────────┐
+│1.RESEARCH │──▶│ 2.PLAN  │──▶│3.PLAN REVIEW│──▶│ 4.BUILD │──▶│5.SIMPLIFY│──▶│6.CODE REVIEW│
+└───────────┘   └─────────┘   │ (3-Pass:    │   │(Feature │   │(non-blk) │   │ (Principal) │
+                               │  PE→PM→PE)  │   │Engineer)│   └──────────┘   └──────┬──────┘
+                               └─────────────┘   └────▲────┘                         │
+                                                      │                       ┌──────▼──────┐
+┌──────────┐   ┌───────────┐                         │                       │ 7.REFACTOR  │
+│11.SIGNAL │◀──│ 10.COMMIT │                         │                       │ or REBUILD  │
+└──────────┘   └───────────┘                         │                       └──────┬──────┘
+                    ▲                                 │                              │
+              ┌─────┴──────┐                         └──────────────────────────────┘
+              │ 9.VERIFY   │                         (REBUILD loops to BUILD)
               │(BLOCKING)  │
               │- Tests     │   ┌─────────────┐
-              │- Code Rev  │◀──│ 7.TEST      │
+              │- Code Rev  │◀──│ 8.TEST      │
               │- Security  │   │(QA Engineer)│
               └────────────┘   └─────────────┘
 ```
@@ -473,6 +473,40 @@ After implementing changes, update `README.md` to reflect the actual implementat
 - Add or revise feature descriptions based on what was actually built
 - Update usage examples if API or CLI interfaces changed
 - Keep the "Current Status" section accurate
+
+---
+
+## SIMPLIFY (Non-blocking)
+
+**Goal**: Review changed code for reuse, complexity, and efficiency through 3 parallel sub-agents. Apply targeted fixes for HIGH-severity findings. Always proceed to CODE-REVIEW after this phase.
+
+### Step 1 — Discover Changed Files
+
+Run `git diff --name-only HEAD`. Read the actual files.
+
+### Step 2 — Dispatch 3 Parallel Sub-Agents
+
+In a **single response**, spawn all 3 Task sub-agents (general-purpose type) simultaneously:
+
+- **Reuse Analyst** — finds duplicated logic, missed shared helpers, copy-paste patterns. Writes to `.claude/simplify-reuse.md`.
+- **Quality Analyst** — finds collapsible conditionals, over-abstraction, dead code, readability issues. Writes to `.claude/simplify-quality.md`.
+- **Efficiency Analyst** — finds repeated operations in loops, unnecessary allocations, redundant iterations. Writes to `.claude/simplify-efficiency.md`.
+
+Each sub-agent prompt must specify: persona, `git diff` as input discovery, numbered evaluation criteria, output file path, 60-line limit, read-only constraint, and `REVIEW COMPLETE` closing signal. See `buildcrew-simplify/SKILL.md` for the exact prompts.
+
+### Step 3 — Verify Output
+
+After all sub-agents complete, verify each file exists. If a file is missing, log a warning and continue.
+
+### Step 4 — Apply HIGH-Severity Findings
+
+For each HIGH-severity finding across all 3 reports: apply a surgical Edit (specific lines only). Skip findings requiring more than ~10 lines of change — defer those to code-review and note in the report.
+
+### Step 5 — Write Report
+
+Write `.claude/simplify-report.md` with sections for each analyst's HIGH findings, changes applied, and deferred items.
+
+This phase is **non-blocking** — always proceed to CODE-REVIEW.
 
 ---
 
@@ -1021,6 +1055,10 @@ Remove temporary files:
 - `.claude/research.md`
 - `.claude/current-plan.md`
 - `.claude/plan-review.md`
+- `.claude/simplify-report.md`
+- `.claude/simplify-reuse.md`
+- `.claude/simplify-quality.md`
+- `.claude/simplify-efficiency.md`
 - `.claude/code-review.md`
 - `.claude/current-test-plan.md`
 - `.claude/test-report.md`

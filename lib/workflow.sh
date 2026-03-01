@@ -7,11 +7,12 @@
 # This script orchestrates BuildCrew's execution mode — the autonomous development
 # pipeline. It reads tasks from BACKLOG.md and processes each one through phase groups:
 #
-# Phase-isolated mode (up to 8 separate Claude invocations):
+# Phase-isolated mode (up to 9 separate Claude invocations):
 #   spec (optional, skipped with --skip-spec)
 #   research + plan
 #   plan-review (3-pass)
 #   build
+#   simplify (non-blocking — review and apply targeted simplifications)
 #   codereview (adversarial PE review — independent phase)
 #   test
 #   outcome (validates against spec acceptance criteria)
@@ -132,6 +133,7 @@ get_phase_max_turns() {
         research)   echo 40 ;;
         review)     echo 50 ;;
         build)      echo 50 ;;
+        simplify)   echo 30 ;;
         codereview) echo 40 ;;
         test)       echo 60 ;;
         outcome)    echo 40 ;;
@@ -268,6 +270,14 @@ parse_args() {
 # ─────────────────────────────────────────────────────────────────────────────────
 # Workflow-specific helpers
 # ─────────────────────────────────────────────────────────────────────────────────
+
+# Run the simplify phase if the skill is installed. Always non-blocking (|| true).
+# Must only be called from within complexity-gated else branches (i.e. not for trivial/simple tasks).
+run_optional_simplify() {
+    local task="$1" context="$2"
+    [[ -d ".claude/skills/buildcrew-simplify" ]] || return 0
+    run_phase_group "simplify" "$task" "$context" || true
+}
 
 print_task_start() {
     echo -e "\n${YELLOW}───────────────────────────────────────────────────────────────${NC}"
@@ -2082,6 +2092,11 @@ process_task_isolated() {
                 clear_task_progress; return 1
             fi
 
+            # --- simplify (non-blocking) ---
+            if [[ "$task_complexity" != "trivial" && "$task_complexity" != "simple" ]]; then
+                run_optional_simplify "$task" "${__spec_context}"
+            fi
+
             # --- code review (independent phase) ---
             local cr_verdict
             if [[ "$task_complexity" == "trivial" || "$task_complexity" == "simple" ]]; then
@@ -2316,6 +2331,7 @@ process_task_isolated() {
                         if [[ "$task_complexity" == "trivial" || "$task_complexity" == "simple" ]]; then
                             cr_verdict="approved"
                         else
+                            run_optional_simplify "$task" "${__spec_context}"
                             run_phase_group "codereview" "$task" "${__spec_context}" || { mark_task_blocked "$task" "codereview phase failed to produce a valid result"; clear_task_progress; return 1; }
                             cr_verdict=$(jq -r '.verdict' "$PHASE_RESULT_FILE")
                         fi
@@ -2374,6 +2390,7 @@ process_task_isolated() {
                     if [[ "$task_complexity" == "trivial" || "$task_complexity" == "simple" ]]; then
                         cr_verdict="approved"
                     else
+                        run_optional_simplify "$task" "${__spec_context}"
                         run_phase_group "codereview" "$task" "${__spec_context}" || { mark_task_blocked "$task" "codereview phase failed to produce a valid result"; clear_task_progress; return 1; }
                         cr_verdict=$(jq -r '.verdict' "$PHASE_RESULT_FILE")
                     fi
@@ -2453,8 +2470,13 @@ process_task_isolated() {
                             "Rebuilt with targeted fix for $failing issues" \
                             "Always run the full verify check before considering a build complete"
                         run_phase_group "build" "$task" "$rebuild_context" || { mark_task_blocked "$task" "build phase failed during verify fix"; clear_task_progress; return 1; }
-                        run_phase_group "codereview" "$task" "${__spec_context}" || { mark_task_blocked "$task" "codereview phase failed to produce a valid result"; clear_task_progress; return 1; }
-                        cr_verdict=$(jq -r '.verdict' "$PHASE_RESULT_FILE")
+                        if [[ "$task_complexity" == "trivial" || "$task_complexity" == "simple" ]]; then
+                            cr_verdict="approved"
+                        else
+                            run_optional_simplify "$task" "${__spec_context}"
+                            run_phase_group "codereview" "$task" "${__spec_context}" || { mark_task_blocked "$task" "codereview phase failed to produce a valid result"; clear_task_progress; return 1; }
+                            cr_verdict=$(jq -r '.verdict' "$PHASE_RESULT_FILE")
+                        fi
                         if [[ "$cr_verdict" == "needs_rebuild" ]]; then
                             mark_task_blocked "$task" "Code review rejected rebuild at verify stage"
                             clear_task_progress; return 1
@@ -2528,6 +2550,7 @@ main() {
         local _phase_count=6
         [[ "$SKIP_SPEC" != "true" ]] && [[ -d ".claude/skills/buildcrew-spec" ]] && _phase_count=$((_phase_count + 1))
         [[ -d ".claude/skills/buildcrew-outcome" ]] && _phase_count=$((_phase_count + 1))
+        [[ -d ".claude/skills/buildcrew-simplify" ]] && _phase_count=$((_phase_count + 1))
         print_info "Mode: Phase-isolated ($_phase_count invocations per task)"
     fi
     print_debug "Flags: skip_spec=$SKIP_SPEC strict=$STRICT_MODE review=$HUMAN_REVIEW branch=$GIT_BRANCH resume=$RESUME_MODE full_pipeline=$FULL_PIPELINE complexity_aware=$COMPLEXITY_AWARE auto=$AUTO_MODE"
@@ -2661,6 +2684,9 @@ main() {
                         fi
                         if [[ -d ".claude/skills/buildcrew-outcome" ]]; then
                             phase_list="${phase_list/test verify/test outcome verify}"
+                        fi
+                        if [[ -d ".claude/skills/buildcrew-simplify" ]]; then
+                            phase_list="${phase_list/build codereview/build simplify codereview}"
                         fi
                         ;;
                 esac

@@ -143,9 +143,9 @@ If you're starting fresh, Discovery mode runs automatically. Once it creates you
 │                         BuildCrew Pipeline                         │
 ├───────────────────────────────────────────────────────────────────┤
 │                                                                    │
-│   SPEC ──► RESEARCH+PLAN ──► PLAN REVIEW ──► BUILD                │
-│   (PM)     (Research Agent)   (3-Pass:        (Feature)            │
-│                               adversarial)                         │
+│   SPEC ──► RESEARCH+PLAN ──► PLAN REVIEW ──► BUILD ──► SIMPLIFY   │
+│   (PM)     (Research Agent)   (3-Pass:        (Feature) (non-      │
+│                               adversarial)              blocking)  │
 │                                                                    │
 │   COMMIT ◄── VERIFY ◄── OUTCOME ◄── TEST ◄── CODE REVIEW          │
 │              (Security   (Acceptance   (QA)   (adversarial         │
@@ -154,7 +154,7 @@ If you're starting fresh, Discovery mode runs automatically. Once it creates you
 └───────────────────────────────────────────────────────────────────┘
 ```
 
-Each task runs through **up to 8 distinct phases** (each a separate, isolated Claude invocation), keeping context focused per phase. Total invocations are bounded by `MAX_INVOCATIONS` (default: 15) — retries, chunked builds, and re-plans all count toward this ceiling:
+Each task runs through **up to 9 distinct phases** (each a separate, isolated Claude invocation), keeping context focused per phase. Total invocations are bounded by `MAX_INVOCATIONS` (default: 15) — retries, chunked builds, and re-plans all count toward this ceiling:
 
 | # | Phase | Description |
 |---|-------|-------------|
@@ -162,10 +162,11 @@ Each task runs through **up to 8 distinct phases** (each a separate, isolated Cl
 | 2 | Research + Plan | Gather context, create implementation plan |
 | 3 | Plan Review (3-pass) | Adversarial review: find the most serious flaw |
 | 4 | Build | Feature Engineer implements the plan |
-| 5 | Code Review | Adversarial review + elegance check; may request rebuild |
-| 6 | Test | QA Engineer writes and runs tests |
-| 7 | Outcome Verification | QA validates each acceptance criterion from the spec |
-| 8 | Verify (incl. Security Audit) + Commit | Final gate; Security blocks commit |
+| 5 | Simplify | Non-blocking: review and apply targeted simplifications before formal review |
+| 6 | Code Review | Adversarial review + elegance check; may request rebuild |
+| 7 | Test | QA Engineer writes and runs tests |
+| 8 | Outcome Verification | QA validates each acceptance criterion from the spec |
+| 9 | Verify (incl. Security Audit) + Commit | Final gate; Security blocks commit |
 
 **Key features:**
 - **Specification first** - PM writes testable acceptance criteria before any code is planned; after each spec, BuildCrew pauses for you to review and approve (or edit) the acceptance criteria before proceeding — pass `--auto` to skip this pause
