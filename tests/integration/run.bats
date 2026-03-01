@@ -142,3 +142,78 @@ EOF
     run "$BUILDCREW_HOME/lib/workflow.sh" --dry-run --single
     [ "$status" -eq 0 ]
 }
+
+# ─────────────────────────────────────────────────────────────────────────────
+# --batch flag tests
+# ─────────────────────────────────────────────────────────────────────────────
+
+@test "run: --batch --single exits with error" {
+    echo "- [ ] Test task" > BACKLOG.md
+    git init && git config user.email "t@t.t" && git config user.name "T"
+    run "$BUILDCREW_HOME/lib/workflow.sh" --batch --single
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"--batch cannot be combined with --single"* ]]
+}
+
+@test "run: --batch --task exits with error" {
+    echo "- [ ] Test task" > BACKLOG.md
+    git init && git config user.email "t@t.t" && git config user.name "T"
+    run "$BUILDCREW_HOME/lib/workflow.sh" --batch --task "some task"
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"--batch cannot be combined"* ]]
+}
+
+@test "run: --batch --resume exits with error" {
+    echo "- [ ] Test task" > BACKLOG.md
+    git init && git config user.email "t@t.t" && git config user.name "T"
+    run "$BUILDCREW_HOME/lib/workflow.sh" --batch --resume
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"--batch cannot be combined with --resume"* ]]
+}
+
+@test "run: --batch with empty backlog exits with error" {
+    echo "# No tasks" > BACKLOG.md
+    git init && git config user.email "t@t.t" && git config user.name "T"
+    run "$BUILDCREW_HOME/lib/workflow.sh" --batch
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"No pending tasks"* ]]
+}
+
+@test "run: --batch with all tasks complete exits with error" {
+    echo "- [x] Done task" > BACKLOG.md
+    git init && git config user.email "t@t.t" && git config user.name "T"
+    run "$BUILDCREW_HOME/lib/workflow.sh" --batch
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"No pending tasks"* ]]
+}
+
+@test "run: --batch outside git repo exits with error about git" {
+    echo "- [ ] Test task" > BACKLOG.md
+    # TEST_DIR is not a git repo (setup_test_dir uses mktemp, no git init)
+    run "$BUILDCREW_HOME/lib/workflow.sh" --batch
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"git repository"* ]]
+}
+
+@test "run: --batch --dry-run shows task list and count" {
+    cat > BACKLOG.md << 'EOF'
+- [ ] Task one
+- [ ] Task two
+- [ ] Task three
+EOF
+    git init && git config user.email "t@t.t" && git config user.name "T"
+    run "$BUILDCREW_HOME/lib/workflow.sh" --batch --dry-run
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"3 tasks"* ]]
+    [[ "$output" == *"Task one"* ]]
+    [[ "$output" == *"Task two"* ]]
+    [[ "$output" == *"Task three"* ]]
+}
+
+@test "run: --batch --review prints warning and no error" {
+    echo "- [ ] Test task" > BACKLOG.md
+    git init && git config user.email "t@t.t" && git config user.name "T"
+    run "$BUILDCREW_HOME/lib/workflow.sh" --batch --review --dry-run
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"--review has no effect"* ]]
+}

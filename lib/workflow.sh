@@ -160,6 +160,8 @@ STRICT_MODE=true
 STRICT_EXPLICIT=false   # true only when --strict or --no-strict is passed explicitly
 VERBOSE=false
 FULL_PIPELINE=false
+BATCH_MODE=false
+BATCH_MAX_TURNS=200
 
 if command -v python3 &>/dev/null; then
     __ACTIVITY_TRACKING=true
@@ -225,6 +227,10 @@ parse_args() {
                 AUTO_MODE=true
                 shift
                 ;;
+            --batch)
+                BATCH_MODE=true
+                shift
+                ;;
             --keep-logs)
                 KEEP_LOGS=true
                 shift
@@ -254,6 +260,7 @@ parse_args() {
                 echo "  --full-pipeline  Force all phases regardless of complexity assessment"
                 echo "  --auto       Run fully unattended — auto-approve all interactive pauses"
                 echo "  --keep-logs  Retain the activity log after a successful run (log is always kept on failure)"
+                echo "  --batch      Delegate pending tasks to /batch for parallel execution"
                 echo "  --verbose    Show orchestrator decisions, phase verdicts, and invocation counts"
                 echo "  --debug      Alias for --verbose"
                 echo "  --help, -h   Show this help message"
@@ -352,6 +359,95 @@ enter_discovery_mode() {
     if [[ "$KEEP_LOGS" != "true" ]]; then
         rm -f "$__LOG_FILE"
     fi
+    trap - EXIT INT TERM
+    exit 0
+}
+
+# Build the prompt string for /batch delegation
+_build_batch_prompt() {
+    local task_list="$1"
+    local prompt
+    prompt="You have ${__BATCH_TASK_COUNT} tasks to process in parallel using /batch."
+    prompt+=$'\n\n'"Here are the tasks:"$'\n\n'"${task_list}"
+    prompt+=$'\n\n'"Each task should be implemented, tested, and opened as a PR."
+    prompt+=$'\n'"The tasks come from the project backlog at: ${BACKLOG_FILE}"
+    prompt+=$'\n\n'"Use /batch now to execute these tasks."
+
+    local project_context
+    project_context=$(load_project_context)
+    if [[ -n "$project_context" ]]; then
+        prompt+=$'\n\nProject Context:\n'"$project_context"
+    fi
+
+    echo "$prompt"
+}
+
+__BATCH_HEARTBEAT_PID=""
+
+_batch_cleanup() {
+    if [[ -n "${__BATCH_HEARTBEAT_PID:-}" ]]; then
+        kill "$__BATCH_HEARTBEAT_PID" 2>/dev/null || true
+        wait "$__BATCH_HEARTBEAT_PID" 2>/dev/null || true
+    fi
+    rm -f ".buildcrew/.agent-activity"
+    clear_workflow_state
+    rm -f "$LOCKFILE"
+}
+
+enter_batch_mode() {
+    local task_list="$1"
+    # Lockfile + log already created by caller (main batch branch)
+    __WF_TASK_NUM=0
+    __WF_TOTAL_TASKS=0
+    __WF_TASK_NAME="Batch mode"
+    __INVOCATION_COUNT=0
+    update_workflow_state "batch" "running"
+    trap '_batch_cleanup' EXIT INT TERM
+
+    # Heartbeat for dashboard visibility
+    ( while kill -0 $$ 2>/dev/null; do sleep 5; update_workflow_state "batch" "running"; done ) &
+    __BATCH_HEARTBEAT_PID=$!
+
+    # Build and execute
+    local prompt
+    prompt=$(_build_batch_prompt "$task_list")
+    if [[ -n "$__LOG_FILE" ]]; then
+        log_msg "--- batch claude output start ---"
+        if [[ "$__ACTIVITY_TRACKING" == "true" ]]; then
+            claude -p "$prompt" --max-turns $BATCH_MAX_TURNS --output-format stream-json --verbose 2>&1 \
+                | python3 "$BUILDCREW_HOME/lib/stream_processor.py" --activity-file ".buildcrew/.agent-activity" --max-turns $BATCH_MAX_TURNS \
+                | tee -a "$__LOG_FILE" || true
+        else
+            claude -p "$prompt" --max-turns $BATCH_MAX_TURNS 2>&1 | tee -a "$__LOG_FILE" || true
+        fi
+        log_msg "--- batch claude output end ---"
+    else
+        if [[ "$__ACTIVITY_TRACKING" == "true" ]]; then
+            claude -p "$prompt" --max-turns $BATCH_MAX_TURNS --output-format stream-json --verbose 2>&1 \
+                | python3 "$BUILDCREW_HOME/lib/stream_processor.py" --activity-file ".buildcrew/.agent-activity" --max-turns $BATCH_MAX_TURNS || true
+        else
+            claude -p "$prompt" --max-turns $BATCH_MAX_TURNS || true
+        fi
+    fi
+
+    # Inline cleanup (normal exit path)
+    kill "$__BATCH_HEARTBEAT_PID" 2>/dev/null || true
+    wait "$__BATCH_HEARTBEAT_PID" 2>/dev/null || true
+    __BATCH_HEARTBEAT_PID=""
+    rm -f ".buildcrew/.agent-activity"
+    clear_workflow_state
+    rm -f "$LOCKFILE"
+
+    # Post-batch advisory
+    print_header "Batch Execution Complete"
+    print_info "Tasks were processed in parallel via /batch."
+    print_info "Review opened PRs and update BACKLOG.md to mark tasks complete."
+    print_info "Run 'buildcrew status' to check current backlog state."
+
+    if [[ "$KEEP_LOGS" != "true" ]]; then
+        rm -f "$__LOG_FILE"
+    fi
+
     trap - EXIT INT TERM
     exit 0
 }
@@ -736,6 +832,16 @@ check_prerequisites() {
 # Get the next uncompleted task from the backlog
 get_next_task() {
     grep -m1 '^\- \[ \]' "$BACKLOG_FILE" 2>/dev/null | sed 's/^- \[ \] //' || echo ""
+}
+
+# Collect all pending tasks into __BATCH_TASK_LIST (global) and set __BATCH_TASK_COUNT.
+# Must NOT be called via command substitution — subshell would lose both globals.
+gather_pending_tasks() {
+    __BATCH_TASK_LIST=$(grep '^\- \[ \]' "$BACKLOG_FILE" 2>/dev/null \
+        | sed 's/^- \[ \] //' \
+        | sed -E 's/[[:space:]]*\{(trivial|simple|standard)\}[[:space:]]*$//' \
+        | awk '{printf "%2d. %s\n", NR, $0}') || __BATCH_TASK_LIST=""
+    __BATCH_TASK_COUNT=$(echo "$__BATCH_TASK_LIST" | awk 'NF {n++} END {print n+0}')
 }
 
 # Get a specific task by name or number
@@ -2529,6 +2635,89 @@ main() {
         fi
         # Stale lockfile — previous run crashed
         rm -f "$LOCKFILE"
+    fi
+
+    if [[ "$BATCH_MODE" == "true" ]]; then
+        # Batch mode has its own prerequisite/validation path
+
+        # 1. Validate flag compatibility (cheapest checks first)
+        if [[ "$SINGLE_TASK" == "true" ]] || [[ -n "$TARGET_TASK" ]]; then
+            print_error "--batch cannot be combined with --single or --task"
+            exit 1
+        fi
+        if [[ "$RESUME_MODE" == "true" ]]; then
+            print_error "--batch cannot be combined with --resume (no phase progress to resume)"
+            exit 1
+        fi
+        if [[ "$HUMAN_REVIEW" == "true" ]]; then
+            print_warning "--review has no effect with --batch (no human review gate in /batch)"
+        fi
+        if [[ "$GIT_BRANCH" == "true" ]]; then
+            print_warning "--branch has no effect with --batch (/batch creates its own branches)"
+        fi
+
+        # 2. Check for claude and jq (same as check_prerequisites, minus discovery logic)
+        if ! command -v claude &>/dev/null; then
+            print_error "Claude Code CLI not found. Please install it first."
+            exit 1
+        fi
+        if ! command -v jq &>/dev/null; then
+            print_error "jq not found. Please install it (brew install jq)"
+            exit 1
+        fi
+
+        # 3. Git is required (/batch uses worktrees)
+        if ! git rev-parse --is-inside-work-tree &>/dev/null 2>&1; then
+            print_error "Batch mode requires a git repository (/batch uses worktrees)"
+            exit 1
+        fi
+
+        # 4. Gather and validate pending tasks
+        gather_pending_tasks
+        if [[ "$__BATCH_TASK_COUNT" -eq 0 ]]; then
+            print_error "No pending tasks in $BACKLOG_FILE to batch"
+            exit 1
+        fi
+        local task_list="$__BATCH_TASK_LIST"
+
+        # 5. Advisory messages
+        if [[ "$__BATCH_TASK_COUNT" -eq 1 ]]; then
+            print_info "Only 1 pending task -- batch mode will still work, but sequential mode may be more thorough"
+        fi
+        if [[ "$__BATCH_TASK_COUNT" -gt 30 ]]; then
+            print_warning "Backlog has $__BATCH_TASK_COUNT tasks. /batch typically handles up to ~30."
+            if [[ "$AUTO_MODE" != "true" ]] && [[ -t 0 ]]; then
+                echo -e "  ${BOLD}[Enter]${NC} Continue  |  ${BOLD}[q]${NC} Quit"
+                read -r batch_response
+                if [[ "$batch_response" == "q" || "$batch_response" == "Q" ]]; then
+                    exit 0
+                fi
+            fi
+        fi
+
+        # 6. Dry-run support
+        if [[ "$DRY_RUN" == "true" ]]; then
+            print_header "Batch Mode (Dry Run)"
+            print_info "Would delegate $__BATCH_TASK_COUNT tasks to /batch:"
+            echo ""
+            echo "$task_list"
+            echo ""
+            exit 0
+        fi
+
+        # 7. Setup and execute
+        mkdir -p .buildcrew
+        log_init
+        log_msg "Batch mode: $__BATCH_TASK_COUNT tasks"
+        print_info "Activity log: $__LOG_FILE"
+        echo $$ > "$LOCKFILE"
+
+        print_header "Batch Mode"
+        print_info "Delegating $__BATCH_TASK_COUNT tasks to /batch for parallel execution"
+        print_debug "Flags: verbose=$VERBOSE keep_logs=$KEEP_LOGS auto=$AUTO_MODE"
+
+        enter_batch_mode "$task_list"
+        # enter_batch_mode calls exit 0, control does not return here
     fi
 
     check_prerequisites
