@@ -1894,6 +1894,8 @@ process_task_isolated() {
     local __need_replan=false        # circuit breaker: set true to restart from research
     local __replan_context=""        # circuit breaker: failure context for re-plan prompt
     local build_attempt=0            # tracks total build attempts across build and outcome phases
+    local __lesson_instruction
+    __lesson_instruction="$(_lesson_writing_instruction)"
 
     # Resume or fresh start
     if [[ "$RESUME_MODE" == "true" ]] && load_task_progress; then
@@ -2207,7 +2209,7 @@ process_task_isolated() {
                 local prev_reason
                 prev_reason=$(jq -r '.details // "unknown"' "$PHASE_RESULT_FILE")
                 build_context="${build_context:+$build_context | }This is build attempt $build_attempt. Previous attempt failed: $prev_reason. Avoid the same mistakes."
-                build_context="$build_context"$'\n\n'"$(_lesson_writing_instruction)"
+                build_context="$build_context"$'\n\n'"$__lesson_instruction"
             fi
 
             local build_result=0
@@ -2463,7 +2465,7 @@ process_task_isolated() {
                             "Rebuilt with targeted fix for failing criteria" \
                             "Partial acceptance at outcome stage means the implementation is incomplete — re-read the specific failing criteria in the spec"
                         ((build_attempt++))
-                        run_phase_group "build" "$task" "OUTCOME FIX: $partial_details | $__spec_context"$'\n\n'"$(_lesson_writing_instruction)" || { mark_task_blocked "$task" "build phase failed during outcome fix"; clear_task_progress; return 1; }
+                        run_phase_group "build" "$task" "OUTCOME FIX: $partial_details | $__spec_context"$'\n\n'"$__lesson_instruction" || { mark_task_blocked "$task" "build phase failed during outcome fix"; clear_task_progress; return 1; }
                         if [[ "$task_complexity" == "trivial" || "$task_complexity" == "simple" ]]; then
                             cr_verdict="approved"
                         else
@@ -2522,7 +2524,7 @@ process_task_isolated() {
                         "Rebuilt with targeted fix for failing criteria" \
                         "Always run the feature against its acceptance criteria before consider it done"
                     ((build_attempt++))
-                    run_phase_group "build" "$task" "OUTCOME FIX: $rebuild_ctx | $__spec_context"$'\n\n'"$(_lesson_writing_instruction)" || { mark_task_blocked "$task" "build phase failed during outcome fix"; clear_task_progress; return 1; }
+                    run_phase_group "build" "$task" "OUTCOME FIX: $rebuild_ctx | $__spec_context"$'\n\n'"$__lesson_instruction" || { mark_task_blocked "$task" "build phase failed during outcome fix"; clear_task_progress; return 1; }
                     if [[ "$task_complexity" == "trivial" || "$task_complexity" == "simple" ]]; then
                         cr_verdict="approved"
                     else
@@ -2605,7 +2607,7 @@ process_task_isolated() {
                             "Verify blocked on '$failing': $failure_details" \
                             "Rebuilt with targeted fix for $failing issues" \
                             "Always run the full verify check before considering a build complete"
-                        run_phase_group "build" "$task" "$rebuild_context"$'\n\n'"$(_lesson_writing_instruction)" || { mark_task_blocked "$task" "build phase failed during verify fix"; clear_task_progress; return 1; }
+                        run_phase_group "build" "$task" "$rebuild_context"$'\n\n'"$__lesson_instruction" || { mark_task_blocked "$task" "build phase failed during verify fix"; clear_task_progress; return 1; }
                         if [[ "$task_complexity" == "trivial" || "$task_complexity" == "simple" ]]; then
                             cr_verdict="approved"
                         else
