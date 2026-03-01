@@ -69,10 +69,10 @@ buildcrew run
 
 That's it. BuildCrew has two modes:
 
-- **Discovery mode** — if no `BACKLOG.md` exists (or all tasks are complete), the Product Manager launches and guides you through defining your project and creating a backlog.
+- **Discovery mode** — if no `BACKLOG.md` exists (or all tasks are complete), the Product Manager launches and guides you through defining your project and creating a backlog. Discovery uses an interview technique that probes edge cases, technical tradeoffs, failure modes, and security considerations — not just the basics.
 - **Execution mode** — once tasks are in your `BACKLOG.md` (as `- [ ] task description`), `buildcrew run` processes each one through the full persona pipeline.
 
-If you're starting fresh, Discovery mode runs automatically. Once it creates your backlog, run `buildcrew run` again to enter Execution mode.
+If you're starting fresh, Discovery mode runs automatically. Once it creates your backlog, run `buildcrew run` again to enter Execution mode. You can also run `buildcrew plan` at any time to re-enter Discovery mode — useful for planning new features or expanding scope on an existing project.
 
 **Ad-hoc usage:** Invoke any persona directly with `/buildcrew <persona>:<task>` (e.g., `/buildcrew security-engineer:audit the API endpoints`). Run `/buildcrew` alone to see available personas.
 
@@ -263,6 +263,7 @@ These files are optional. When present, the orchestrator automatically injects t
 buildcrew                    # Show help
 buildcrew init               # Link project to BuildCrew
 buildcrew run                # Run workflow on BACKLOG.md
+buildcrew plan               # Launch Product Manager to plan a new project or add scope
 buildcrew run --single       # Process one task and stop
 buildcrew run --dry-run      # Preview without executing
 buildcrew run --review       # Pause for human review before build — shows plan inline, opens editor
