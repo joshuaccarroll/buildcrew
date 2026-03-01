@@ -274,6 +274,7 @@ buildcrew run --resume       # Resume an interrupted task from where it left off
 buildcrew run --task N       # Target a specific task by name or number
 buildcrew run --auto         # Run fully unattended — auto-approve all interactive pauses
 buildcrew run --full-pipeline  # Force all phases regardless of complexity assessment
+buildcrew run --batch        # Delegate all pending tasks to /batch for parallel execution
 buildcrew run --keep-logs    # Retain the activity log after a successful run
 buildcrew run --max-invocations N  # Set max Claude invocations per run (default: 15)
 buildcrew run --verbose      # Show orchestrator decisions, phase verdicts, and invocation counts
@@ -311,6 +312,7 @@ buildcrew uninstall          # Remove BuildCrew
 | `--no-strict` | Allow partial acceptance criteria pass — unmet criteria trigger a warning but don't block the commit. |
 | `--full-pipeline` | Force all phases regardless of complexity assessment |
 | `--auto` | Run fully unattended — auto-approve all interactive pauses |
+| `--batch` | Delegate all pending BACKLOG.md tasks to `/batch` for parallel execution in isolated git worktrees. Incompatible with `--single`, `--task`, and `--resume`. |
 | `--keep-logs` | Retain the activity log after a successful run (the log is always kept on failure) |
 | `--max-invocations N` | Set max Claude invocations per run (default: 15) |
 | `--verbose` / `--debug` | Show orchestrator decisions, phase verdicts, and invocation counts |
@@ -353,7 +355,7 @@ buildcrew lessons promote 3    # Graduate lesson 3 to .buildcrew/rules/project-r
 buildcrew lessons prune        # Interactively review and delete stale lessons
 ```
 
-Lessons are capped at 100 entries. When exceeded, the oldest 50 are condensed into a summary "Patterns" section to keep context injection bounded.
+Lessons are capped at 25 entries. When exceeded, the oldest 10 are condensed into a summary "Patterns" section to keep context injection bounded. Duplicate rules are automatically skipped — if an identical rule already exists, the new lesson is silently dropped.
 
 ---
 
