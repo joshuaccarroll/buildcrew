@@ -99,6 +99,15 @@ load_buildcrew_config() {
                         fi
                     fi
                     ;;
+                MAX_PARALLEL)
+                    if [[ -z "${MAX_PARALLEL+x}" ]]; then
+                        if [[ "$value" =~ ^[1-9][0-9]*$ ]] && [[ ${#value} -le 2 ]]; then
+                            MAX_PARALLEL="$value"
+                        else
+                            echo "Warning: invalid MAX_PARALLEL in .buildcrew/config: $value (ignored, must be 1-99)" >&2
+                        fi
+                    fi
+                    ;;
                 # Add future config keys here
             esac
         fi
@@ -121,6 +130,7 @@ MAX_INVOCATIONS=${MAX_INVOCATIONS:-15}
 COMPLEXITY_AWARE=${COMPLEXITY_AWARE:-true}
 AUTO_MODE=${AUTO_MODE:-false}
 KEEP_LOGS=${KEEP_LOGS:-false}
+MAX_PARALLEL=${MAX_PARALLEL:-5}
 __INVOCATION_COUNT=0
 __RESUME_PHASES=""
 __DISCOVERY_HEARTBEAT_PID=""
@@ -244,6 +254,14 @@ parse_args() {
                 MAX_INVOCATIONS="$2"
                 shift 2
                 ;;
+            --max-parallel)
+                if [[ -z "${2:-}" ]] || ! [[ "$2" =~ ^[1-9][0-9]*$ ]] || [[ ${#2} -gt 2 ]]; then
+                    echo "Error: --max-parallel requires a positive integer (1-99)"
+                    exit 1
+                fi
+                MAX_PARALLEL="$2"
+                shift 2
+                ;;
             --help|-h)
                 echo "Usage: $0 [OPTIONS]"
                 echo ""
@@ -261,7 +279,8 @@ parse_args() {
                 echo "  --full-pipeline  Force all phases regardless of complexity assessment"
                 echo "  --auto       Run fully unattended — auto-approve all interactive pauses"
                 echo "  --keep-logs  Retain the activity log after a successful run (log is always kept on failure)"
-                echo "  --batch      Delegate pending tasks to /batch for parallel execution"
+                echo "  --batch      Run pending tasks in parallel using git worktrees"
+                echo "  --max-parallel N  Max concurrent tasks in batch mode (default: 5)"
                 echo "  --verbose    Show orchestrator decisions, phase verdicts, and invocation counts"
                 echo "  --debug      Alias for --verbose"
                 echo "  --help, -h   Show this help message"
@@ -368,93 +387,633 @@ enter_discovery_mode() {
     exit 0
 }
 
-# Build the prompt string for /batch delegation
-_build_batch_prompt() {
-    local task_list="$1"
-    local prompt
-    prompt="You have ${__BATCH_TASK_COUNT} tasks to process in parallel using /batch."
-    prompt+=$'\n\n'"Here are the tasks:"$'\n\n'"${task_list}"
-    prompt+=$'\n\n'"Each task should be implemented, tested, and opened as a PR."
-    prompt+=$'\n'"The tasks come from the project backlog at: ${BACKLOG_FILE}"
-    prompt+=$'\n\n'"Use /batch now to execute these tasks."
+# ─────────────────────────────────────────────────────────────────────────────────
+# Parallel batch mode — worktree-based parallel task execution
+# ─────────────────────────────────────────────────────────────────────────────────
 
-    local project_context
-    project_context=$(load_project_context)
-    if [[ -n "$project_context" ]]; then
-        prompt+=$'\n\nProject Context:\n'"$project_context"
-    fi
-
-    echo "$prompt"
-}
+BATCH_DIR=".buildcrew/batch"
+BATCH_MANIFEST="$BATCH_DIR/manifest.json"
+BATCH_WORKTREE_DIR="$BATCH_DIR/worktrees"
 
 __BATCH_HEARTBEAT_PID=""
 
-_batch_cleanup() {
+# Batch state arrays (indexed, bash 3.2 compatible — no declare -A)
+_batch_tasks=()
+_batch_slugs=()
+_batch_pids=()
+_batch_running=0
+_batch_completed=0
+_batch_failed=0
+_batch_next_idx=0
+_batch_start_time=0
+_batch_dashboard_lines=0
+
+# ── Manifest functions ────────────────────────────────────────────────────────
+
+# Initialize a new batch manifest.
+_batch_init_manifest() {
+    local base_branch="$1" base_commit="$2"
+    mkdir -p "$BATCH_DIR" "$BATCH_WORKTREE_DIR"
+    jq -n \
+        --arg id "$(date +%Y%m%d-%H%M%S)-$$" \
+        --arg branch "$base_branch" \
+        --arg commit "$base_commit" \
+        --argjson max "$MAX_PARALLEL" \
+        --arg started "$(date -u +%Y-%m-%dT%H:%M:%S)" \
+        '{batch_id: $id, base_branch: $branch, base_commit: $commit,
+          max_parallel: $max, started_at: $started, tasks: []}' \
+        > "$BATCH_MANIFEST.tmp" \
+        && mv "$BATCH_MANIFEST.tmp" "$BATCH_MANIFEST"
+}
+
+# Add a task entry to the manifest.
+_batch_add_task() {
+    local index="$1" text="$2" slug="$3"
+    local branch="buildcrew/$slug"
+    local worktree="$BATCH_WORKTREE_DIR/$slug"
+    jq --argjson idx "$index" \
+       --arg text "$text" \
+       --arg slug "$slug" \
+       --arg branch "$branch" \
+       --arg wt "$worktree" \
+       '.tasks += [{index: $idx, text: $text, slug: $slug, branch: $branch,
+                    worktree: $wt, status: "pending", exit_code: null,
+                    started_at: null, completed_at: null}]' \
+       "$BATCH_MANIFEST" > "$BATCH_MANIFEST.tmp" \
+       && mv "$BATCH_MANIFEST.tmp" "$BATCH_MANIFEST"
+}
+
+# Update a task's status in the manifest.
+_batch_mark_task() {
+    local index="$1" status="$2" exit_code="${3:-null}"
+    local ts
+    ts=$(date -u +%Y-%m-%dT%H:%M:%S)
+    if [[ "$status" == "running" ]]; then
+        jq --argjson idx "$index" \
+           --arg status "$status" \
+           --arg ts "$ts" \
+           '(.tasks[] | select(.index == $idx)) |= (.status = $status | .started_at = $ts)' \
+           "$BATCH_MANIFEST" > "$BATCH_MANIFEST.tmp" \
+           && mv "$BATCH_MANIFEST.tmp" "$BATCH_MANIFEST"
+    else
+        jq --argjson idx "$index" \
+           --arg status "$status" \
+           --arg ts "$ts" \
+           --argjson ec "$exit_code" \
+           '(.tasks[] | select(.index == $idx)) |= (.status = $status | .completed_at = $ts | .exit_code = $ec)' \
+           "$BATCH_MANIFEST" > "$BATCH_MANIFEST.tmp" \
+           && mv "$BATCH_MANIFEST.tmp" "$BATCH_MANIFEST"
+    fi
+}
+
+# Load manifest for resume. Returns 0 if valid manifest with incomplete tasks exists.
+_batch_load_manifest() {
+    [[ -f "$BATCH_MANIFEST" ]] || return 1
+    jq -e . "$BATCH_MANIFEST" >/dev/null 2>&1 || return 1
+    local incomplete
+    incomplete=$(jq '[.tasks[] | select(.status != "completed")] | length' "$BATCH_MANIFEST")
+    [[ "$incomplete" -gt 0 ]] || return 1
+    return 0
+}
+
+# Get the status of a task from the manifest.
+_batch_get_task_status() {
+    local manifest_idx="$1"
+    jq -r --argjson idx "$manifest_idx" \
+        '.tasks[] | select(.index == $idx) | .status' "$BATCH_MANIFEST" 2>/dev/null || echo "unknown"
+}
+
+# ── Worktree management ──────────────────────────────────────────────────────
+
+# Create a git worktree for a task. Returns 0 on success, 1 on failure.
+_batch_create_worktree() {
+    local slug="$1" base_branch="$2"
+    local worktree_path="$BATCH_WORKTREE_DIR/$slug"
+    local branch_name="buildcrew/$slug"
+
+    # Clean up stale branch/worktree from previous run
+    if git rev-parse --verify "$branch_name" >/dev/null 2>&1; then
+        git branch -D "$branch_name" 2>/dev/null || true
+    fi
+    if [[ -d "$worktree_path" ]]; then
+        git worktree remove --force "$worktree_path" 2>/dev/null || true
+    fi
+
+    # Create worktree with new branch
+    if ! git worktree add -b "$branch_name" "$worktree_path" "$base_branch" 2>/dev/null; then
+        return 1
+    fi
+
+    # Copy skills (preserving symlinks)
+    if [[ -d ".claude/skills" ]] || [[ -L ".claude/skills" ]]; then
+        mkdir -p "$worktree_path/.claude"
+        cp -a ".claude/skills" "$worktree_path/.claude/skills"
+    fi
+
+    # Copy settings files
+    local f
+    for f in .claude/settings.json .claude/settings.local.json .claude/.buildcrew-link; do
+        if [[ -f "$f" ]]; then
+            mkdir -p "$worktree_path/$(dirname "$f")"
+            cp "$f" "$worktree_path/$f" 2>/dev/null || true
+        fi
+    done
+
+    # Copy buildcrew config and context (NOT lock, state, or batch dir)
+    mkdir -p "$worktree_path/.buildcrew"
+    if [[ -f ".buildcrew/config" ]]; then
+        cp ".buildcrew/config" "$worktree_path/.buildcrew/config"
+    fi
+    if [[ -f ".buildcrew/lessons.md" ]]; then
+        cp ".buildcrew/lessons.md" "$worktree_path/.buildcrew/lessons.md"
+    fi
+    if [[ -d ".buildcrew/context" ]]; then
+        cp -R ".buildcrew/context" "$worktree_path/.buildcrew/context"
+    fi
+
+    # Create logs dir in worktree for child output
+    mkdir -p "$worktree_path/.buildcrew/logs"
+
+    return 0
+}
+
+# Remove a worktree (keeps the branch for review).
+_batch_remove_worktree() {
+    local slug="$1"
+    git worktree remove --force "$BATCH_WORKTREE_DIR/$slug" 2>/dev/null || true
+}
+
+# Clean up worktrees for completed tasks only.
+_batch_cleanup_completed_worktrees() {
+    [[ -f "$BATCH_MANIFEST" ]] || return 0
+    local slug
+    while IFS= read -r slug; do
+        [[ -n "$slug" ]] && _batch_remove_worktree "$slug"
+    done < <(jq -r '.tasks[] | select(.status == "completed") | .slug' "$BATCH_MANIFEST")
+}
+
+# ── Task launch and pool management ──────────────────────────────────────────
+
+# Launch a single task in its worktree as a background process.
+_batch_launch_task() {
+    local idx="$1"
+    local task="${_batch_tasks[$idx]}"
+    local slug="${_batch_slugs[$idx]}"
+    local worktree="$BATCH_WORKTREE_DIR/$slug"
+    local manifest_idx=$((idx + 1))
+
+    _batch_mark_task "$manifest_idx" "running"
+
+    (
+        cd "$worktree" || exit 1
+        export BUILDCREW_BATCH_NONCE="${slug}-${idx}"
+        export BUILDCREW_HOME
+        exec "$BUILDCREW_HOME/lib/workflow.sh" \
+            --single --task "$task" --auto \
+            --max-invocations "$MAX_INVOCATIONS" \
+            ${KEEP_LOGS:+--keep-logs} \
+            ${SKIP_SPEC:+--skip-spec} \
+            ${FULL_PIPELINE:+--full-pipeline} \
+            ${VERBOSE:+--verbose} \
+            > ".buildcrew/logs/batch-${slug}.log" 2>&1
+    ) &
+    _batch_pids[$idx]=$!
+    _batch_running=$(( _batch_running + 1 ))
+
+    log_msg "Launched task $manifest_idx: '$task' (PID=${_batch_pids[$idx]}, worktree=$worktree)"
+}
+
+# Check all running tasks for completion. Handles results.
+_batch_poll_tasks() {
+    local i
+    for i in "${!_batch_pids[@]}"; do
+        local pid="${_batch_pids[$i]:-}"
+        [[ -z "$pid" ]] && continue
+        if ! kill -0 "$pid" 2>/dev/null; then
+            local exit_code=0
+            wait "$pid" 2>/dev/null || exit_code=$?
+            _batch_pids[$i]=""
+            _batch_running=$(( _batch_running - 1 ))
+            local manifest_idx=$((i + 1))
+            local task_text="${_batch_tasks[$i]}"
+            if [[ $exit_code -eq 0 ]]; then
+                _batch_mark_task "$manifest_idx" "completed" "0"
+                _batch_completed=$(( _batch_completed + 1 ))
+                log_msg "Task $manifest_idx completed: '$task_text'"
+            else
+                _batch_mark_task "$manifest_idx" "failed" "$exit_code"
+                _batch_failed=$(( _batch_failed + 1 ))
+                log_msg "Task $manifest_idx failed (exit=$exit_code): '$task_text'"
+            fi
+        fi
+    done
+}
+
+# Display a compact status dashboard.
+_batch_refresh_dashboard() {
+    # Clear previous dashboard lines
+    if (( _batch_dashboard_lines > 0 )); then
+        printf '\033[%dA\033[J' "$_batch_dashboard_lines"
+    fi
+
+    local now elapsed elapsed_str total pending
+    now=$(date +%s)
+    elapsed=$(( now - _batch_start_time ))
+    elapsed_str=$(printf '%dm%02ds' $((elapsed / 60)) $((elapsed % 60)))
+    total=${#_batch_tasks[@]}
+    pending=$(( total - _batch_completed - _batch_failed - _batch_running ))
+
+    echo -e "${BLUE}═══ Batch Status ($elapsed_str) ═════════════════════════════════════${NC}"
+    echo -e "  Running: ${GREEN}$_batch_running${NC}/$MAX_PARALLEL  |  Done: ${GREEN}$_batch_completed${NC}  |  Failed: ${RED}$_batch_failed${NC}  |  Pending: $pending  |  Total: $total"
+
+    local lines=2
+    # Show status for each running task
+    local i
+    for i in "${!_batch_pids[@]}"; do
+        local pid="${_batch_pids[$i]:-}"
+        [[ -z "$pid" ]] && continue
+        local slug="${_batch_slugs[$i]}"
+        local phase="starting"
+        local state_file="$BATCH_WORKTREE_DIR/$slug/.buildcrew/.workflow-state"
+        if [[ -f "$state_file" ]]; then
+            local key val
+            while IFS='=' read -r key val; do
+                [[ "$key" == "PHASE" ]] && { phase="$val"; break; }
+            done < "$state_file"
+        fi
+        local task_short="${_batch_tasks[$i]}"
+        if (( ${#task_short} > 50 )); then
+            task_short="${task_short:0:47}..."
+        fi
+        echo -e "  ${CYAN}[$((i + 1))]${NC} $task_short  ${YELLOW}[$phase]${NC}"
+        (( lines++ )) || true
+    done
+    echo -e "${BLUE}═════════════════════════════════════════════════════════════════${NC}"
+    (( lines++ )) || true
+    _batch_dashboard_lines=$lines
+}
+
+# ── Cleanup and post-completion ───────────────────────────────────────────────
+
+# Start a background heartbeat that updates workflow state every 5 seconds.
+_batch_start_heartbeat() {
+    ( while kill -0 $$ 2>/dev/null; do sleep 5; update_workflow_state "batch" "running"; done ) &
+    __BATCH_HEARTBEAT_PID=$!
+}
+
+# Stop the batch heartbeat process.
+_batch_stop_heartbeat() {
     if [[ -n "${__BATCH_HEARTBEAT_PID:-}" ]]; then
         kill "$__BATCH_HEARTBEAT_PID" 2>/dev/null || true
         wait "$__BATCH_HEARTBEAT_PID" 2>/dev/null || true
+        __BATCH_HEARTBEAT_PID=""
     fi
-    rm -f ".buildcrew/.agent-activity"
-    clear_workflow_state
-    rm -f "$LOCKFILE"
 }
 
-enter_batch_mode() {
-    local task_list="$1"
-    # Lockfile + log already created by caller (main batch branch)
-    __WF_TASK_NUM=0
-    __WF_TOTAL_TASKS=0
-    __WF_TASK_NAME="Batch mode"
-    __INVOCATION_COUNT=0
-    update_workflow_state "batch" "running"
-    trap '_batch_cleanup' EXIT INT TERM
+# Trap handler for Ctrl-C during batch execution.
+_batch_parallel_cleanup() {
+    echo ""
+    print_warning "Batch interrupted. Terminating running tasks..."
 
-    # Heartbeat for dashboard visibility
-    ( while kill -0 $$ 2>/dev/null; do sleep 5; update_workflow_state "batch" "running"; done ) &
-    __BATCH_HEARTBEAT_PID=$!
-
-    # Build and execute
-    local prompt
-    prompt=$(_build_batch_prompt "$task_list")
-    if [[ -n "$__LOG_FILE" ]]; then
-        log_msg "--- batch claude output start ---"
-        if [[ "$__ACTIVITY_TRACKING" == "true" ]]; then
-            claude -p "$prompt" --max-turns $BATCH_MAX_TURNS --output-format stream-json --verbose 2>&1 \
-                | python3 "$BUILDCREW_HOME/lib/stream_processor.py" --activity-file ".buildcrew/.agent-activity" --max-turns $BATCH_MAX_TURNS \
-                | tee -a "$__LOG_FILE" || true
-        else
-            claude -p "$prompt" --max-turns $BATCH_MAX_TURNS 2>&1 | tee -a "$__LOG_FILE" || true
+    # Kill all running child processes
+    local i
+    for i in "${!_batch_pids[@]}"; do
+        local pid="${_batch_pids[$i]:-}"
+        if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then
+            kill -TERM "$pid" 2>/dev/null || true
+            local manifest_idx=$((i + 1))
+            _batch_mark_task "$manifest_idx" "interrupted" "130"
         fi
-        log_msg "--- batch claude output end ---"
-    else
-        if [[ "$__ACTIVITY_TRACKING" == "true" ]]; then
-            claude -p "$prompt" --max-turns $BATCH_MAX_TURNS --output-format stream-json --verbose 2>&1 \
-                | python3 "$BUILDCREW_HOME/lib/stream_processor.py" --activity-file ".buildcrew/.agent-activity" --max-turns $BATCH_MAX_TURNS || true
-        else
-            claude -p "$prompt" --max-turns $BATCH_MAX_TURNS || true
-        fi
-    fi
+    done
 
-    # Inline cleanup (normal exit path)
-    kill "$__BATCH_HEARTBEAT_PID" 2>/dev/null || true
-    wait "$__BATCH_HEARTBEAT_PID" 2>/dev/null || true
-    __BATCH_HEARTBEAT_PID=""
-    rm -f ".buildcrew/.agent-activity"
+    # Wait briefly for graceful shutdown
+    sleep 2
+
+    # Force-kill any remaining
+    for i in "${!_batch_pids[@]}"; do
+        local pid="${_batch_pids[$i]:-}"
+        if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then
+            kill -KILL "$pid" 2>/dev/null || true
+        fi
+    done
+
+    wait 2>/dev/null || true
+
+    _batch_stop_heartbeat
+
     clear_workflow_state
     rm -f "$LOCKFILE"
 
-    # Post-batch advisory
-    print_header "Batch Execution Complete"
-    print_info "Tasks were processed in parallel via /batch."
-    print_info "Review opened PRs and update BACKLOG.md to mark tasks complete."
-    print_info "Run 'buildcrew status' to check current backlog state."
+    print_info "Batch state saved to $BATCH_MANIFEST"
+    print_info "Resume with: buildcrew run --batch --resume"
+}
 
-    if [[ "$KEEP_LOGS" != "true" ]]; then
+# Push branches and create PRs for completed tasks.
+_batch_create_prs() {
+    local base_branch="$1"
+    local i
+    for i in "${!_batch_tasks[@]}"; do
+        local manifest_idx=$((i + 1))
+        local status
+        status=$(_batch_get_task_status "$manifest_idx")
+        if [[ "$status" == "completed" ]]; then
+            local branch_name="buildcrew/${_batch_slugs[$i]}"
+            local task_text="${_batch_tasks[$i]}"
+            print_info "Pushing $branch_name..."
+            if git push -u origin "$branch_name" 2>/dev/null; then
+                local pr_title
+                pr_title=$(echo "$task_text" | cut -c1-70)
+                if gh pr create --title "$pr_title" \
+                    --body "Task: $task_text"$'\n\n'"*Generated by BuildCrew batch mode*" \
+                    --base "$base_branch" \
+                    --head "$branch_name" 2>/dev/null; then
+                    print_success "PR created for: $task_text"
+                else
+                    print_warning "PR creation failed for: $task_text"
+                fi
+            else
+                print_warning "Push failed for: $branch_name"
+            fi
+        fi
+    done
+}
+
+# Post-completion: summary, optional PR creation, worktree cleanup.
+_batch_post_completion() {
+    local base_branch="$1"
+
+    _batch_stop_heartbeat
+
+    local end_time duration
+    end_time=$(date +%s)
+    duration=$(( end_time - _batch_start_time ))
+
+    echo ""
+    print_header "Batch Execution Complete"
+    echo -e "  ${GREEN}Completed:${NC}  $_batch_completed"
+    echo -e "  ${RED}Failed:${NC}     $_batch_failed"
+    echo -e "  ${CYAN}Duration:${NC}   $(printf '%dm%02ds' $((duration / 60)) $((duration % 60)))"
+    echo ""
+
+    # List branches for completed tasks
+    if (( _batch_completed > 0 )); then
+        print_info "Completed task branches:"
+        local i
+        for i in "${!_batch_tasks[@]}"; do
+            local status
+            status=$(_batch_get_task_status $((i + 1)))
+            if [[ "$status" == "completed" ]]; then
+                echo -e "  ${GREEN}*${NC} buildcrew/${_batch_slugs[$i]}  --  ${_batch_tasks[$i]}"
+            fi
+        done
+        echo ""
+    fi
+
+    # List failures
+    if (( _batch_failed > 0 )); then
+        print_warning "Failed tasks:"
+        local i
+        for i in "${!_batch_tasks[@]}"; do
+            local status
+            status=$(_batch_get_task_status $((i + 1)))
+            if [[ "$status" == "failed" ]]; then
+                local slug="${_batch_slugs[$i]}"
+                local log_path="$BATCH_WORKTREE_DIR/$slug/.buildcrew/logs/batch-${slug}.log"
+                echo -e "  ${RED}x${NC} ${_batch_tasks[$i]}  (log: $log_path)"
+            fi
+        done
+        echo ""
+    fi
+
+    # PR creation offer (only if gh is available and remote exists)
+    if (( _batch_completed > 0 )); then
+        if command -v gh &>/dev/null && gh auth status &>/dev/null 2>&1; then
+            if git remote get-url origin &>/dev/null 2>&1; then
+                if [[ -t 0 ]] && [[ "$AUTO_MODE" != "true" ]]; then
+                    echo -e "  ${BOLD}[p]${NC} Push branches and create PRs  |  ${BOLD}[Enter]${NC} Skip"
+                    read -r pr_response
+                    if [[ "$pr_response" == "p" || "$pr_response" == "P" ]]; then
+                        _batch_create_prs "$base_branch"
+                    fi
+                else
+                    print_info "Push branches and create PRs manually, or re-run without --auto."
+                fi
+            fi
+        fi
+    fi
+
+    # Clean up completed worktrees (leave failed for debugging)
+    _batch_cleanup_completed_worktrees
+
+    clear_workflow_state
+    rm -f "$LOCKFILE"
+
+    if [[ "$KEEP_LOGS" != "true" ]] && (( _batch_failed == 0 )); then
         rm -f "$__LOG_FILE"
     fi
 
     trap - EXIT INT TERM
+    if (( _batch_failed > 0 )); then
+        exit 1
+    fi
     exit 0
+}
+
+# ── Parse task list and handle slug collisions ────────────────────────────────
+
+# Parse the numbered task list into _batch_tasks[] and _batch_slugs[] arrays.
+_batch_parse_task_list() {
+    local task_list="$1"
+    _batch_tasks=()
+    _batch_slugs=()
+    local i=0
+    local line
+    while IFS= read -r line; do
+        [[ -z "$line" ]] && continue
+        local text="${line#*. }"  # strip " 1. " prefix
+        [[ -z "$text" ]] && continue
+        _batch_tasks[$i]="$text"
+        local slug
+        slug=$(task_to_slug "$text")
+        # Collision check: deduplicate slugs
+        local j=0 collision=false
+        while (( j < i )); do
+            if [[ "${_batch_slugs[$j]}" == "$slug" ]]; then
+                collision=true
+                break
+            fi
+            (( j++ )) || true
+        done
+        if [[ "$collision" == "true" ]] || git rev-parse --verify "buildcrew/$slug" >/dev/null 2>&1; then
+            slug="${slug}-${i}"
+        fi
+        _batch_slugs[$i]="$slug"
+        (( i++ )) || true
+    done <<< "$task_list"
+}
+
+# ── Shared dispatch loop ──────────────────────────────────────────────────────
+
+# Main dispatch loop — launches tasks up to MAX_PARALLEL, polls for completion.
+_batch_dispatch_loop() {
+    local total="$1" base_branch="$2"
+
+    while (( _batch_completed + _batch_failed < total )); do
+        _batch_poll_tasks || true
+
+        # Launch new tasks while slots are available
+        while (( _batch_running < MAX_PARALLEL && _batch_next_idx < total )); do
+            local manifest_idx=$(( _batch_next_idx + 1 ))
+            local status
+            status=$(_batch_get_task_status "$manifest_idx")
+
+            # Skip completed or already-failed tasks
+            if [[ "$status" == "completed" || "$status" == "failed" ]]; then
+                (( _batch_next_idx++ )) || true
+                continue
+            fi
+
+            # Ensure worktree exists (resume case — fresh runs already created them)
+            local slug="${_batch_slugs[$_batch_next_idx]}"
+            if [[ ! -d "$BATCH_WORKTREE_DIR/$slug" ]]; then
+                if ! _batch_create_worktree "$slug" "$base_branch"; then
+                    _batch_mark_task "$manifest_idx" "failed" "1"
+                    _batch_failed=$(( _batch_failed + 1 ))
+                    (( _batch_next_idx++ )) || true
+                    continue
+                fi
+            fi
+
+            _batch_launch_task "$_batch_next_idx"
+            (( _batch_next_idx++ )) || true
+        done
+
+        _batch_refresh_dashboard
+        sleep 3
+    done
+
+    _batch_post_completion "$base_branch"
+}
+
+# ── Resume support ────────────────────────────────────────────────────────────
+
+_batch_resume() {
+    # Force auto mode
+    AUTO_MODE=true
+
+    # Load tasks from manifest
+    _batch_tasks=()
+    _batch_slugs=()
+    local count base_branch
+    count=$(jq '.tasks | length' "$BATCH_MANIFEST")
+    base_branch=$(jq -r '.base_branch' "$BATCH_MANIFEST")
+
+    local i=0
+    while (( i < count )); do
+        _batch_tasks[$i]=$(jq -r --argjson i "$i" '.tasks[$i].text' "$BATCH_MANIFEST")
+        _batch_slugs[$i]=$(jq -r --argjson i "$i" '.tasks[$i].slug' "$BATCH_MANIFEST")
+        (( i++ )) || true
+    done
+
+    local total=${#_batch_tasks[@]}
+    local already_done
+    already_done=$(jq '[.tasks[] | select(.status == "completed")] | length' "$BATCH_MANIFEST")
+
+    # Pool state
+    _batch_pids=()
+    _batch_running=0
+    _batch_completed=$already_done
+    _batch_failed=0
+    _batch_next_idx=0
+    _batch_start_time=$(date +%s)
+    _batch_dashboard_lines=0
+
+    i=0
+    while (( i < total )); do
+        _batch_pids[$i]=""
+        (( i++ )) || true
+    done
+
+    trap '_batch_parallel_cleanup' EXIT INT TERM
+    _batch_start_heartbeat
+
+    print_header "Batch Mode - Resuming"
+    print_info "Tasks: $total  |  Already completed: $already_done  |  Max parallel: $MAX_PARALLEL"
+    echo ""
+
+    _batch_dispatch_loop "$total" "$base_branch"
+}
+
+# ── Main batch entry point ────────────────────────────────────────────────────
+
+enter_batch_mode() {
+    local task_list="$1"
+
+    # Force auto mode for background processes
+    if [[ "$AUTO_MODE" != "true" ]]; then
+        print_warning "Batch mode implies --auto (background processes cannot be interactive)"
+        AUTO_MODE=true
+    fi
+
+    # Determine base branch and commit
+    local base_branch base_commit
+    base_branch=$(git rev-parse --abbrev-ref HEAD)
+    base_commit=$(git rev-parse HEAD)
+
+    # Parse task list into arrays
+    _batch_parse_task_list "$task_list"
+    local total=${#_batch_tasks[@]}
+    if [[ $total -eq 0 ]]; then
+        print_error "No tasks to process"
+        exit 1
+    fi
+
+    # Initialize manifest
+    _batch_init_manifest "$base_branch" "$base_commit"
+    local i=0
+    while (( i < total )); do
+        _batch_add_task $((i + 1)) "${_batch_tasks[$i]}" "${_batch_slugs[$i]}"
+        (( i++ )) || true
+    done
+
+    # Create all worktrees upfront
+    print_info "Creating $total worktrees..."
+    i=0
+    while (( i < total )); do
+        if ! _batch_create_worktree "${_batch_slugs[$i]}" "$base_branch"; then
+            print_warning "Failed to create worktree for task $((i + 1)): ${_batch_tasks[$i]}"
+            _batch_mark_task $((i + 1)) "failed" "1"
+            _batch_failed=$(( _batch_failed + 1 ))
+        fi
+        (( i++ )) || true
+    done
+
+    # Pool state
+    _batch_pids=()
+    _batch_running=0
+    _batch_next_idx=0
+    _batch_start_time=$(date +%s)
+    _batch_dashboard_lines=0
+
+    i=0
+    while (( i < total )); do
+        _batch_pids[$i]=""
+        (( i++ )) || true
+    done
+
+    # Setup
+    __WF_TASK_NUM=0
+    __WF_TOTAL_TASKS=$total
+    __WF_TASK_NAME="Batch mode"
+    update_workflow_state "batch" "running"
+    trap '_batch_parallel_cleanup' EXIT INT TERM
+    _batch_start_heartbeat
+
+    print_header "Batch Mode - Parallel Execution"
+    print_info "Tasks: $total  |  Max parallel: $MAX_PARALLEL  |  Base: $base_branch"
+    echo ""
+
+    _batch_dispatch_loop "$total" "$base_branch"
 }
 
 # Pause for human review when --review is set
@@ -1586,17 +2145,26 @@ __run_phase_group_impl() {
     # always available even if the Skill tool fails in headless (claude -p) mode.
     local skill_file=".claude/skills/buildcrew-${phase}/SKILL.md"
     local prompt
+
+    # pkill cross-talk safety: when running in batch mode, include a unique nonce
+    # in the prompt so the file monitor's pkill pattern only matches this worker.
+    local batch_nonce="${BUILDCREW_BATCH_NONCE:-}"
+    local phase_tag="buildcrew-${phase}"
+    if [[ -n "$batch_nonce" ]]; then
+        phase_tag="buildcrew-${phase}:${batch_nonce}"
+    fi
+
     if [[ -f "$skill_file" ]]; then
         # Strip YAML frontmatter (content between first and second --- delimiters)
         local skill_content
         skill_content=$(awk 'NR==1&&/^---/{f=1;next} f&&/^---/{f=0;next} !f' "$skill_file")
-        prompt="Execute the buildcrew-$phase skill for this task: $task"
+        prompt="Execute the $phase_tag skill for this task: $task"
         if [[ -n "$extra_context" ]]; then
             prompt="$prompt. Context: $extra_context"
         fi
         prompt="$prompt"$'\n\n---\n\n'"$skill_content"
     else
-        prompt="Execute the buildcrew-$phase skill for this task: $task"
+        prompt="Execute the $phase_tag skill for this task: $task"
         if [[ -n "$extra_context" ]]; then
             prompt="$prompt. Context: $extra_context"
         fi
@@ -1616,8 +2184,8 @@ __run_phase_group_impl() {
         __saved_stty=$(stty -g 2>/dev/null) || __saved_stty=""
     fi
 
-    # Start file watcher
-    start_file_monitor "$PHASE_RESULT_FILE" "claude.*buildcrew-$phase"
+    # Start file watcher (uses phase_tag for pkill pattern — unique per worker in batch mode)
+    start_file_monitor "$PHASE_RESULT_FILE" "claude.*${phase_tag}"
 
     update_workflow_state "$phase" "running"
     __INVOCATION_COUNT=$(( __INVOCATION_COUNT + 1 ))
@@ -1673,7 +2241,7 @@ __run_phase_group_impl() {
             return 1
         fi
 
-        start_file_monitor "$PHASE_RESULT_FILE" "claude.*buildcrew-$phase"
+        start_file_monitor "$PHASE_RESULT_FILE" "claude.*${phase_tag}"
 
         update_workflow_state "$phase" "running"
         __INVOCATION_COUNT=$(( __INVOCATION_COUNT + 1 ))
@@ -2713,18 +3281,14 @@ main() {
             print_error "--batch cannot be combined with --single or --task"
             exit 1
         fi
-        if [[ "$RESUME_MODE" == "true" ]]; then
-            print_error "--batch cannot be combined with --resume (no phase progress to resume)"
-            exit 1
-        fi
         if [[ "$HUMAN_REVIEW" == "true" ]]; then
-            print_warning "--review has no effect with --batch (no human review gate in /batch)"
+            print_warning "--review has no effect with --batch (auto mode is implied)"
         fi
         if [[ "$GIT_BRANCH" == "true" ]]; then
-            print_warning "--branch has no effect with --batch (/batch creates its own branches)"
+            print_warning "--branch has no effect with --batch (batch mode creates worktree branches automatically)"
         fi
 
-        # 2. Check for claude and jq (same as check_prerequisites, minus discovery logic)
+        # 2. Check for claude and jq
         if ! command -v claude &>/dev/null; then
             print_error "Claude Code CLI not found. Please install it first."
             exit 1
@@ -2734,13 +3298,34 @@ main() {
             exit 1
         fi
 
-        # 3. Git is required (/batch uses worktrees)
+        # 3. Git is required (worktrees)
         if ! git rev-parse --is-inside-work-tree &>/dev/null 2>&1; then
-            print_error "Batch mode requires a git repository (/batch uses worktrees)"
+            print_error "Batch mode requires a git repository"
             exit 1
         fi
 
-        # 4. Gather and validate pending tasks
+        # 4. Working tree must be clean
+        if [[ -n "$(git status --porcelain 2>/dev/null)" ]]; then
+            print_error "Working tree is not clean. Commit or stash changes before using --batch."
+            exit 1
+        fi
+
+        # 5. Resume mode
+        if [[ "$RESUME_MODE" == "true" ]]; then
+            mkdir -p .buildcrew
+            log_init
+            echo $$ > "$LOCKFILE"
+            if _batch_load_manifest; then
+                print_info "Resuming batch from $BATCH_MANIFEST"
+                _batch_resume
+            else
+                print_error "No resumable batch found at $BATCH_MANIFEST"
+                exit 1
+            fi
+            # _batch_resume calls exit 0, never returns
+        fi
+
+        # 6. Gather and validate pending tasks
         gather_pending_tasks
         if [[ "$__BATCH_TASK_COUNT" -eq 0 ]]; then
             print_error "No pending tasks in $BACKLOG_FILE to batch"
@@ -2748,41 +3333,28 @@ main() {
         fi
         local task_list="$__BATCH_TASK_LIST"
 
-        # 5. Advisory messages
+        # 7. Advisory messages
         if [[ "$__BATCH_TASK_COUNT" -eq 1 ]]; then
             print_info "Only 1 pending task -- batch mode will still work, but sequential mode may be more thorough"
         fi
-        if [[ "$__BATCH_TASK_COUNT" -gt 30 ]]; then
-            print_warning "Backlog has $__BATCH_TASK_COUNT tasks. /batch typically handles up to ~30."
-            if [[ "$AUTO_MODE" != "true" ]] && [[ -t 0 ]]; then
-                echo -e "  ${BOLD}[Enter]${NC} Continue  |  ${BOLD}[q]${NC} Quit"
-                read -r batch_response
-                if [[ "$batch_response" == "q" || "$batch_response" == "Q" ]]; then
-                    exit 0
-                fi
-            fi
-        fi
 
-        # 6. Dry-run support
+        # 8. Dry-run support
         if [[ "$DRY_RUN" == "true" ]]; then
             print_header "Batch Mode (Dry Run)"
-            print_info "Would delegate $__BATCH_TASK_COUNT tasks to /batch:"
+            print_info "Would process $__BATCH_TASK_COUNT tasks in parallel (max $MAX_PARALLEL concurrent):"
             echo ""
             echo "$task_list"
             echo ""
             exit 0
         fi
 
-        # 7. Setup and execute
+        # 9. Setup and execute
         mkdir -p .buildcrew
         log_init
-        log_msg "Batch mode: $__BATCH_TASK_COUNT tasks"
+        log_msg "Batch mode: $__BATCH_TASK_COUNT tasks, max_parallel=$MAX_PARALLEL"
         print_info "Activity log: $__LOG_FILE"
         echo $$ > "$LOCKFILE"
-
-        print_header "Batch Mode"
-        print_info "Delegating $__BATCH_TASK_COUNT tasks to /batch for parallel execution"
-        print_debug "Flags: verbose=$VERBOSE keep_logs=$KEEP_LOGS auto=$AUTO_MODE"
+        print_debug "Flags: verbose=$VERBOSE keep_logs=$KEEP_LOGS auto=$AUTO_MODE max_parallel=$MAX_PARALLEL"
 
         enter_batch_mode "$task_list"
         # enter_batch_mode calls exit 0, control does not return here

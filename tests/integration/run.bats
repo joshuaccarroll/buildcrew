@@ -163,17 +163,19 @@ EOF
     [[ "$output" == *"--batch cannot be combined"* ]]
 }
 
-@test "run: --batch --resume exits with error" {
+@test "run: --batch --resume exits with error when no manifest" {
     echo "- [ ] Test task" > BACKLOG.md
     git init && git config user.email "t@t.t" && git config user.name "T"
+    git add . && git commit -m "init" --no-verify
     run "$BUILDCREW_HOME/lib/workflow.sh" --batch --resume
     [ "$status" -ne 0 ]
-    [[ "$output" == *"--batch cannot be combined with --resume"* ]]
+    [[ "$output" == *"No resumable batch"* ]]
 }
 
 @test "run: --batch with empty backlog exits with error" {
     echo "# No tasks" > BACKLOG.md
     git init && git config user.email "t@t.t" && git config user.name "T"
+    git add . && git commit -m "init" --no-verify
     run "$BUILDCREW_HOME/lib/workflow.sh" --batch
     [ "$status" -ne 0 ]
     [[ "$output" == *"No pending tasks"* ]]
@@ -182,6 +184,7 @@ EOF
 @test "run: --batch with all tasks complete exits with error" {
     echo "- [x] Done task" > BACKLOG.md
     git init && git config user.email "t@t.t" && git config user.name "T"
+    git add . && git commit -m "init" --no-verify
     run "$BUILDCREW_HOME/lib/workflow.sh" --batch
     [ "$status" -ne 0 ]
     [[ "$output" == *"No pending tasks"* ]]
@@ -202,6 +205,7 @@ EOF
 - [ ] Task three
 EOF
     git init && git config user.email "t@t.t" && git config user.name "T"
+    git add . && git commit -m "init" --no-verify
     run "$BUILDCREW_HOME/lib/workflow.sh" --batch --dry-run
     [ "$status" -eq 0 ]
     [[ "$output" == *"3 tasks"* ]]
@@ -213,6 +217,7 @@ EOF
 @test "run: --batch --review prints warning and no error" {
     echo "- [ ] Test task" > BACKLOG.md
     git init && git config user.email "t@t.t" && git config user.name "T"
+    git add . && git commit -m "init" --no-verify
     run "$BUILDCREW_HOME/lib/workflow.sh" --batch --review --dry-run
     [ "$status" -eq 0 ]
     [[ "$output" == *"--review has no effect"* ]]

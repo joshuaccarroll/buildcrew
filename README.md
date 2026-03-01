@@ -275,7 +275,8 @@ buildcrew run --resume       # Resume an interrupted task from where it left off
 buildcrew run --task N       # Target a specific task by name or number
 buildcrew run --auto         # Run fully unattended — auto-approve all interactive pauses
 buildcrew run --full-pipeline  # Force all phases regardless of complexity assessment
-buildcrew run --batch        # Delegate all pending tasks to /batch for parallel execution
+buildcrew run --batch        # Run pending tasks in parallel using git worktrees
+buildcrew run --max-parallel N   # Max concurrent tasks in batch mode (default: 5)
 buildcrew run --keep-logs    # Retain the activity log after a successful run
 buildcrew run --max-invocations N  # Set max Claude invocations per run (default: 15)
 buildcrew run --verbose      # Show orchestrator decisions, phase verdicts, and invocation counts
@@ -313,7 +314,8 @@ buildcrew uninstall          # Remove BuildCrew
 | `--no-strict` | Allow partial acceptance criteria pass — unmet criteria trigger a warning but don't block the commit. |
 | `--full-pipeline` | Force all phases regardless of complexity assessment |
 | `--auto` | Run fully unattended — auto-approve all interactive pauses |
-| `--batch` | Delegate all pending BACKLOG.md tasks to `/batch` for parallel execution in isolated git worktrees. Incompatible with `--single`, `--task`, and `--resume`. |
+| `--batch` | Run all pending BACKLOG.md tasks in parallel, each through the full phase pipeline in its own git worktree. Use `--resume` to pick up where an interrupted batch left off. Incompatible with `--single` and `--task`. |
+| `--max-parallel N` | Max concurrent tasks in batch mode (default: 5). Also configurable via `MAX_PARALLEL` in `.buildcrew/config`. |
 | `--keep-logs` | Retain the activity log after a successful run (the log is always kept on failure) |
 | `--max-invocations N` | Set max Claude invocations per run (default: 15) |
 | `--verbose` / `--debug` | Show orchestrator decisions, phase verdicts, and invocation counts |
@@ -332,6 +334,7 @@ Project-level configuration lives in `.buildcrew/config` (created from `.buildcr
 | `COMPLEXITY_AWARE` | `true` | Auto-detect task complexity and skip unnecessary phases. Set to `false` to always run all phases (equivalent to `--full-pipeline`). |
 | `AUTO_MODE` | `false` | Run fully unattended — auto-approve all interactive pauses. Equivalent to `--auto`. |
 | `KEEP_LOGS` | `false` | Retain the activity log after a successful run. Equivalent to `--keep-logs`. |
+| `MAX_PARALLEL` | `5` | Max concurrent tasks in batch mode. Equivalent to `--max-parallel N`. |
 
 Example `.buildcrew/config`:
 
