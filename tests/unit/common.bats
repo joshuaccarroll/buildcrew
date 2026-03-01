@@ -217,3 +217,42 @@ teardown() {
     run grep "${esc}" "$__LOG_FILE"
     [ "$status" -eq 1 ]  # grep returns 1 when no match — i.e., no ANSI codes found
 }
+
+# ─────────────────────────────────────────────────────────────────────────────
+# load_project_context: boundary-aware truncation (Change 3)
+# ─────────────────────────────────────────────────────────────────────────────
+
+@test "load_project_context: boundary-aware truncation stops at last section marker" {
+    mkdir -p .buildcrew/context
+    # Build a string >10KB with a --- boundary near the 10KB limit
+    # First section: ~9900 bytes of content followed by ---
+    python3 -c "
+import sys
+# Section 1: filler up to ~9900 bytes
+s = 'x' * 100 + '\n'
+block = s * 97  # ~9800 bytes
+print('## Section One')
+print(block, end='')
+print('---')
+print('## Section Two (should be truncated)')
+print('y' * 500)
+" > .buildcrew/context/users.md
+    output=$(load_project_context 2>/dev/null)
+    [[ "$output" == *"[truncated]"* ]]
+    # Must not contain content from Section Two
+    [[ "$output" != *"should be truncated"* ]]
+}
+
+@test "load_project_context: falls back to last-newline truncation when no section markers" {
+    mkdir -p .buildcrew/context
+    # A single long line repeated to exceed 10KB, no --- or ## markers
+    python3 -c "print('a' * 200 + '\n', end='')" | python3 -c "
+import sys
+line = sys.stdin.read()
+# Write enough lines to exceed 10KB but none start with --- or ##
+content = ('content: ' + 'z' * 200 + '\n') * 60
+sys.stdout.write(content)
+" > .buildcrew/context/users.md
+    output=$(load_project_context 2>/dev/null)
+    [[ "$output" == *"[truncated]"* ]]
+}

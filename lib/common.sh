@@ -150,7 +150,17 @@ load_project_context() {
         local ctx_size=${#project_context}
         if (( ctx_size > 10240 )); then
             echo -e "${YELLOW}⚠ Project context exceeds 10KB ($ctx_size bytes), truncating${NC}" >&2
-            project_context="${project_context:0:10240}"$'\n\n[truncated]'
+            # Truncate to 10KB, then find last section boundary for clean break
+            local truncated="${project_context:0:10240}"
+            local boundary_line
+            boundary_line=$(printf '%s' "$truncated" | grep -n '^\(---\|## \)' | tail -1 | cut -d: -f1)
+            if [[ -n "$boundary_line" && "$boundary_line" -gt 1 ]]; then
+                project_context=$(printf '%s' "$truncated" | head -n "$(( boundary_line - 1 ))")
+            else
+                # Fallback: truncate at last newline
+                project_context="${truncated%$'\n'*}"
+            fi
+            project_context="$project_context"$'\n\n[truncated]'
         fi
     fi
     echo "$project_context"
