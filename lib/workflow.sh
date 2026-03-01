@@ -1609,6 +1609,13 @@ __run_phase_group_impl() {
         prompt="$prompt"$'\n\nProject Context:\n'"$project_context"
     fi
 
+    # Inject skill catalog
+    local catalog
+    catalog=$(build_skill_catalog)
+    if [[ -n "$catalog" ]]; then
+        prompt="$prompt"$'\n\nSkill Catalog:\n'"$catalog"
+    fi
+
     # Save terminal state — claude may leave terminal in raw/no-echo mode when
     # killed by SIGINT (from the file monitor), breaking subsequent read prompts.
     local __saved_stty=""

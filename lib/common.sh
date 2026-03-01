@@ -249,3 +249,167 @@ stop_file_monitor() {
         __MONITOR_PID=""
     fi
 }
+
+# ─────────────────────────────────────────────────────────────────────────────────
+# Skill catalog builder
+# ─────────────────────────────────────────────────────────────────────────────────
+
+# Builds a compressed catalog of available skills from SKILL.md frontmatter.
+# Scans project-local (.claude/skills/*/SKILL.md) and source ($BUILDCREW_HOME/skills/*/SKILL.md).
+# Project-local skills override source skills when directory basenames collide.
+# Outputs: "Available Skills:\n- name: description" (sorted by name), or empty string if none found.
+build_skill_catalog() {
+    # Guard: BUILDCREW_HOME may not be set in test/CLI contexts
+    local source_dir=""
+    if [[ -n "${BUILDCREW_HOME:-}" ]]; then
+        source_dir="$BUILDCREW_HOME/skills"
+    fi
+    local local_dir=".claude/skills"
+
+    # Collect skill directories: source first, then local (local overrides on collision)
+    # Use basename as dedup key. Store in "basename:path" format.
+    local seen_basenames=""
+    local skill_entries=""
+
+    # Helper: extract name and description from a SKILL.md file's YAML frontmatter.
+    # Sets __CATALOG_NAME and __CATALOG_DESC. Returns 1 if invalid.
+    __extract_skill_frontmatter() {
+        local file="$1"
+        __CATALOG_NAME=""
+        __CATALOG_DESC=""
+
+        [[ -f "$file" ]] || return 1
+
+        # First line must be ---
+        local first_line
+        first_line=$(head -1 "$file")
+        if [[ "$first_line" != "---" ]]; then
+            return 1
+        fi
+
+        # Read lines between first and second --- delimiters
+        local in_frontmatter=0
+        local line_num=0
+        while IFS= read -r line || [[ -n "$line" ]]; do
+            line_num=$(( line_num + 1 ))
+            if [[ $line_num -eq 1 ]]; then
+                in_frontmatter=1
+                continue
+            fi
+            if [[ $in_frontmatter -eq 1 && "$line" == "---" ]]; then
+                break
+            fi
+            if [[ $in_frontmatter -eq 1 ]]; then
+                case "$line" in
+                    name:\ *)
+                        __CATALOG_NAME="${line#name: }"
+                        ;;
+                    description:\ *)
+                        __CATALOG_DESC="${line#description: }"
+                        ;;
+                esac
+            fi
+        done < "$file"
+
+        # Both fields required
+        if [[ -z "$__CATALOG_NAME" || -z "$__CATALOG_DESC" ]]; then
+            return 1
+        fi
+
+        # Truncate description to 120 chars at word boundary
+        if [[ ${#__CATALOG_DESC} -gt 120 ]]; then
+            local truncated="${__CATALOG_DESC:0:120}"
+            # Find last space for word boundary
+            if [[ "$truncated" =~ ^(.*[[:space:]])[^[:space:]]*$ ]]; then
+                truncated="${BASH_REMATCH[1]}"
+                # Trim trailing whitespace
+                truncated="${truncated%"${truncated##*[![:space:]]}"}"
+            fi
+            __CATALOG_DESC="${truncated}..."
+        fi
+
+        return 0
+    }
+
+    # Process source skills first (BUILDCREW_HOME/skills/*)
+    if [[ -n "$source_dir" && -d "$source_dir" ]]; then
+        for skill_dir in "$source_dir"/*/; do
+            [[ -d "$skill_dir" ]] || continue
+            local basename
+            basename=$(basename "$skill_dir")
+            local skill_file="$skill_dir/SKILL.md"
+            if [[ -f "$skill_file" ]] && __extract_skill_frontmatter "$skill_file"; then
+                seen_basenames="$seen_basenames $basename"
+                skill_entries="$skill_entries"$'\n'"$__CATALOG_NAME: $__CATALOG_DESC"
+            fi
+        done
+    fi
+
+    # Process local skills (override source on basename collision)
+    if [[ -d "$local_dir" ]]; then
+        for skill_dir in "$local_dir"/*/; do
+            [[ -d "$skill_dir" ]] || continue
+            local basename
+            basename=$(basename "$skill_dir")
+            local skill_file="$skill_dir/SKILL.md"
+            if [[ -f "$skill_file" ]] && __extract_skill_frontmatter "$skill_file"; then
+                # Check if this basename was already seen from source
+                local already_seen=0
+                for seen in $seen_basenames; do
+                    if [[ "$seen" == "$basename" ]]; then
+                        already_seen=1
+                        break
+                    fi
+                done
+                if [[ $already_seen -eq 1 ]]; then
+                    # Remove the source entry and replace with local
+                    local new_entries=""
+                    local old_name=""
+                    # Re-extract the source skill name for this basename
+                    local source_file="$source_dir/$basename/SKILL.md"
+                    if [[ -f "$source_file" ]]; then
+                        local saved_name="$__CATALOG_NAME"
+                        local saved_desc="$__CATALOG_DESC"
+                        if __extract_skill_frontmatter "$source_file"; then
+                            old_name="$__CATALOG_NAME"
+                        fi
+                        __CATALOG_NAME="$saved_name"
+                        __CATALOG_DESC="$saved_desc"
+                    fi
+                    # Filter out the old entry
+                    local IFS_SAVE="$IFS"
+                    IFS=$'\n'
+                    for entry in $skill_entries; do
+                        [[ -z "$entry" ]] && continue
+                        if [[ -n "$old_name" && "$entry" == "$old_name: "* ]]; then
+                            continue
+                        fi
+                        new_entries="$new_entries"$'\n'"$entry"
+                    done
+                    IFS="$IFS_SAVE"
+                    skill_entries="$new_entries"
+                fi
+                skill_entries="$skill_entries"$'\n'"$__CATALOG_NAME: $__CATALOG_DESC"
+                seen_basenames="$seen_basenames $basename"
+            fi
+        done
+    fi
+
+    # Remove leading blank lines and sort
+    local cleaned
+    cleaned=$(echo "$skill_entries" | sed '/^$/d' | sort)
+
+    if [[ -z "$cleaned" ]]; then
+        echo ""
+        return 0
+    fi
+
+    # Format output
+    local output="Available Skills:"
+    while IFS= read -r line; do
+        [[ -z "$line" ]] && continue
+        output="$output"$'\n'"- $line"
+    done <<< "$cleaned"
+
+    echo "$output"
+}
