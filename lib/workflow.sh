@@ -162,6 +162,7 @@ VERBOSE=false
 FULL_PIPELINE=false
 BATCH_MODE=false
 BATCH_MAX_TURNS=200
+PLAN_MODE=false
 
 if command -v python3 &>/dev/null; then
     __ACTIVITY_TRACKING=true
@@ -265,6 +266,10 @@ parse_args() {
                 echo "  --debug      Alias for --verbose"
                 echo "  --help, -h   Show this help message"
                 exit 0
+                ;;
+            --plan)
+                PLAN_MODE=true
+                shift
                 ;;
             *)
                 echo "Unknown option: $1"
@@ -2667,6 +2672,37 @@ main() {
         fi
         # Stale lockfile — previous run crashed
         rm -f "$LOCKFILE"
+    fi
+
+    if [[ "$PLAN_MODE" == "true" ]]; then
+        # Validate flag compatibility
+        if [[ "$BATCH_MODE" == "true" ]]; then
+            print_error "--plan cannot be combined with --batch"
+            exit 1
+        fi
+        if [[ "$SINGLE_TASK" == "true" ]] || [[ -n "$TARGET_TASK" ]]; then
+            print_error "--plan cannot be combined with --single or --task"
+            exit 1
+        fi
+        if [[ "$RESUME_MODE" == "true" ]]; then
+            print_error "--plan cannot be combined with --resume"
+            exit 1
+        fi
+
+        # Check prerequisites inline (same as batch mode pattern)
+        if ! command -v claude &>/dev/null; then
+            print_error "Claude Code CLI not found. Please install it first."
+            exit 1
+        fi
+
+        local plan_prompt
+        if has_project_file; then
+            plan_prompt="Run /build to add new tasks to this project."
+        else
+            plan_prompt="Run /build to help define this project and create a backlog."
+        fi
+        enter_discovery_mode "$plan_prompt"
+        # enter_discovery_mode calls exit 0, never returns
     fi
 
     if [[ "$BATCH_MODE" == "true" ]]; then

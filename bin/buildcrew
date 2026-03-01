@@ -45,6 +45,7 @@ print_help() {
     echo -e "${BOLD}COMMANDS:${NC}"
     echo "    init             Initialize BuildCrew in current project"
     echo "    run              Execute workflow on BACKLOG.md (execution mode)"
+    echo "    plan             Launch Product Manager to plan a new project or add scope"
     echo "    status           Show backlog stats and last workflow result"
     echo "    stop             Stop workflow after current task completes"
     echo "    reset            Clear blocked tasks and clean up artifacts"
@@ -1763,6 +1764,19 @@ cmd_run() {
     exec "$BUILDCREW_HOME/lib/workflow.sh" "$@"
 }
 
+cmd_plan() {
+    # Check for updates (non-blocking)
+    check_for_updates &
+
+    # Show plugin tip on first run
+    if ! plugins_already_checked; then
+        show_plugin_tip
+    fi
+
+    # Pass --plan flag through to workflow.sh to force discovery mode
+    exec "$BUILDCREW_HOME/lib/workflow.sh" --plan "$@"
+}
+
 cmd_update() {
     echo -e "${BOLD}Checking for updates...${NC}"
     echo ""
@@ -1992,6 +2006,10 @@ case "${1:-}" in
     run)
         shift
         cmd_run "$@"
+        ;;
+    plan)
+        shift
+        cmd_plan "$@"
         ;;
     status)
         cmd_status

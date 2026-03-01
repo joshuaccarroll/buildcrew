@@ -507,3 +507,17 @@ EOF
     [ "$log_count" -gt 0 ]
     unset KEEP_LOGS
 }
+
+# ─────────────────────────────────────────────────────────────────────────────
+# PLAN_MODE tests
+# ─────────────────────────────────────────────────────────────────────────────
+
+@test "PLAN_MODE defaults to false" {
+    [ "$PLAN_MODE" = "false" ]
+}
+
+@test "parse_args: --plan sets PLAN_MODE=true" {
+    PLAN_MODE=false
+    parse_args --plan
+    [ "$PLAN_MODE" = "true" ]
+}
