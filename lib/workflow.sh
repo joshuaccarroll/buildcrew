@@ -1993,6 +1993,7 @@ process_task_isolated() {
 
         local spec_verdict
         spec_verdict=$(jq -r '.verdict // "complete"' "$PHASE_RESULT_FILE")
+        local __interview_rerun=false
         if [[ "$spec_verdict" == "vague" ]]; then
             local vague_reason
             vague_reason=$(jq -r '.details // "Task too vague"' "$PHASE_RESULT_FILE")
@@ -2001,44 +2002,96 @@ process_task_isolated() {
             clear_task_progress
             print_warning "Task flagged as too vague to spec. See .claude/spec.md for details."
             return 1
+        elif [[ "$spec_verdict" == "needs_probing" ]]; then
+            # Extract questions from phase-result.json
+            local interview_questions=""
+            interview_questions=$(jq -r '.questions[]' "$PHASE_RESULT_FILE" 2>/dev/null) || interview_questions=""
+
+            if [[ -z "$interview_questions" ]]; then
+                # No questions produced — treat as complete
+                print_debug "Spec verdict: needs_probing but no questions — proceeding with best-effort spec"
+            elif [[ "$AUTO_MODE" == "true" ]] || ! [[ -t 0 ]]; then
+                # Auto mode or non-interactive terminal — skip interview
+                print_info "Auto mode: skipping spec interview, proceeding with best-effort spec"
+            else
+                # Interactive path — present questions and collect answers
+                print_info "Spec phase has questions to clarify before proceeding."
+                echo ""
+
+                local q_num=0
+                local interview_context=""
+                local line
+                while IFS= read -r line; do
+                    q_num=$((q_num + 1))
+                    echo "  $q_num. $line"
+                done <<< "$interview_questions"
+
+                echo ""
+
+                # Collect answers
+                q_num=0
+                while IFS= read -r line; do
+                    q_num=$((q_num + 1))
+                    local answer=""
+                    printf "  Answer %d (enter = your call): " "$q_num"
+                    read -r answer
+                    interview_context="${interview_context}Q${q_num}: ${line}"$'\n'"A${q_num}: ${answer:-your call}"$'\n'
+                done <<< "$interview_questions"
+
+                # Re-invoke spec phase with answers injected
+                __interview_rerun=true
+                local interview_extra="[BUILDCREW_INTERVIEW_ANSWERS]"$'\n'"${interview_context}"
+                run_phase_group "spec" "$task" \
+                    "${__replan_context:+Re-planning context: $__replan_context. }$interview_extra" \
+                    || { mark_task_blocked "$task" "spec phase failed on interview re-run"; clear_task_progress; return 1; }
+
+                # Check if second pass still emitted needs_probing (agent disobeyed)
+                local rerun_verdict
+                rerun_verdict=$(jq -r '.verdict // "complete"' "$PHASE_RESULT_FILE")
+                if [[ "$rerun_verdict" == "needs_probing" ]]; then
+                    print_warning "Interview re-run produced needs_probing again — proceeding with best-effort spec"
+                fi
+            fi
         fi
 
         __spec_context="Specification available at .claude/spec.md — read it for acceptance criteria and scope boundaries."
 
-        # Validate AC count meets minimum (2 required)
-        local ac_count=0
-        if [[ -f ".claude/spec.md" ]]; then
-            ac_count=$(grep -c '^- \[ \] AC-' ".claude/spec.md" 2>/dev/null) || ac_count=0
-        fi
-        if (( ac_count < 2 )); then
-            print_warning "Spec has only $ac_count acceptance criteria (minimum 2). Re-running spec phase."
-            run_phase_group "spec" "$task" \
-                "RETRY: Previous spec had only $ac_count acceptance criteria. Minimum is 2 concrete, testable acceptance criteria. Read .claude/spec.md and add more specific ACs." \
-                || { mark_task_blocked "$task" "spec phase failed to produce a valid result on AC retry"; clear_task_progress; return 1; }
-            # Re-validate
-            ac_count=$(grep -c '^- \[ \] AC-' ".claude/spec.md" 2>/dev/null) || ac_count=0
+        if [[ "${__interview_rerun}" != "true" ]]; then
+            # Validate AC count meets minimum (2 required)
+            local ac_count=0
+            if [[ -f ".claude/spec.md" ]]; then
+                ac_count=$(grep -c '^- \[ \] AC-' ".claude/spec.md" 2>/dev/null) || ac_count=0
+            fi
             if (( ac_count < 2 )); then
-                mark_task_blocked "$task" "Spec produced only $ac_count acceptance criteria after retry (minimum 2)"
-                clear_task_progress
-                return 1
+                print_warning "Spec has only $ac_count acceptance criteria (minimum 2). Re-running spec phase."
+                run_phase_group "spec" "$task" \
+                    "RETRY: Previous spec had only $ac_count acceptance criteria. Minimum is 2 concrete, testable acceptance criteria. Read .claude/spec.md and add more specific ACs." \
+                    || { mark_task_blocked "$task" "spec phase failed to produce a valid result on AC retry"; clear_task_progress; return 1; }
+                # Re-validate
+                ac_count=$(grep -c '^- \[ \] AC-' ".claude/spec.md" 2>/dev/null) || ac_count=0
+                if (( ac_count < 2 )); then
+                    mark_task_blocked "$task" "Spec produced only $ac_count acceptance criteria after retry (minimum 2)"
+                    clear_task_progress
+                    return 1
+                fi
             fi
-        fi
 
-        # Spec review — fires once per task (not on circuit-breaker replans)
-        if [[ "$__spec_reviewed" == "false" ]]; then
-            local spec_review_exit=0
-            handle_spec_review "$task" "$ac_count" "$task_num" "$total_tasks" || spec_review_exit=$?
-            if [[ $spec_review_exit -eq 1 ]]; then
-                mark_task_blocked "$task" "Skipped during spec review"
-                clear_task_progress
-                return 1
-            elif [[ $spec_review_exit -eq 2 ]]; then
-                touch "$STOP_FILE"
-                mark_task_blocked "$task" "Pipeline stopped during spec review"
-                clear_task_progress
-                return 1
+            # Spec review — fires once per task (not on circuit-breaker replans)
+            if [[ "$__spec_reviewed" == "false" ]]; then
+                local spec_review_exit=0
+                handle_spec_review "$task" "$ac_count" "$task_num" "$total_tasks" || spec_review_exit=$?
+                if [[ $spec_review_exit -eq 1 ]]; then
+                    mark_task_blocked "$task" "Skipped during spec review"
+                    clear_task_progress
+                    return 1
+                elif [[ $spec_review_exit -eq 2 ]]; then
+                    touch "$STOP_FILE"
+                    mark_task_blocked "$task" "Pipeline stopped during spec review"
+                    clear_task_progress
+                    return 1
+                fi
+                __spec_reviewed=true
             fi
-            __spec_reviewed=true
         fi
 
         __completed_phases="${__completed_phases:+$__completed_phases }spec"

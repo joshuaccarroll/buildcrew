@@ -22,7 +22,7 @@ An unknown verdict hits the catch-all and marks the task blocked:
 
 | Phase      | Valid verdicts                               |
 |------------|----------------------------------------------|
-| spec       | `complete`, `vague`                          |
+| spec       | `complete`, `needs_probing`, `vague`         |
 | research   | `complete`                                   |
 | review     | `approved`, `needs_revision`, `rejected`     |
 | build      | `complete`                                   |

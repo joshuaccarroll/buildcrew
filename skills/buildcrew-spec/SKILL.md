@@ -27,20 +27,43 @@ The task was provided in the prompt. Your job is to convert this raw backlog ite
 
 ### Step 1: Assess Clarity
 
-Before writing anything, assess whether this task is specific enough to produce clear acceptance criteria.
+Before writing anything, assess whether this task is specific enough to produce clear acceptance criteria. There are three possible outcomes:
 
-**Sufficient clarity** (proceed to spec):
+**Path 1 — Clear** (proceed to Step 2):
 - Task describes a concrete user-facing behavior or outcome
-- The definition of "done" is at least partially inferrable
-- You can write at least 2 testable acceptance criteria
+- The definition of "done" is unambiguous
+- You can write at least 2 testable acceptance criteria without guessing
 
-**Insufficient clarity** (flag and skip):
+**Path 2 — Needs Probing** (write best-effort spec, then flag for interview):
+- Task is workable — you can write a spec — but has unstated edge cases, ambiguities, or trade-offs
+- You could write acceptance criteria, but a reasonable engineer might interpret some details differently
+- Examples: auth flow with unclear session handling, API with unspecified error behavior, feature with ambiguous scope boundaries
+
+If the task **needs probing**: write the best-effort spec (proceed through Steps 2-3 as normal), then write `.claude/phase-result.json` with:
+```json
+{
+  "phase": "spec",
+  "verdict": "needs_probing",
+  "details": "Summary of what was unclear",
+  "questions": [
+    "Specific question about an edge case or ambiguity in THIS task",
+    "Another specific question referencing the task description"
+  ]
+}
+```
+Questions rules:
+- 2-4 questions total
+- Each question must reference the specific task — no generic questions
+- Focus on: edge cases, failure modes, "what should happen when...", trade-offs
+- Example: `"Should expired sessions redirect to login or show an inline re-auth prompt?"`
+
+**Path 3 — Vague** (flag and skip):
 - Task is purely aspirational with no concrete behavior described (e.g., "improve performance")
 - Task refers to undefined external artifacts (e.g., "implement the thing we discussed")
 - Task is ambiguous enough that 2 engineers would build completely different features
 - Task describes multiple unrelated outcomes (e.g., "add login AND redesign the dashboard") — recommend splitting into separate backlog items, each with its own spec
 
-If the task is **insufficient**, write `.claude/spec.md` with a `VAGUE` verdict:
+If the task is **vague**, write `.claude/spec.md` with a `VAGUE` verdict:
 
 ```markdown
 # Specification: [Task Title]
@@ -59,6 +82,13 @@ If the task is **insufficient**, write `.claude/spec.md` with a `VAGUE` verdict:
 ```
 
 Then write `.claude/phase-result.json` with `verdict: "vague"` and `details` explaining the issue. Log the reason clearly.
+
+### Second-Pass Detection
+
+If the prompt contains the marker `[BUILDCREW_INTERVIEW_ANSWERS]`, this is a **second pass** — the orchestrator has already interviewed the user and injected their answers. In this case:
+- Do NOT emit `needs_probing` again — always write `verdict: "complete"`
+- Incorporate the user's answers into the spec (update acceptance criteria, clarify edge cases, resolve ambiguities)
+- Include a `## User Decisions` section in the spec (see template below)
 
 ### Step 2: Explore Context (for sufficient tasks)
 
@@ -102,6 +132,12 @@ Keep the spec focused and brief. No rigid template with dozens of fields — jus
 - [Belongs in a separate task]
 
 **This task delivers**: [one sentence — the single primary deliverable]
+
+## User Decisions
+[Only include this section on the second pass — when the prompt contains `[BUILDCREW_INTERVIEW_ANSWERS]`.
+List each question and the user's answer. Omit this section entirely on the first pass.]
+- **Q**: [Question that was asked]
+  **A**: [User's answer]
 
 ## Acceptance Criteria
 - [ ] AC-01: [Specific, verifiable condition]
@@ -173,12 +209,22 @@ while iteration < 5:
 
 Write `.claude/phase-result.json` using the Write tool before ending your response:
 
-**If spec was written successfully:**
+**If spec was written successfully (clear task, or second pass after interview):**
 ```json
 {
   "phase": "spec",
   "verdict": "complete",
   "details": "Specification written with N acceptance criteria"
+}
+```
+
+**If task needs probing (first pass only — workable but has ambiguities):**
+```json
+{
+  "phase": "spec",
+  "verdict": "needs_probing",
+  "details": "Summary of what was unclear",
+  "questions": ["Specific question 1", "Specific question 2"]
 }
 ```
 
