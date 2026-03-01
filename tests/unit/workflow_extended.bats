@@ -2260,3 +2260,143 @@ EOF
     run run_phase_group "build" "test task"
     [ "$status" -eq 1 ]
 }
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Lessons system improvements (dedup, thresholds, helper, regex)
+# ─────────────────────────────────────────────────────────────────────────────
+
+@test "append_lesson: skips duplicate rule (Rule: match)" {
+    mkdir -p .buildcrew
+    # Seed lessons file with an existing rule
+    cat > "$LESSONS_FILE" << 'EOF'
+# BuildCrew Lessons
+
+---
+
+## Lesson 1: 2026-01-01 00:00
+
+**Phase**: build
+**What went wrong**: something
+**What fixed it**: something else
+**Rule**: always validate inputs
+**Applies to**: build persona
+
+---
+EOF
+    local initial_count
+    initial_count=$(grep -c '^## Lesson' "$LESSONS_FILE")
+    append_lesson "build" "another error" "another fix" "always validate inputs"
+    local final_count
+    final_count=$(grep -c '^## Lesson' "$LESSONS_FILE")
+    [ "$final_count" -eq "$initial_count" ]
+}
+
+@test "append_lesson: allows different rule" {
+    mkdir -p .buildcrew
+    cat > "$LESSONS_FILE" << 'EOF'
+# BuildCrew Lessons
+
+---
+
+## Lesson 1: 2026-01-01 00:00
+
+**Phase**: build
+**What went wrong**: something
+**What fixed it**: something else
+**Rule**: always validate inputs
+**Applies to**: build persona
+
+---
+EOF
+    local initial_count
+    initial_count=$(grep -c '^## Lesson' "$LESSONS_FILE")
+    append_lesson "build" "another error" "another fix" "always validate outputs"
+    local final_count
+    final_count=$(grep -c '^## Lesson' "$LESSONS_FILE")
+    [ "$final_count" -gt "$initial_count" ]
+}
+
+@test "append_lesson: skips duplicate condensed bullet (full-line match)" {
+    mkdir -p .buildcrew
+    cat > "$LESSONS_FILE" << 'EOF'
+# BuildCrew Lessons
+
+## Patterns (condensed from oldest 10 lessons)
+
+*The following patterns were extracted from the first 10 lessons:*
+
+- always validate inputs
+
+---
+
+EOF
+    local initial_count
+    initial_count=$(grep -c '^## Lesson' "$LESSONS_FILE" 2>/dev/null) || initial_count=0
+    append_lesson "build" "some error" "some fix" "always validate inputs"
+    local final_count
+    final_count=$(grep -c '^## Lesson' "$LESSONS_FILE" 2>/dev/null) || final_count=0
+    [ "$final_count" -eq "$initial_count" ]
+}
+
+@test "append_lesson: does NOT suppress substring match against condensed bullet" {
+    mkdir -p .buildcrew
+    cat > "$LESSONS_FILE" << 'EOF'
+# BuildCrew Lessons
+
+## Patterns (condensed from oldest 10 lessons)
+
+*The following patterns were extracted from the first 10 lessons:*
+
+- always validate inputs before submitting to the API
+
+---
+
+EOF
+    local initial_count
+    initial_count=$(grep -c '^## Lesson' "$LESSONS_FILE" 2>/dev/null) || initial_count=0
+    # "always validate inputs" is a substring of the bullet but NOT a full-line match
+    append_lesson "build" "some error" "some fix" "always validate inputs"
+    local final_count
+    final_count=$(grep -c '^## Lesson' "$LESSONS_FILE" 2>/dev/null) || final_count=0
+    [ "$final_count" -gt "$initial_count" ]
+}
+
+@test "lessons: LESSONS_MAX_ENTRIES is 25 and LESSONS_SUMMARIZE_COUNT is 10" {
+    [ "$LESSONS_MAX_ENTRIES" -eq 25 ]
+    [ "$LESSONS_SUMMARIZE_COUNT" -eq 10 ]
+}
+
+@test "_lesson_writing_instruction: output contains LESSON REQUIRED" {
+    run _lesson_writing_instruction
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"LESSON REQUIRED"* ]]
+}
+
+@test "append_lesson: entry count includes skill-written ## Lesson: format" {
+    mkdir -p .buildcrew
+    # Seed file with a skill-written (unnumbered) lesson entry
+    cat > "$LESSONS_FILE" << 'EOF'
+# BuildCrew Lessons
+
+---
+
+## Lesson: 2026-01-15
+
+**Phase**: build
+**What went wrong**: something went wrong
+**What fixed it**: fixed it
+**Rule**: skill written rule
+**Applies to**: build persona
+
+---
+EOF
+    # The broadened regex '^## Lesson' should count this entry
+    local count
+    count=$(grep -c '^## Lesson' "$LESSONS_FILE")
+    [ "$count" -ge 1 ]
+    # Now appending a new lesson should succeed (no dedup on different rule)
+    append_lesson "test" "new error" "new fix" "a brand new rule"
+    local new_count
+    new_count=$(grep -c '^## Lesson' "$LESSONS_FILE")
+    [ "$new_count" -gt "$count" ]
+}

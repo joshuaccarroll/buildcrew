@@ -185,6 +185,30 @@ Create `.claude/workflow-status.json`:
 
 ---
 
+## Lessons Awareness
+
+Before finalizing, check if this task encountered any failures that were resolved:
+- Review `.claude/code-review.md` and `.claude/test-report.md` for failure/retry evidence
+- Check existing `.buildcrew/lessons.md` for relevance to the code being committed
+
+If failures were resolved during this task and no lesson has been recorded for them, append a retrospective lesson to `.buildcrew/lessons.md` using this format:
+
+---
+
+## Lesson: [date]
+
+**Phase**: verify
+**What went wrong**: [specific description of what failed]
+**What fixed it**: [specific description of what was changed]
+**Rule**: [one-sentence rule to prevent this in future]
+**Applies to**: [relevant phase] persona
+
+---
+
+**IMPORTANT**: Write any lessons to `.buildcrew/lessons.md` BEFORE writing `.claude/phase-result.json`. Writing phase-result.json triggers process termination. Any file writes after phase-result.json may be lost.
+
+---
+
 ## Phase Result Protocol
 
 When all verification, commit, and signal phases are complete, write `.claude/phase-result.json`:

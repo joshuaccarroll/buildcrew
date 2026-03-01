@@ -1193,8 +1193,28 @@ archive_task_artifacts() {
 # Lessons system (Change 2: Self-Improvement Loop)
 # ─────────────────────────────────────────────────────────────────────────────────
 
-LESSONS_MAX_ENTRIES=100
-LESSONS_SUMMARIZE_COUNT=50
+_lesson_writing_instruction() {
+    cat << 'EOF'
+LESSON REQUIRED: After completing your fix, append a lesson to .buildcrew/lessons.md.
+Write it BEFORE writing phase-result.json (which triggers process termination).
+Use this exact format:
+
+---
+
+## Lesson: [date]
+
+**Phase**: [the current phase, e.g. build, verify, outcome]
+**What went wrong**: [specific description of what failed]
+**What fixed it**: [specific description of what you changed]
+**Rule**: [one-sentence rule to prevent this in future]
+**Applies to**: [phase] persona
+
+---
+EOF
+}
+
+LESSONS_MAX_ENTRIES=25
+LESSONS_SUMMARIZE_COUNT=10
 
 # Append a structured lesson to .buildcrew/lessons.md after a failure.
 # Usage: append_lesson "phase" "what_went_wrong" "what_fixed_it" "rule"
@@ -1209,7 +1229,16 @@ append_lesson() {
     # Count existing lesson entries (lines starting with "## Lesson")
     local entry_count=0
     if [[ -f "$LESSONS_FILE" ]]; then
-        entry_count=$(grep -c '^## Lesson [0-9]' "$LESSONS_FILE" 2>/dev/null) || entry_count=0
+        entry_count=$(grep -c '^## Lesson' "$LESSONS_FILE" 2>/dev/null) || entry_count=0
+
+        # Deduplication: skip if this exact rule already exists
+        # Use -qF for **Rule**: match (prefix is structured enough to avoid false positives)
+        # Use -xqF for condensed bullets (full-line match prevents substring false positives)
+        if grep -qF -- "**Rule**: ${rule}" "$LESSONS_FILE" 2>/dev/null || \
+           grep -xqF -- "- ${rule}" "$LESSONS_FILE" 2>/dev/null; then
+            print_debug "Lesson skipped (duplicate rule): $rule"
+            return 0
+        fi
     fi
 
     # Summarize oldest entries if at cap
@@ -1261,7 +1290,7 @@ _summarize_old_lessons() {
 
     # Extract the header/patterns section (before first "## Lesson") and all lesson entries
     local header_end
-    header_end=$(grep -n '^## Lesson [0-9]' "$LESSONS_FILE" 2>/dev/null | head -1 | cut -d: -f1)
+    header_end=$(grep -n '^## Lesson' "$LESSONS_FILE" 2>/dev/null | head -1 | cut -d: -f1)
     if [[ -z "$header_end" ]]; then
         return 0
     fi
@@ -1269,12 +1298,12 @@ _summarize_old_lessons() {
     # Get existing patterns section (if any) or just the header
     local existing_patterns=""
     if grep -q '^## Patterns' "$LESSONS_FILE" 2>/dev/null; then
-        existing_patterns=$(awk '/^## Patterns/,/^## Lesson [0-9]/' "$LESSONS_FILE" 2>/dev/null | sed '$d')
+        existing_patterns=$(awk '/^## Patterns/,/^## Lesson/' "$LESSONS_FILE" 2>/dev/null | sed '$d')
     fi
 
     # Get all lesson entries
     local all_lessons
-    all_lessons=$(grep -n '^## Lesson [0-9]' "$LESSONS_FILE" 2>/dev/null)
+    all_lessons=$(grep -n '^## Lesson' "$LESSONS_FILE" 2>/dev/null)
     local total_lessons
     total_lessons=$(echo "$all_lessons" | wc -l | tr -d ' ')
 
@@ -1865,6 +1894,8 @@ process_task_isolated() {
     local __need_replan=false        # circuit breaker: set true to restart from research
     local __replan_context=""        # circuit breaker: failure context for re-plan prompt
     local build_attempt=0            # tracks total build attempts across build and outcome phases
+    local __lesson_instruction
+    __lesson_instruction="$(_lesson_writing_instruction)"
 
     # Resume or fresh start
     if [[ "$RESUME_MODE" == "true" ]] && load_task_progress; then
@@ -2178,6 +2209,7 @@ process_task_isolated() {
                 local prev_reason
                 prev_reason=$(jq -r '.details // "unknown"' "$PHASE_RESULT_FILE")
                 build_context="${build_context:+$build_context | }This is build attempt $build_attempt. Previous attempt failed: $prev_reason. Avoid the same mistakes."
+                build_context="$build_context"$'\n\n'"$__lesson_instruction"
             fi
 
             local build_result=0
@@ -2433,7 +2465,7 @@ process_task_isolated() {
                             "Rebuilt with targeted fix for failing criteria" \
                             "Partial acceptance at outcome stage means the implementation is incomplete — re-read the specific failing criteria in the spec"
                         ((build_attempt++))
-                        run_phase_group "build" "$task" "OUTCOME FIX: $partial_details | $__spec_context" || { mark_task_blocked "$task" "build phase failed during outcome fix"; clear_task_progress; return 1; }
+                        run_phase_group "build" "$task" "OUTCOME FIX: $partial_details | $__spec_context"$'\n\n'"$__lesson_instruction" || { mark_task_blocked "$task" "build phase failed during outcome fix"; clear_task_progress; return 1; }
                         if [[ "$task_complexity" == "trivial" || "$task_complexity" == "simple" ]]; then
                             cr_verdict="approved"
                         else
@@ -2492,7 +2524,7 @@ process_task_isolated() {
                         "Rebuilt with targeted fix for failing criteria" \
                         "Always run the feature against its acceptance criteria before consider it done"
                     ((build_attempt++))
-                    run_phase_group "build" "$task" "OUTCOME FIX: $rebuild_ctx | $__spec_context" || { mark_task_blocked "$task" "build phase failed during outcome fix"; clear_task_progress; return 1; }
+                    run_phase_group "build" "$task" "OUTCOME FIX: $rebuild_ctx | $__spec_context"$'\n\n'"$__lesson_instruction" || { mark_task_blocked "$task" "build phase failed during outcome fix"; clear_task_progress; return 1; }
                     if [[ "$task_complexity" == "trivial" || "$task_complexity" == "simple" ]]; then
                         cr_verdict="approved"
                     else
@@ -2575,7 +2607,7 @@ process_task_isolated() {
                             "Verify blocked on '$failing': $failure_details" \
                             "Rebuilt with targeted fix for $failing issues" \
                             "Always run the full verify check before considering a build complete"
-                        run_phase_group "build" "$task" "$rebuild_context" || { mark_task_blocked "$task" "build phase failed during verify fix"; clear_task_progress; return 1; }
+                        run_phase_group "build" "$task" "$rebuild_context"$'\n\n'"$__lesson_instruction" || { mark_task_blocked "$task" "build phase failed during verify fix"; clear_task_progress; return 1; }
                         if [[ "$task_complexity" == "trivial" || "$task_complexity" == "simple" ]]; then
                             cr_verdict="approved"
                         else
