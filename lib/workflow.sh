@@ -2170,7 +2170,7 @@ process_task_isolated() {
                             return 1
                         fi
                         ((__replan_count++))
-                        __replan_context="CIRCUIT BREAKER: Plan review failed twice. Previous approach: $failure_summary. Try a fundamentally different approach."
+                        __replan_context="CIRCUIT BREAKER: Plan review failed twice. Previous approach: $failure_summary. Knowing everything you know now, scrap this and implement the elegant solution."
                         print_debug "Re-plan context: $__replan_context"
                         __need_replan=true
                         __completed_phases=""
@@ -2272,7 +2272,7 @@ process_task_isolated() {
                             return 1
                         fi
                         ((__replan_count++))
-                        __replan_context="CIRCUIT BREAKER: Code review NEEDS_REBUILD twice. Previous failure: $failure_summary. The implementation approach needs to change — re-plan with a different strategy."
+                        __replan_context="CIRCUIT BREAKER: Code review NEEDS_REBUILD twice. Previous failure: $failure_summary. Knowing everything you know now, scrap this and implement the elegant solution."
                         print_debug "Re-plan context: $__replan_context"
                         __need_replan=true
                         __completed_phases=""
@@ -2345,7 +2345,7 @@ process_task_isolated() {
                             return 1
                         fi
                         ((__replan_count++))
-                        __replan_context="CIRCUIT BREAKER: Build/test failed twice. Previous failure: $failure_summary. The implementation approach needs to change — re-plan with a different strategy."
+                        __replan_context="CIRCUIT BREAKER: Build/test failed twice. Previous failure: $failure_summary. Knowing everything you know now, scrap this and implement the elegant solution."
                         print_debug "Re-plan context: $__replan_context"
                         __need_replan=true
                         __completed_phases=""
@@ -2378,7 +2378,7 @@ process_task_isolated() {
                             return 1
                         fi
                         ((__replan_count++))
-                        __replan_context="CIRCUIT BREAKER: Smoke test NEEDS_REBUILD twice. Failure: $failure_summary. Re-plan with a different implementation strategy."
+                        __replan_context="CIRCUIT BREAKER: Smoke test NEEDS_REBUILD twice. Failure: $failure_summary. Knowing everything you know now, scrap this and implement the elegant solution."
                         __need_replan=true
                         __completed_phases=""
                         clear_task_progress
@@ -2456,7 +2456,7 @@ process_task_isolated() {
                                 return 1
                             fi
                             ((__replan_count++))
-                            __replan_context="CIRCUIT BREAKER: Outcome verification failed twice. Unmet criteria: $failure_summary. Re-read the spec in .claude/spec.md and plan differently."
+                            __replan_context="CIRCUIT BREAKER: Outcome verification failed twice. Unmet criteria: $failure_summary. Re-read the spec in .claude/spec.md. Knowing everything you know now, scrap this and implement the elegant solution."
                             print_debug "Re-plan context: $__replan_context"
                             __need_replan=true
                             __completed_phases=""
@@ -2513,7 +2513,7 @@ process_task_isolated() {
                             return 1
                         fi
                         ((__replan_count++))
-                        __replan_context="CIRCUIT BREAKER: Outcome verification failed twice. Unmet criteria: $failure_summary. Re-read the spec in .claude/spec.md and plan differently."
+                        __replan_context="CIRCUIT BREAKER: Outcome verification failed twice. Unmet criteria: $failure_summary. Re-read the spec in .claude/spec.md. Knowing everything you know now, scrap this and implement the elegant solution."
                         print_debug "Re-plan context: $__replan_context"
                         __need_replan=true
                         __completed_phases=""
@@ -2594,7 +2594,7 @@ process_task_isolated() {
                         return 1
                     fi
                     ((__replan_count++))
-                    __replan_context="CIRCUIT BREAKER: Verification failed twice on '$failing': $failure_details. Plan a different approach that avoids this issue."
+                    __replan_context="CIRCUIT BREAKER: Verification failed twice on '$failing': $failure_details. Knowing everything you know now, scrap this and implement the elegant solution."
                     print_debug "Re-plan context: $__replan_context"
                     __need_replan=true
                     __completed_phases=""
