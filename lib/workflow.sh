@@ -626,8 +626,8 @@ _batch_create_worktree() {
 
     # Copy skills (preserving symlinks) and settings from source repo
     if [[ -d "$source_dir/.claude/skills" ]] || [[ -L "$source_dir/.claude/skills" ]]; then
-        mkdir -p "$worktree_path/.claude"
-        cp -a "$source_dir/.claude/skills" "$worktree_path/.claude/skills"
+        mkdir -p "$worktree_path/.claude/skills"
+        cp -a "$source_dir/.claude/skills/"* "$worktree_path/.claude/skills/" 2>/dev/null || true
     fi
     local f
     for f in .claude/settings.json .claude/settings.local.json .claude/.buildcrew-link; do
