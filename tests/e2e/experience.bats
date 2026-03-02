@@ -358,3 +358,37 @@ COMMON_SH="$BUILDCREW_ROOT/lib/common.sh"
     [ "$status" -eq 0 ]
     [[ "$output" == *'if [[ -n "$skill_catalog" ]]'* ]]
 }
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Task: Increase default UAT_ARTIFACT_TIMEOUT from 1800s to 7200s
+# ─────────────────────────────────────────────────────────────────────────────
+UAT_SH="$BUILDCREW_ROOT/lib/uat.sh"
+
+# Happy path: user sources uat.sh — the default UAT_ARTIFACT_TIMEOUT is 7200 (2 hours).
+@test "experience: UAT_ARTIFACT_TIMEOUT default is 7200 in uat.sh source" {
+    grep -q 'UAT_ARTIFACT_TIMEOUT="${UAT_ARTIFACT_TIMEOUT:-7200}"' "$UAT_SH"
+}
+
+# Happy path: user overrides UAT_ARTIFACT_TIMEOUT via .buildcrew/config — the override takes effect.
+@test "experience: UAT_ARTIFACT_TIMEOUT config override is respected by load_uat_config" {
+    source_lib "uat.sh"
+    mkdir -p .buildcrew
+    echo 'UAT_ARTIFACT_TIMEOUT=3600' > .buildcrew/config
+    load_uat_config
+    [ "$UAT_ARTIFACT_TIMEOUT" = "3600" ]
+}
+
+# Regression guard: old 1800 default is completely gone from uat.sh source.
+@test "experience: no residual 1800 default remains in uat.sh" {
+    ! grep -q ':-1800' "$UAT_SH"
+}
+
+# Adversarial: user puts a non-numeric UAT_ARTIFACT_TIMEOUT in config — it is silently ignored.
+@test "experience: non-numeric UAT_ARTIFACT_TIMEOUT in config is rejected" {
+    source_lib "uat.sh"
+    mkdir -p .buildcrew
+    echo 'UAT_ARTIFACT_TIMEOUT=forever' > .buildcrew/config
+    UAT_ARTIFACT_TIMEOUT=7200
+    load_uat_config
+    [ "$UAT_ARTIFACT_TIMEOUT" = "7200" ]
+}
