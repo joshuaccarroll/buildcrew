@@ -2161,7 +2161,10 @@ __run_phase_group_impl() {
         phase_tag="buildcrew-${phase}:${batch_nonce}"
     fi
 
+    # Extract allowed-tools from SKILL.md frontmatter before stripping it
+    local allowed_tools=""
     if [[ -f "$skill_file" ]]; then
+        allowed_tools=$(awk 'NR==1&&/^---/{f=1;next} f&&/^---/{f=0;next} f&&/^allowed-tools:/{sub(/^allowed-tools:[[:space:]]*/,"");print}' "$skill_file")
         # Strip YAML frontmatter (content between first and second --- delimiters)
         local skill_content
         skill_content=$(awk 'NR==1&&/^---/{f=1;next} f&&/^---/{f=0;next} !f' "$skill_file")
@@ -2182,6 +2185,19 @@ __run_phase_group_impl() {
     project_context=$(load_project_context)
     if [[ -n "$project_context" ]]; then
         prompt="$prompt"$'\n\nProject Context:\n'"$project_context"
+    fi
+
+    # Inject skill catalog
+    local skill_catalog
+    skill_catalog=$(build_skill_catalog)
+    if [[ -n "$skill_catalog" ]]; then
+        prompt="$prompt"$'\n\nSkill Catalog:\n'"$skill_catalog"
+    fi
+
+    # Build --allowedTools flag if declared in skill frontmatter
+    local allowed_tools_flag=""
+    if [[ -n "$allowed_tools" ]]; then
+        allowed_tools_flag="--allowedTools $allowed_tools"
     fi
 
     # Save terminal state — claude may leave terminal in raw/no-echo mode when
@@ -2205,16 +2221,16 @@ __run_phase_group_impl() {
     if [[ -n "$__LOG_FILE" ]]; then
         log_msg "--- claude output start: $phase ---"
         if [[ "$__ACTIVITY_TRACKING" == "true" ]]; then
-            claude -p "$prompt" --max-turns "$max_turns" --output-format stream-json --verbose 2>&1 | python3 "$BUILDCREW_HOME/lib/stream_processor.py" --activity-file ".buildcrew/.agent-activity" --max-turns "$max_turns" | tee -a "$__LOG_FILE" || true
+            claude -p "$prompt" --max-turns "$max_turns" $allowed_tools_flag --output-format stream-json --verbose 2>&1 | python3 "$BUILDCREW_HOME/lib/stream_processor.py" --activity-file ".buildcrew/.agent-activity" --max-turns "$max_turns" | tee -a "$__LOG_FILE" || true
         else
-            claude -p "$prompt" --max-turns "$max_turns" 2>&1 | tee -a "$__LOG_FILE" || true
+            claude -p "$prompt" --max-turns "$max_turns" $allowed_tools_flag 2>&1 | tee -a "$__LOG_FILE" || true
         fi
         log_msg "--- claude output end: $phase ---"
     else
         if [[ "$__ACTIVITY_TRACKING" == "true" ]]; then
-            claude -p "$prompt" --max-turns "$max_turns" --output-format stream-json --verbose 2>&1 | python3 "$BUILDCREW_HOME/lib/stream_processor.py" --activity-file ".buildcrew/.agent-activity" --max-turns "$max_turns" || true
+            claude -p "$prompt" --max-turns "$max_turns" $allowed_tools_flag --output-format stream-json --verbose 2>&1 | python3 "$BUILDCREW_HOME/lib/stream_processor.py" --activity-file ".buildcrew/.agent-activity" --max-turns "$max_turns" || true
         else
-            claude -p "$prompt" --max-turns "$max_turns" || true
+            claude -p "$prompt" --max-turns "$max_turns" $allowed_tools_flag || true
         fi
     fi
 
@@ -2262,16 +2278,16 @@ __run_phase_group_impl() {
         if [[ -n "$__LOG_FILE" ]]; then
             log_msg "--- claude output start: $phase ---"
             if [[ "$__ACTIVITY_TRACKING" == "true" ]]; then
-                claude -p "$prompt" --max-turns "$max_turns" --output-format stream-json --verbose 2>&1 | python3 "$BUILDCREW_HOME/lib/stream_processor.py" --activity-file ".buildcrew/.agent-activity" --max-turns "$max_turns" | tee -a "$__LOG_FILE" || true
+                claude -p "$prompt" --max-turns "$max_turns" $allowed_tools_flag --output-format stream-json --verbose 2>&1 | python3 "$BUILDCREW_HOME/lib/stream_processor.py" --activity-file ".buildcrew/.agent-activity" --max-turns "$max_turns" | tee -a "$__LOG_FILE" || true
             else
-                claude -p "$prompt" --max-turns "$max_turns" 2>&1 | tee -a "$__LOG_FILE" || true
+                claude -p "$prompt" --max-turns "$max_turns" $allowed_tools_flag 2>&1 | tee -a "$__LOG_FILE" || true
             fi
             log_msg "--- claude output end: $phase ---"
         else
             if [[ "$__ACTIVITY_TRACKING" == "true" ]]; then
-                claude -p "$prompt" --max-turns "$max_turns" --output-format stream-json --verbose 2>&1 | python3 "$BUILDCREW_HOME/lib/stream_processor.py" --activity-file ".buildcrew/.agent-activity" --max-turns "$max_turns" || true
+                claude -p "$prompt" --max-turns "$max_turns" $allowed_tools_flag --output-format stream-json --verbose 2>&1 | python3 "$BUILDCREW_HOME/lib/stream_processor.py" --activity-file ".buildcrew/.agent-activity" --max-turns "$max_turns" || true
             else
-                claude -p "$prompt" --max-turns "$max_turns" || true
+                claude -p "$prompt" --max-turns "$max_turns" $allowed_tools_flag || true
             fi
         fi
 

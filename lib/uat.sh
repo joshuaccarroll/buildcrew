@@ -513,11 +513,20 @@ _uat_run_agent_phase() {
         prompt="$prompt. Context: $extra_context"
     fi
 
+    # Extract allowed-tools from SKILL.md frontmatter before stripping it
+    local allowed_tools=""
     if [[ -n "$skill_file" ]]; then
+        allowed_tools=$(awk 'NR==1&&/^---/{f=1;next} f&&/^---/{f=0;next} f&&/^allowed-tools:/{sub(/^allowed-tools:[[:space:]]*/,"");print}' "$skill_file")
         # Strip YAML frontmatter (content between first and second --- delimiters)
         local skill_content
         skill_content=$(awk 'NR==1&&/^---/{f=1;next} f&&/^---/{f=0;next} !f' "$skill_file")
         prompt="$prompt"$'\n\n---\n\n'"$skill_content"
+    fi
+
+    # Build --allowedTools flag if declared
+    local allowed_tools_flag=""
+    if [[ -n "$allowed_tools" ]]; then
+        allowed_tools_flag="--allowedTools $allowed_tools"
     fi
 
     # Inject project context (lessons, etc.)
@@ -542,10 +551,10 @@ _uat_run_agent_phase() {
     # Invoke Claude agent
     if [[ -n "${__LOG_FILE:-}" ]]; then
         log_msg "--- claude output start: $phase_name ---"
-        claude -p "$prompt" --max-turns "$max_turns" 2>&1 | tee -a "$__LOG_FILE" || true
+        claude -p "$prompt" --max-turns "$max_turns" $allowed_tools_flag 2>&1 | tee -a "$__LOG_FILE" || true
         log_msg "--- claude output end: $phase_name ---"
     else
-        claude -p "$prompt" --max-turns "$max_turns" || true
+        claude -p "$prompt" --max-turns "$max_turns" $allowed_tools_flag || true
     fi
 
     stop_file_monitor
@@ -562,10 +571,10 @@ _uat_run_agent_phase() {
         log_msg "=== UAT PHASE: $phase_name retry ==="
         if [[ -n "${__LOG_FILE:-}" ]]; then
             log_msg "--- claude output start: $phase_name ---"
-            claude -p "$prompt" --max-turns "$max_turns" 2>&1 | tee -a "$__LOG_FILE" || true
+            claude -p "$prompt" --max-turns "$max_turns" $allowed_tools_flag 2>&1 | tee -a "$__LOG_FILE" || true
             log_msg "--- claude output end: $phase_name ---"
         else
-            claude -p "$prompt" --max-turns "$max_turns" || true
+            claude -p "$prompt" --max-turns "$max_turns" $allowed_tools_flag || true
         fi
 
         stop_file_monitor
