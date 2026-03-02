@@ -3614,12 +3614,8 @@ process_task_isolated() {
                             break
                         fi
                         # Rebuild to fix failing criteria
-                        append_lesson "outcome" \
-                            "Acceptance criteria partially met on attempt $outcome_attempt: $partial_details" \
-                            "Rebuilt with targeted fix for failing criteria" \
-                            "Partial acceptance at outcome stage means the implementation is incomplete — re-read the specific failing criteria in the spec"
                         ((build_attempt++))
-                        run_phase_group "build" "$task" "OUTCOME FIX: $partial_details | $__spec_context"$'\n\n'"$__lesson_instruction" || { mark_task_blocked "$task" "build phase failed during outcome fix"; clear_task_progress; return 1; }
+                        run_phase_group "build" "$task" "OUTCOME FIX: $partial_details | RULE: Partial acceptance means the implementation is incomplete — re-read the specific failing criteria in .claude/spec.md before writing any code. | $__spec_context"$'\n\n'"$__lesson_instruction" || { mark_task_blocked "$task" "build phase failed during outcome fix"; clear_task_progress; return 1; }
                         if [[ "$task_complexity" == "trivial" || "$task_complexity" == "simple" ]]; then
                             cr_verdict="approved"
                         else
