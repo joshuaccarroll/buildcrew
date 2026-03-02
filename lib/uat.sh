@@ -245,6 +245,85 @@ ISOLATION_EOF
 }
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# _uat_regress_set_artifact — Set artifact globals from a local directory
+# (used by --regress mode instead of uat_phase_wait_artifact)
+# ═══════════════════════════════════════════════════════════════════════════════
+#
+# Args:
+#   regress_path — absolute path to the artifact directory
+#   readme_path  — path to the README (for hash computation)
+#
+# Sets globals: __UAT_ARTIFACT_PATH, __UAT_ARTIFACT_TYPE, __UAT_RUN_COMMAND,
+#   __UAT_INSTALL_COMMAND, __UAT_HEALTH_CHECK, __UAT_STOP_COMMAND,
+#   __UAT_BUILD_ITERATION, __UAT_README_HASH
+
+_uat_regress_set_artifact() {
+    local regress_path="${1:-}"
+    local readme_path="${2:-}"
+
+    if [[ -z "$regress_path" ]]; then
+        print_error "_uat_regress_set_artifact: regress_path is required"
+        return 1
+    fi
+
+    # Reset globals (same pattern as _uat_read_manifest)
+    __UAT_ARTIFACT_TYPE=""
+    __UAT_ARTIFACT_PATH=""
+    __UAT_RUN_COMMAND=""
+    __UAT_INSTALL_COMMAND=""
+    __UAT_HEALTH_CHECK=""
+    __UAT_STOP_COMMAND=""
+    __UAT_BUILD_ITERATION=""
+    __UAT_README_HASH=""
+
+    # Set artifact path
+    __UAT_ARTIFACT_PATH="$regress_path"
+
+    # Read config overrides from .buildcrew/config
+    local config_file=".buildcrew/config"
+    if [[ -f "$config_file" ]]; then
+        local line key value
+        while IFS= read -r line || [[ -n "$line" ]]; do
+            [[ "$line" =~ ^[[:space:]]*# ]] && continue
+            [[ "$line" =~ ^[[:space:]]*$ ]] && continue
+            if [[ "$line" =~ ^([A-Z_][A-Z0-9_]*)=(.*)$ ]]; then
+                key="${BASH_REMATCH[1]}"
+                value="${BASH_REMATCH[2]}"
+                # Strip surrounding quotes
+                value="${value#\"}"
+                value="${value%\"}"
+                value="${value#\'}"
+                value="${value%\'}"
+                case "$key" in
+                    UAT_ARTIFACT_TYPE)   __UAT_ARTIFACT_TYPE="$value" ;;
+                    UAT_RUN_COMMAND)     __UAT_RUN_COMMAND="$value" ;;
+                    UAT_INSTALL_COMMAND) __UAT_INSTALL_COMMAND="$value" ;;
+                    UAT_HEALTH_CHECK)    __UAT_HEALTH_CHECK="$value" ;;
+                    UAT_STOP_COMMAND)    __UAT_STOP_COMMAND="$value" ;;
+                esac
+            fi
+        done < "$config_file"
+    fi
+
+    # Default artifact type to "cli" if not set
+    if [[ -z "$__UAT_ARTIFACT_TYPE" ]]; then
+        __UAT_ARTIFACT_TYPE="cli"
+    fi
+
+    # Compute iteration = last_tested + 1
+    local last_tested
+    last_tested=$(read_last_tested_iteration ".buildcrew")
+    __UAT_BUILD_ITERATION=$((last_tested + 1))
+
+    # Compute README hash
+    if [[ -n "$readme_path" ]] && [[ -f "$readme_path" ]]; then
+        __UAT_README_HASH=$(_uat_sha256_hash "$readme_path") || __UAT_README_HASH=""
+    fi
+
+    return 0
+}
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # 2. uat_run_phases — Main orchestrator loop
 # ═══════════════════════════════════════════════════════════════════════════════
 
@@ -252,6 +331,7 @@ uat_run_phases() {
     local readme_path="$1"
     local project_name="$2"
     local auto_mode="${3:-false}"
+    local regress_path="${4:-}"
 
     if [[ -z "$readme_path" || -z "$project_name" ]]; then
         print_error "uat_run_phases: readme_path and project_name are required"
@@ -319,26 +399,32 @@ uat_run_phases() {
     local signal_dir="${HOME}/.buildcrew/uat-signals/${project_name}"
 
     while true; do
-        # Phase 4: Wait for artifact
-        uat_phase_wait_artifact "$project_name" || return 1
+        # Phase 4: Wait for artifact (or set from regress path)
+        if [[ -n "$regress_path" ]]; then
+            _uat_regress_set_artifact "$regress_path" "$readme_path" || return 1
+        else
+            uat_phase_wait_artifact "$project_name" || return 1
+        fi
 
         local build_iteration="$__UAT_BUILD_ITERATION"
 
-        # Check for README changes
-        if [[ -n "$__UAT_README_HASH" ]] && [[ -f .buildcrew/last_readme_hash ]]; then
-            local stored_hash
-            stored_hash=$(cat .buildcrew/last_readme_hash 2>/dev/null)
-            if [[ "$stored_hash" != "$__UAT_README_HASH" ]]; then
-                print_info "README changed — re-running Phases 1-3"
-                cp "$readme_path" README.md
-                echo "$__UAT_README_HASH" > .buildcrew/last_readme_hash
-                # Clear stale scenarios and harness
-                rm -rf scenarios/* harness/*
-                mkdir -p scenarios harness
-                failing_scenarios=""
-                uat_phase_stories || return 1
-                uat_phase_scenarios || return 1
-                uat_phase_harness || return 1
+        # Check for README changes (skip in regress mode — single-pass)
+        if [[ -z "$regress_path" ]]; then
+            if [[ -n "$__UAT_README_HASH" ]] && [[ -f .buildcrew/last_readme_hash ]]; then
+                local stored_hash
+                stored_hash=$(cat .buildcrew/last_readme_hash 2>/dev/null)
+                if [[ "$stored_hash" != "$__UAT_README_HASH" ]]; then
+                    print_info "README changed — re-running Phases 1-3"
+                    cp "$readme_path" README.md
+                    echo "$__UAT_README_HASH" > .buildcrew/last_readme_hash
+                    # Clear stale scenarios and harness
+                    rm -rf scenarios/* harness/*
+                    mkdir -p scenarios harness
+                    failing_scenarios=""
+                    uat_phase_stories || return 1
+                    uat_phase_scenarios || return 1
+                    uat_phase_harness || return 1
+                fi
             fi
         fi
 
@@ -351,8 +437,12 @@ uat_run_phases() {
             "$__UAT_INSTALL_COMMAND" \
             "$__UAT_HEALTH_CHECK" || {
             local setup_rc=$?
-            # Install failure → write error verdict and loop back
+            # Install failure → write error verdict and loop back (or exit in regress mode)
             if [[ $setup_rc -eq 2 ]]; then
+                if [[ -n "$regress_path" ]]; then
+                    print_error "Artifact setup failed in regress mode"
+                    return 1
+                fi
                 local error_json
                 error_json=$(jq -n '[{"scenario":"artifact_setup","status":"error","summary":"Artifact install or setup failed","expected":"Artifact installs successfully","actual":"Install command exited non-zero"}]')
                 write_verdict "$signal_dir" "$error_json" "$build_iteration"
@@ -374,7 +464,13 @@ uat_run_phases() {
 
         # Phase 5: Execute scenarios
         uat_phase_execute "$build_iteration" "$artifact_context" "$failing_scenarios" || {
-            # Execution failed entirely — write error verdict
+            # Execution failed entirely
+            if [[ -n "$regress_path" ]]; then
+                uat_stop_server
+                print_error "Phase 5 execution failed in regress mode"
+                return 1
+            fi
+            # Write error verdict
             local error_json
             error_json=$(jq -n '[{"scenario":"harness_execution","status":"error","summary":"Phase 5 execution failed","expected":"Test harness runs successfully","actual":"Claude agent crashed or timed out"}]')
             write_verdict "$signal_dir" "$error_json" "$build_iteration"
@@ -395,6 +491,10 @@ uat_run_phases() {
         # Phase 6: Write verdict
         uat_phase_verdict "$signal_dir" "$build_iteration" || {
             # Phase 6 failed (e.g., no valid scenario results)
+            if [[ -n "$regress_path" ]]; then
+                print_error "Phase 6 verdict failed in regress mode"
+                return 1
+            fi
             retry_count=$((retry_count + 1))
             if [[ $retry_count -ge $UAT_MAX_RETRIES ]]; then
                 print_error "UAT max retries ($UAT_MAX_RETRIES) exhausted"
@@ -424,6 +524,12 @@ uat_run_phases() {
                 print_warning "Only disputed scenarios remain. Check disputes.md for details."
                 return 2
             fi
+        fi
+
+        # In regress mode, exit after single pass — no retry loop
+        if [[ -n "$regress_path" ]]; then
+            print_error "Regress mode: ${__VERDICT_FAILED} failures, ${__VERDICT_ERRORED} errors"
+            return 1
         fi
 
         # Failures or errors exist — extract failing scenario names for retry

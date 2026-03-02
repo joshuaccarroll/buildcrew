@@ -1916,6 +1916,7 @@ cmd_uat() {
     local artifact_dir=""
     local signal_dir=""
     local uat_auto=false
+    local regress_path=""
 
     # Parse arguments
     while [[ $# -gt 0 ]]; do
@@ -1952,6 +1953,14 @@ cmd_uat() {
                 signal_dir="$2"
                 shift 2
                 ;;
+            --regress)
+                if [[ -z "${2:-}" ]]; then
+                    echo -e "${RED}Error:${NC} --regress requires a path argument"
+                    exit 1
+                fi
+                regress_path="$2"
+                shift 2
+                ;;
             --auto)
                 uat_auto=true
                 shift
@@ -1967,11 +1976,13 @@ cmd_uat() {
                 echo "    --project <name>       Project identifier (default: derived from README parent dir)"
                 echo "    --artifact-dir <path>  Where to find the built artifact"
                 echo "    --signal-dir <path>    Where to write signal/verdict files"
+                echo "    --regress <path>       Run UAT standalone against an existing artifact directory (implies --auto)"
                 echo "    --auto                 Auto mode: log disputes without pausing"
                 echo "    --help, -h             Show this help message"
                 echo ""
-                echo -e "${BOLD}EXAMPLE:${NC}"
+                echo -e "${BOLD}EXAMPLES:${NC}"
                 echo "    buildcrew uat --readme ../my-project/README.md"
+                echo "    buildcrew uat --readme ../my-project/README.md --regress /path/to/artifact"
                 exit 0
                 ;;
             *)
@@ -2011,6 +2022,28 @@ cmd_uat() {
         exit 1
     fi
 
+    # Validate --regress
+    if [[ -n "$regress_path" ]]; then
+        # Conflicts with --artifact-dir
+        if [[ -n "$artifact_dir" ]]; then
+            echo -e "${RED}Error:${NC} --regress and --artifact-dir cannot be used together"
+            exit 1
+        fi
+        # Resolve to absolute path
+        if command -v realpath >/dev/null 2>&1; then
+            regress_path="$(realpath "$regress_path" 2>/dev/null)" || true
+        else
+            regress_path="$(cd "$(dirname "$regress_path")" 2>/dev/null && pwd)/$(basename "$regress_path")"
+        fi
+        # Must be a directory
+        if [[ ! -d "$regress_path" ]]; then
+            echo -e "${RED}Error:${NC} --regress path is not a directory: $regress_path"
+            exit 1
+        fi
+        # --regress implies --auto
+        uat_auto=true
+    fi
+
     # Source UAT libraries
     source "$BUILDCREW_HOME/lib/uat_signal.sh"
     source "$BUILDCREW_HOME/lib/uat.sh"
@@ -2024,7 +2057,7 @@ cmd_uat() {
 
     # Initialize and run UAT phases
     uat_init "$readme_path" "$project_name"
-    uat_run_phases "$readme_path" "$project_name" "$uat_auto"
+    uat_run_phases "$readme_path" "$project_name" "$uat_auto" "$regress_path"
 }
 
 cmd_dash() {

@@ -209,6 +209,108 @@ EOF
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
+# _uat_regress_set_artifact tests
+# ─────────────────────────────────────────────────────────────────────────────
+
+@test "_uat_regress_set_artifact: sets path and defaults (type=cli, run_command empty, iteration=1)" {
+    mkdir -p .buildcrew
+    local artifact_dir
+    artifact_dir=$(mktemp -d)
+    _uat_regress_set_artifact "$artifact_dir" ""
+    [ "$__UAT_ARTIFACT_PATH" = "$artifact_dir" ]
+    [ "$__UAT_ARTIFACT_TYPE" = "cli" ]
+    [ "$__UAT_RUN_COMMAND" = "" ]
+    [ "$__UAT_BUILD_ITERATION" = "1" ]
+    rm -rf "$artifact_dir"
+}
+
+@test "_uat_regress_set_artifact: reads type from config" {
+    mkdir -p .buildcrew
+    echo 'UAT_ARTIFACT_TYPE=api' > .buildcrew/config
+    local artifact_dir
+    artifact_dir=$(mktemp -d)
+    _uat_regress_set_artifact "$artifact_dir" ""
+    [ "$__UAT_ARTIFACT_TYPE" = "api" ]
+    rm -rf "$artifact_dir"
+}
+
+@test "_uat_regress_set_artifact: reads run_command from config" {
+    mkdir -p .buildcrew
+    echo 'UAT_RUN_COMMAND=npm start' > .buildcrew/config
+    local artifact_dir
+    artifact_dir=$(mktemp -d)
+    _uat_regress_set_artifact "$artifact_dir" ""
+    [ "$__UAT_RUN_COMMAND" = "npm start" ]
+    rm -rf "$artifact_dir"
+}
+
+@test "_uat_regress_set_artifact: reads all 5 config overrides together" {
+    mkdir -p .buildcrew
+    cat > .buildcrew/config << 'EOF'
+UAT_ARTIFACT_TYPE=api
+UAT_RUN_COMMAND=node server.js
+UAT_INSTALL_COMMAND=npm install
+UAT_HEALTH_CHECK=curl http://localhost:3000
+UAT_STOP_COMMAND=kill $PID
+EOF
+    local artifact_dir
+    artifact_dir=$(mktemp -d)
+    _uat_regress_set_artifact "$artifact_dir" ""
+    [ "$__UAT_ARTIFACT_TYPE" = "api" ]
+    [ "$__UAT_RUN_COMMAND" = "node server.js" ]
+    [ "$__UAT_INSTALL_COMMAND" = "npm install" ]
+    [ "$__UAT_HEALTH_CHECK" = "curl http://localhost:3000" ]
+    [ "$__UAT_STOP_COMMAND" = 'kill $PID' ]
+    rm -rf "$artifact_dir"
+}
+
+@test "_uat_regress_set_artifact: iteration = last_tested + 1" {
+    mkdir -p .buildcrew
+    echo "5" > .buildcrew/last_tested_iteration
+    local artifact_dir
+    artifact_dir=$(mktemp -d)
+    _uat_regress_set_artifact "$artifact_dir" ""
+    [ "$__UAT_BUILD_ITERATION" = "6" ]
+    rm -rf "$artifact_dir"
+}
+
+@test "_uat_regress_set_artifact: iteration defaults to 1 when no last_tested file" {
+    mkdir -p .buildcrew
+    rm -f .buildcrew/last_tested_iteration
+    local artifact_dir
+    artifact_dir=$(mktemp -d)
+    _uat_regress_set_artifact "$artifact_dir" ""
+    [ "$__UAT_BUILD_ITERATION" = "1" ]
+    rm -rf "$artifact_dir"
+}
+
+@test "_uat_regress_set_artifact: requires regress_path argument" {
+    run _uat_regress_set_artifact "" ""
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"required"* ]]
+}
+
+@test "_uat_regress_set_artifact: computes README hash (64-char hex)" {
+    mkdir -p .buildcrew
+    create_test_readme .
+    local artifact_dir
+    artifact_dir=$(mktemp -d)
+    _uat_regress_set_artifact "$artifact_dir" "README.md"
+    [ -n "$__UAT_README_HASH" ]
+    [[ ${#__UAT_README_HASH} -eq 64 ]]
+    rm -rf "$artifact_dir"
+}
+
+@test "_uat_regress_set_artifact: handles missing readme gracefully (empty hash)" {
+    mkdir -p .buildcrew
+    local artifact_dir
+    artifact_dir=$(mktemp -d)
+    _uat_regress_set_artifact "$artifact_dir" "/nonexistent/README.md"
+    [ "$__UAT_README_HASH" = "" ]
+    rm -rf "$artifact_dir"
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
 # uat_init tests
 # ─────────────────────────────────────────────────────────────────────────────
 
