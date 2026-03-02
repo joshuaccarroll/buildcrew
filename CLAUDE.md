@@ -4,6 +4,7 @@
 
 - The shell orchestrator (`lib/workflow.sh`) launches `claude -p` once per phase in **phase-isolated mode**.
 - Each phase is a separate skill: `skills/buildcrew-*/SKILL.md` (spec, research, review, build, simplify, codereview, test, outcome, verify).
+- **UAT subsystem** (`lib/uat.sh`, `lib/uat_signal.sh`, `lib/artifact.sh`) provides blind scenario-based acceptance testing.
 - All orchestrator↔Claude communication is **file-based only** — no pipes, no env vars, no return values.
 
 ## Signal Flow
@@ -31,6 +32,10 @@ An unknown verdict hits the catch-all and marks the task blocked:
 | test       | `approved`, `needs_rebuild`, `test_failure`  |
 | outcome    | `passed`, `partial`, `failed`                |
 | verify     | `complete`, `blocked`                        |
+| uat-stories | `pass`, `fail`                              |
+| uat-scenarios | `pass`, `fail`                            |
+| uat-harness | `pass`, `fail`, `disputed`                  |
+| uat-execute | `pass`, `fail`, `error`, `disputed`         |
 
 ## Key Files
 
@@ -39,6 +44,9 @@ An unknown verdict hits the catch-all and marks the task blocked:
 | `lib/workflow.sh` | Phase orchestrator — reads verdicts, drives retry/circuit breaker logic |
 | `lib/common.sh` | Shared utilities, file monitor, print helpers |
 | `lib/statusline.sh` | Status line integration for Claude Code status bar |
+| `lib/uat.sh` | UAT orchestrator — phase sequencing, polling, retry loop, server lifecycle |
+| `lib/uat_signal.sh` | UAT signal management — verdict I/O, iteration tracking, atomic writes |
+| `lib/artifact.sh` | Artifact publishing — type detection, manifest, hints, verdict context |
 | `lib/version.sh` | Version management |
 | `lib/update.sh` | Update checker |
 | `skills/buildcrew-*/SKILL.md` | Per-phase skill prompts |

@@ -112,6 +112,18 @@ After implementing changes, update `README.md` to reflect the actual implementat
 - Update usage examples if API or CLI interfaces changed
 - Keep the "Current Status" section accurate
 
+### UAT Artifact Hints
+
+If this project produces a runnable artifact (CLI tool, API server, library), write `.buildcrew/artifact-hints.json` with:
+- `run_command`: How to run/start the artifact (e.g., `./bin/myapp serve --port 8080`)
+- `install_command` (optional): Setup command (e.g., `pip install -e '.[dev]'`)
+- `health_check` (optional): Command that exits 0 when ready (e.g., `curl -sf http://localhost:8080/health`)
+- `stop_command` (optional): How to stop it (e.g., `docker compose down`)
+
+### UAT Failure Context
+
+If `.buildcrew/uat-context.md` exists, read it first. It contains feedback from blind user acceptance testing — scenarios that failed or errored when tested against the built artifact. Fix the described issues. Do NOT access the UAT directory or test scenarios.
+
 ---
 
 ## Phase Result Protocol

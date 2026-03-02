@@ -277,10 +277,13 @@ buildcrew run --auto         # Run fully unattended — auto-approve all interac
 buildcrew run --full-pipeline  # Force all phases regardless of complexity assessment
 buildcrew run --batch        # Run pending tasks in parallel using git worktrees
 buildcrew run --max-parallel N   # Max concurrent tasks in batch mode (default: 5)
+buildcrew run --uat          # After build, enter watch mode for UAT verdicts (implies --auto)
 buildcrew run --keep-logs    # Retain the activity log after a successful run
 buildcrew run --max-invocations N  # Set max Claude invocations per run (default: 15)
 buildcrew run --verbose      # Show orchestrator decisions, phase verdicts, and invocation counts
 buildcrew run --debug        # Alias for --verbose
+buildcrew uat --readme <path>  # Run blind UAT against a project's README
+buildcrew uat --readme <path> --auto  # Run UAT fully unattended
 buildcrew status             # Show backlog stats and last workflow result
 buildcrew stop               # Stop after current task completes
 buildcrew reset              # Clear blocked tasks and clean up artifacts
@@ -316,6 +319,7 @@ buildcrew uninstall          # Remove BuildCrew
 | `--auto` | Run fully unattended — auto-approve all interactive pauses |
 | `--batch` | Run all pending BACKLOG.md tasks in parallel, each through the full phase pipeline in its own git worktree. Use `--resume` to pick up where an interrupted batch left off. Incompatible with `--single` and `--task`. |
 | `--max-parallel N` | Max concurrent tasks in batch mode (default: 5). Also configurable via `MAX_PARALLEL` in `.buildcrew/config`. |
+| `--uat` | After a successful build, publish the artifact and enter watch mode for UAT verdicts. Implies `--auto`. Use with `buildcrew uat` in a separate terminal. |
 | `--keep-logs` | Retain the activity log after a successful run (the log is always kept on failure) |
 | `--max-invocations N` | Set max Claude invocations per run (default: 15) |
 | `--verbose` / `--debug` | Show orchestrator decisions, phase verdicts, and invocation counts |
@@ -335,6 +339,10 @@ Project-level configuration lives in `.buildcrew/config` (created from `.buildcr
 | `AUTO_MODE` | `false` | Run fully unattended — auto-approve all interactive pauses. Equivalent to `--auto`. |
 | `KEEP_LOGS` | `false` | Retain the activity log after a successful run. Equivalent to `--keep-logs`. |
 | `MAX_PARALLEL` | `5` | Max concurrent tasks in batch mode. Equivalent to `--max-parallel N`. |
+| `UAT_MAX_RETRIES` | `5` | Max build-fix-test iterations in UAT watch mode. |
+| `UAT_ARTIFACT_TYPE` | (auto-detected) | Override artifact type detection (`cli`, `api`, `library`, `tui`). |
+| `UAT_RUN_COMMAND` | (auto-detected) | Override how to run/start the artifact. |
+| `BUILD_UAT_WATCH_TIMEOUT` | `600` | Seconds to wait for UAT verdict before exiting watch mode. |
 
 Example `.buildcrew/config`:
 
@@ -373,6 +381,82 @@ If any phase fails its quality gate **twice consecutively**, BuildCrew stops gri
 4. Outputs: `[CIRCUIT BREAKER] Approach failed twice at <phase>. Re-planning from scratch with failure context.`
 
 The re-plan gets **one attempt**. If it hits the circuit breaker again, the task is blocked and reported to the user.
+
+---
+
+## Blind UAT (User Acceptance Testing)
+
+BuildCrew includes a **blind UAT system** that tests your project against its README — without the test agent seeing the source code or the build agent seeing the tests.
+
+### How it works
+
+1. The **build side** writes code and publishes a runnable artifact
+2. The **UAT side** reads only the README, generates test scenarios, and executes them against the artifact
+3. If tests fail, a structured verdict (what failed, what was expected) is sent back to the build side — without revealing the test code
+4. The build agent fixes the issues and the cycle repeats
+
+This ensures the tests validate *documented behavior*, not implementation details.
+
+### Quick Start (new project)
+
+```bash
+# Terminal A: build the project
+cd my-project
+buildcrew plan                           # create README + spec + plan
+buildcrew run --uat                      # build code, then watch for UAT results
+
+# Terminal B: run blind UAT (in a sibling directory)
+mkdir ../my-project-uat && cd ../my-project-uat
+buildcrew uat --readme ../my-project/README.md
+```
+
+### Adding UAT to an existing project
+
+Any project with a README can use UAT — no setup needed in the project directory itself:
+
+```bash
+# From your existing project (already has README.md)
+cd my-existing-project
+buildcrew run --uat                      # builds normally, then enters watch mode
+
+# In a new sibling directory
+mkdir ../my-existing-project-uat && cd ../my-existing-project-uat
+buildcrew uat --readme ../my-existing-project/README.md
+```
+
+The `--uat` flag on `buildcrew run` tells the build side to publish an artifact and watch for UAT verdicts after each successful build. The `buildcrew uat` command is fully standalone — it only needs a path to the README.
+
+For projects that don't auto-detect correctly (e.g., artifact type or run command), add overrides to `.buildcrew/config`:
+
+```bash
+# In the build project's .buildcrew/config
+UAT_ARTIFACT_TYPE=cli           # cli, api, library, tui
+UAT_RUN_COMMAND=./bin/myapp     # how to run the artifact
+```
+
+### UAT Options
+
+| Flag | Description |
+|------|-------------|
+| `--readme <path>` | (Required) Path to the project's README.md |
+| `--project <name>` | Project identifier (default: derived from README parent dir) |
+| `--artifact-dir <path>` | Override artifact discovery path |
+| `--signal-dir <path>` | Override signal file path |
+| `--auto` | Auto mode: log disputes without pausing |
+
+### How UAT phases work
+
+| Phase | Actor | Description |
+|-------|-------|-------------|
+| 1. Extract User Stories | Claude agent | Reads README, extracts user stories |
+| 2. Generate Scenarios | Claude agent | Creates Given/When/Then test scenarios |
+| 3. Build Test Harness | Claude agent | Writes executable test scripts |
+| 4. Wait for Artifact | Orchestrator | Polls for build artifact (manifest.json) |
+| 4.5. Set Up Environment | Orchestrator | Creates wrapper scripts so agent never touches source |
+| 5. Execute Scenarios | Claude agent | Runs tests against artifact, collects results |
+| 6. Write Verdict | Orchestrator | Assembles verdict, sends to build side |
+
+On failure, the build side re-enters build-through-verify with the verdict as context, then republishes. UAT retries up to 5 times (configurable via `UAT_MAX_RETRIES`).
 
 ---
 

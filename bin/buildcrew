@@ -55,6 +55,7 @@ print_help() {
     echo "    lessons prune    Interactively remove stale lessons"
     echo "    plugins          Show recommended plugins for your project"
     echo "    update           Check for and install updates"
+    echo "    uat              Run blind UAT against a project's README"
     echo "    dash             Manage the buildcrew-dash terminal dashboard"
     echo "    version          Show version information"
     echo "    uninstall        Remove BuildCrew from system"
@@ -73,6 +74,7 @@ print_help() {
     echo "    --max-invocations N  Max Claude invocations per run (default: 15, with 'run')"
     echo "    --full-pipeline  Force all phases regardless of complexity assessment (with 'run')"
     echo "    --auto        Run fully unattended — auto-approve all interactive pauses (with 'run')"
+    echo "    --uat         After build completes, enter watch mode for UAT verdicts (with 'run')"
     echo "    --batch       Run pending tasks in parallel using git worktrees (with 'run')"
     echo "    --max-parallel N  Max concurrent tasks in batch mode (default: 5, with 'run --batch')"
     echo "    --keep-logs   Retain the activity log after a successful run (log is always kept on failure)"
@@ -1904,6 +1906,127 @@ _dash_install()   { _dash_download_and_run "install.sh"; }
 _dash_upgrade()   { _dash_download_and_run "install.sh" --upgrade; }
 _dash_uninstall() { _dash_download_and_run "uninstall.sh"; }
 
+# ═══════════════════════════════════════════════════════════════════════════════
+# UAT command — blind scenario-based acceptance testing
+# ═══════════════════════════════════════════════════════════════════════════════
+
+cmd_uat() {
+    local readme_path=""
+    local project_name=""
+    local artifact_dir=""
+    local signal_dir=""
+    local uat_auto=false
+
+    # Parse arguments
+    while [[ $# -gt 0 ]]; do
+        case $1 in
+            --readme)
+                if [[ -z "${2:-}" ]]; then
+                    echo -e "${RED}Error:${NC} --readme requires a path argument"
+                    exit 1
+                fi
+                readme_path="$2"
+                shift 2
+                ;;
+            --project)
+                if [[ -z "${2:-}" ]]; then
+                    echo -e "${RED}Error:${NC} --project requires a name argument"
+                    exit 1
+                fi
+                project_name="$2"
+                shift 2
+                ;;
+            --artifact-dir)
+                if [[ -z "${2:-}" ]]; then
+                    echo -e "${RED}Error:${NC} --artifact-dir requires a path argument"
+                    exit 1
+                fi
+                artifact_dir="$2"
+                shift 2
+                ;;
+            --signal-dir)
+                if [[ -z "${2:-}" ]]; then
+                    echo -e "${RED}Error:${NC} --signal-dir requires a path argument"
+                    exit 1
+                fi
+                signal_dir="$2"
+                shift 2
+                ;;
+            --auto)
+                uat_auto=true
+                shift
+                ;;
+            --help|-h)
+                echo -e "${BOLD}buildcrew uat${NC} — Blind scenario-based acceptance testing"
+                echo ""
+                echo -e "${BOLD}USAGE:${NC}"
+                echo "    buildcrew uat --readme <path> [options]"
+                echo ""
+                echo -e "${BOLD}OPTIONS:${NC}"
+                echo "    --readme <path>        Path to the project's README.md (required)"
+                echo "    --project <name>       Project identifier (default: derived from README parent dir)"
+                echo "    --artifact-dir <path>  Where to find the built artifact"
+                echo "    --signal-dir <path>    Where to write signal/verdict files"
+                echo "    --auto                 Auto mode: log disputes without pausing"
+                echo "    --help, -h             Show this help message"
+                echo ""
+                echo -e "${BOLD}EXAMPLE:${NC}"
+                echo "    buildcrew uat --readme ../my-project/README.md"
+                exit 0
+                ;;
+            *)
+                echo -e "${RED}Error:${NC} Unknown option '$1'"
+                echo "Run 'buildcrew uat --help' for usage."
+                exit 1
+                ;;
+        esac
+    done
+
+    # Validate --readme is provided and readable
+    if [[ -z "$readme_path" ]]; then
+        echo -e "${RED}Error:${NC} --readme is required"
+        echo "Run 'buildcrew uat --help' for usage."
+        exit 1
+    fi
+
+    if [[ ! -f "$readme_path" ]] || [[ ! -r "$readme_path" ]]; then
+        echo -e "${RED}Error:${NC} README not found or not readable: $readme_path"
+        exit 1
+    fi
+
+    # Derive project name if not provided
+    if [[ -z "$project_name" ]]; then
+        local abs_readme
+        # Use realpath if available, fall back to manual resolution
+        if command -v realpath >/dev/null 2>&1; then
+            abs_readme="$(realpath "$readme_path")"
+        else
+            abs_readme="$(cd "$(dirname "$readme_path")" && pwd)/$(basename "$readme_path")"
+        fi
+        project_name="$(basename "$(dirname "$abs_readme")")"
+    fi
+
+    if [[ -z "$project_name" ]]; then
+        echo -e "${RED}Error:${NC} Could not derive project name. Use --project <name>."
+        exit 1
+    fi
+
+    # Source UAT libraries
+    source "$BUILDCREW_HOME/lib/uat_signal.sh"
+    source "$BUILDCREW_HOME/lib/uat.sh"
+
+    # Export variables for uat.sh
+    export UAT_README_PATH="$readme_path"
+    export UAT_PROJECT_NAME="$project_name"
+    export UAT_AUTO_MODE="$uat_auto"
+    [[ -n "$artifact_dir" ]] && export UAT_ARTIFACT_DIR_OVERRIDE="$artifact_dir"
+    [[ -n "$signal_dir" ]] && export UAT_SIGNAL_DIR_OVERRIDE="$signal_dir"
+
+    # Initialize and run UAT phases
+    uat_init "$project_name" "$readme_path" "$artifact_dir" "$signal_dir"
+    uat_run_phases "$project_name" "$readme_path" "$uat_auto"
+}
+
 cmd_dash() {
     local subcommand="${1:-}"
 
@@ -2036,6 +2159,12 @@ case "${1:-}" in
     update)
         shift
         cmd_update "$@"
+        ;;
+    uat)
+        shift
+        source "$BUILDCREW_HOME/lib/uat_signal.sh"
+        source "$BUILDCREW_HOME/lib/uat.sh"
+        cmd_uat "$@"
         ;;
     dash)
         shift
