@@ -249,3 +249,88 @@ stop_file_monitor() {
         __MONITOR_PID=""
     fi
 }
+
+# ─────────────────────────────────────────────────────────────────────────────────
+# Skill catalog builder
+# ─────────────────────────────────────────────────────────────────────────────────
+
+# Parses YAML frontmatter from a SKILL.md file.
+# Outputs "name\ndescription" if valid, or nothing if invalid/missing.
+__parse_skill_frontmatter() {
+    awk '
+    NR==1 { if ($0 != "---") exit; next }
+    /^---$/ { exit }
+    /^name: / { n = substr($0, 7); gsub(/^[ \t]+/, "", n); gsub(/[ \t]+$/, "", n) }
+    /^description: / { d = substr($0, 14); gsub(/^[ \t]+/, "", d); gsub(/[ \t]+$/, "", d) }
+    END {
+        if (n == "" || d == "") exit
+        if (length(d) > 120) {
+            p = 0
+            for (i = 120; i >= 1; i--) {
+                if (substr(d, i, 1) == " ") { p = i; break }
+            }
+            if (p > 0) d = substr(d, 1, p - 1) "..."
+            else d = substr(d, 1, 120) "..."
+        }
+        print n
+        print d
+    }
+    ' "$1" 2>/dev/null
+}
+
+# Scans a skills directory and appends pipe-delimited entries to all_entries.
+# Usage: __collect_skill_entries "/path/to/skills"
+# Appends "dirname|name|desc\n" for each valid SKILL.md found.
+__collect_skill_entries() {
+    local skills_dir="$1"
+    local f dir_name parsed name desc
+    for f in "$skills_dir"/*/SKILL.md; do
+        [[ -f "$f" ]] || continue
+        dir_name=$(basename "$(dirname "$f")")
+        parsed=$(__parse_skill_frontmatter "$f") || true
+        if [[ -n "$parsed" ]]; then
+            name="${parsed%%$'\n'*}"
+            desc="${parsed#*$'\n'}"
+            all_entries="${all_entries}${dir_name}|${name}|${desc}"$'\n'
+        fi
+    done
+}
+
+# Builds a compressed skill catalog from project-local and source skill directories.
+# Scans $BUILDCREW_HOME/skills/*/SKILL.md and $PWD/.claude/skills/*/SKILL.md,
+# deduplicates by directory basename (project-local wins), sorts by name.
+# Outputs "Available Skills:\n- name: desc\n..." to stdout, or nothing if no skills.
+# Always returns 0.
+build_skill_catalog() {
+    local all_entries=""
+
+    # Source skills first, then project-local (last-write-wins for dedup)
+    if [[ -n "${BUILDCREW_HOME:-}" && -d "$BUILDCREW_HOME/skills" ]]; then
+        __collect_skill_entries "$BUILDCREW_HOME/skills"
+    fi
+
+    if [[ -d "$PWD/.claude/skills" ]]; then
+        __collect_skill_entries "$PWD/.claude/skills"
+    fi
+
+    if [[ -z "$all_entries" ]]; then
+        return 0
+    fi
+
+    # Dedup by directory basename (field 1), sort by skill name (field 1 after dedup)
+    local formatted
+    formatted=$(printf '%s' "$all_entries" | awk -F'|' '{
+        names[$1] = $2; descs[$1] = $3
+    } END {
+        for (k in names) print names[k] "|" descs[k]
+    }' | LC_ALL=C sort -t'|' -k1,1 | while IFS='|' read -r n d; do
+        printf '%s\n' "- $n: $d"
+    done) || true
+
+    if [[ -n "$formatted" ]]; then
+        printf '%s\n' "Available Skills:"
+        printf '%s\n' "$formatted"
+    fi
+
+    return 0
+}

@@ -300,3 +300,61 @@ WORKFLOW_SH="$BUILDCREW_ROOT/lib/workflow.sh"
     dupes=$(grep 'CIRCUIT BREAKER:' "$WORKFLOW_SH" | grep -c 'elegant solution.*elegant solution' || true)
     [ "$dupes" -eq 0 ]
 }
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Task: Inject compressed skill catalog into every phase context
+# ─────────────────────────────────────────────────────────────────────────────
+COMMON_SH="$BUILDCREW_ROOT/lib/common.sh"
+
+# Happy path: build_skill_catalog function exists and is callable after sourcing common.sh.
+@test "experience: build_skill_catalog function exists in common.sh" {
+    source_lib "common.sh"
+    run type build_skill_catalog
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"function"* ]]
+}
+
+# Happy path: workflow.sh calls build_skill_catalog between project context and stty save.
+# SMOKE-01: integration wiring is correct — catalog injected into prompt with correct label.
+@test "experience: workflow.sh injects skill catalog between project context and stty save" {
+    # Verify the block exists in the right position (after project context fi, before stty save)
+    run awk '/Inject skill catalog/,/Save terminal state/' "$WORKFLOW_SH"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"build_skill_catalog"* ]]
+    [[ "$output" == *'Skill Catalog:'* ]]
+}
+
+# Happy path: catalog outputs "Available Skills:" header when skills are found.
+@test "experience: build_skill_catalog outputs Available Skills header with real skills" {
+    source_lib "common.sh"
+    # Use the actual BUILDCREW_HOME skills directory (which has real skills)
+    export BUILDCREW_HOME="$BUILDCREW_ROOT"
+    run build_skill_catalog
+    [ "$status" -eq 0 ]
+    [[ "$output" == "Available Skills:"* ]]
+}
+
+# Happy path: catalog discovers real buildcrew skills from BUILDCREW_HOME.
+@test "experience: build_skill_catalog discovers buildcrew-spec skill from source" {
+    source_lib "common.sh"
+    export BUILDCREW_HOME="$BUILDCREW_ROOT"
+    run build_skill_catalog
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"- buildcrew-spec:"* ]]
+}
+
+# Error recovery: function returns 0 even when BUILDCREW_HOME is garbage path.
+@test "experience: build_skill_catalog returns 0 with invalid BUILDCREW_HOME" {
+    source_lib "common.sh"
+    export BUILDCREW_HOME="/nonexistent/path/that/does/not/exist"
+    run build_skill_catalog
+    [ "$status" -eq 0 ]
+}
+
+# Adversarial: workflow.sh catalog injection does not add empty header when no skills found.
+@test "experience: workflow.sh catalog injection guards against empty catalog" {
+    # The if-block around the injection means an empty catalog adds nothing to prompt
+    run grep -A2 'skill_catalog=$(build_skill_catalog)' "$WORKFLOW_SH"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *'if [[ -n "$skill_catalog" ]]'* ]]
+}
