@@ -358,3 +358,112 @@ COMMON_SH="$BUILDCREW_ROOT/lib/common.sh"
     [ "$status" -eq 0 ]
     [[ "$output" == *'if [[ -n "$skill_catalog" ]]'* ]]
 }
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Task: Orchestrator-driven interview for spec phase
+# ─────────────────────────────────────────────────────────────────────────────
+SPEC_SKILL="$BUILDCREW_ROOT/skills/buildcrew-spec/SKILL.md"
+
+# Happy path: user runs buildcrew with a task that has ambiguities — spec skill
+# defines the three-path assessment (Clear / Needs probing / Insufficient clarity).
+@test "experience: spec SKILL.md defines three clarity assessment paths" {
+    grep -q '^\*\*Clear\*\*' "$SPEC_SKILL"
+    grep -q '^\*\*Needs probing\*\*' "$SPEC_SKILL"
+    grep -q '^\*\*Insufficient clarity\*\*' "$SPEC_SKILL"
+}
+
+# Happy path: spec skill defines the second-pass detection marker so the orchestrator
+# can inject answers and the spec agent knows to incorporate them.
+@test "experience: spec SKILL.md has BUILDCREW_INTERVIEW_ANSWERS marker detection" {
+    grep -q '\[BUILDCREW_INTERVIEW_ANSWERS\]' "$SPEC_SKILL"
+    grep -q 'Interview Answers (Second Pass)' "$SPEC_SKILL"
+}
+
+# Happy path: CLAUDE.md phase result contract shows needs_probing for spec phase.
+@test "experience: CLAUDE.md spec verdicts include needs_probing" {
+    run grep 'spec' "$BUILDCREW_ROOT/CLAUDE.md"
+    [[ "$output" == *'needs_probing'* ]]
+}
+
+# Happy path: workflow.sh has the elif branch wiring needs_probing to the interview handler.
+@test "experience: workflow.sh handles needs_probing verdict via handle_spec_interview" {
+    grep -q 'elif \[\[.*spec_verdict.*needs_probing' "$WORKFLOW_SH"
+    grep -q 'handle_spec_interview "\$task"' "$WORKFLOW_SH"
+}
+
+# Happy path: handle_spec_interview function exists and is callable after sourcing.
+@test "experience: handle_spec_interview function exists in workflow.sh" {
+    run type handle_spec_interview
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"function"* ]]
+}
+
+# Happy path: __is_interactive helper is defined (extracted for testability).
+@test "experience: __is_interactive testability helper exists" {
+    run type __is_interactive
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"function"* ]]
+}
+
+# Happy path: AUTO_MODE guard in handle_spec_interview skips interview gracefully.
+# Simulates CI / non-interactive batch mode where no user is present.
+@test "experience: handle_spec_interview in AUTO_MODE skips without error" {
+    export AUTO_MODE="true"
+    mkdir -p .claude
+    PHASE_RESULT_FILE="$TEST_DIR/.claude/phase-result.json"
+    cat > "$PHASE_RESULT_FILE" << 'EOF'
+{"phase":"spec","verdict":"needs_probing","details":"test","questions":["Q1?","Q2?"]}
+EOF
+    run handle_spec_interview "test task"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Auto mode: skipping spec interview"* ]]
+}
+
+# Error recovery: spec skill defines the needs_probing phase-result.json format
+# including the questions array — so agents write machine-parseable output.
+@test "experience: spec SKILL.md has needs_probing JSON example with questions array" {
+    grep -q '"needs_probing"' "$SPEC_SKILL"
+    grep -q '"questions"' "$SPEC_SKILL"
+    grep -q 'Should expired sessions' "$SPEC_SKILL"
+}
+
+# Adversarial: spec SKILL.md second-pass instructions explicitly forbid emitting
+# needs_probing again — prevents infinite interview loops.
+@test "experience: spec SKILL.md forbids needs_probing on second pass" {
+    grep -q 'do NOT emit.*needs_probing.*on.*second pass' "$SPEC_SKILL" || \
+    grep -q 'do NOT emit `needs_probing` on a second pass' "$SPEC_SKILL"
+}
+
+# Adversarial: User Decisions section in spec template is conditional on second pass.
+# First-pass specs must not contain an empty User Decisions section.
+@test "experience: spec SKILL.md User Decisions section is conditional" {
+    grep -q '## User Decisions' "$SPEC_SKILL"
+    grep -q 'Omit this section entirely on first pass' "$SPEC_SKILL" || \
+    grep -q 'Only include this section on second pass' "$SPEC_SKILL"
+}
+
+# Adversarial: handle_spec_interview with empty questions array does NOT prompt user
+# or call run_phase_group — verifies the empty-questions guard fires early.
+@test "experience: handle_spec_interview with empty questions does not re-invoke spec" {
+    mkdir -p .claude
+    PHASE_RESULT_FILE="$TEST_DIR/.claude/phase-result.json"
+    export VERBOSE=true
+    cat > "$PHASE_RESULT_FILE" << 'EOF'
+{"phase":"spec","verdict":"needs_probing","details":"unclear","questions":[]}
+EOF
+    run handle_spec_interview "test task"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"needs_probing verdict but no questions"* ]]
+}
+
+# Adversarial: workflow.sh spec handling block properly sequences: vague check first,
+# then needs_probing, then fallthrough — incorrect ordering would skip interviews.
+@test "experience: workflow.sh spec verdict checks are in correct order (vague before needs_probing)" {
+    # The vague check must come BEFORE needs_probing in the if/elif chain
+    local vague_line needs_probing_line
+    vague_line=$(grep -n 'spec_verdict.*==.*"vague"' "$WORKFLOW_SH" | head -1 | cut -d: -f1)
+    needs_probing_line=$(grep -n 'spec_verdict.*==.*"needs_probing"' "$WORKFLOW_SH" | head -1 | cut -d: -f1)
+    [ -n "$vague_line" ]
+    [ -n "$needs_probing_line" ]
+    [ "$vague_line" -lt "$needs_probing_line" ]
+}

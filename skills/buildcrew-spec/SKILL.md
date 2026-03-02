@@ -29,10 +29,17 @@ The task was provided in the prompt. Your job is to convert this raw backlog ite
 
 Before writing anything, assess whether this task is specific enough to produce clear acceptance criteria.
 
-**Sufficient clarity** (proceed to spec):
+**Clear** (proceed to spec):
 - Task describes a concrete user-facing behavior or outcome
 - The definition of "done" is at least partially inferrable
 - You can write at least 2 testable acceptance criteria
+- No significant ambiguities remain — a capable engineer could build it without questions
+
+**Needs probing** (write best-effort spec, then ask):
+- Task describes a concrete behavior but has 2-4 specific ambiguities
+- You can write a best-effort spec but would produce better ACs with user input
+- Each ambiguity is answerable in one sentence by the task author
+- Example: "add user auth" — clear enough to spec, but session handling and concurrent session limits are unstated
 
 **Insufficient clarity** (flag and skip):
 - Task is purely aspirational with no concrete behavior described (e.g., "improve performance")
@@ -59,6 +66,34 @@ If the task is **insufficient**, write `.claude/spec.md` with a `VAGUE` verdict:
 ```
 
 Then write `.claude/phase-result.json` with `verdict: "vague"` and `details` explaining the issue. Log the reason clearly.
+
+**If the task needs probing**: Proceed to Step 2 and Step 3 as normal — write a best-effort spec to `.claude/spec.md`, using `[TBD: ...]` markers for ambiguous points in acceptance criteria. Then write `.claude/phase-result.json` with `verdict: "needs_probing"`, `details` summarizing what was unclear, and a `questions` array of 2-4 plain strings. Each question must be specific to the task — about edge cases, failure modes, "what should happen when...", or trade-offs. No generic questions.
+
+Example:
+```json
+{
+  "phase": "spec",
+  "verdict": "needs_probing",
+  "details": "Auth flow has ambiguous session handling",
+  "questions": [
+    "Should expired sessions redirect to login or show an inline re-auth prompt?",
+    "What is the maximum concurrent session limit per user, if any?"
+  ]
+}
+```
+
+### Interview Answers (Second Pass)
+
+If the prompt contains the marker `[BUILDCREW_INTERVIEW_ANSWERS]`, this is a **second pass** — the orchestrator has collected user answers and is re-invoking you.
+
+On second pass:
+1. **Skip Step 1 and Step 2** — clarity was already assessed, context already explored
+2. **Read the existing `.claude/spec.md`** written in the first pass
+3. **Read the Q/A pairs** from the prompt (format: `Q1: ... / A1: ...`)
+4. **Incorporate answers** into the spec — replace `[TBD: ...]` markers with concrete decisions
+5. **Add a `## User Decisions` section** to the spec (see Step 3 template below)
+6. **Re-run Step 4** (iterative review) to validate the updated spec
+7. **Write `.claude/phase-result.json`** with `verdict: "complete"` — do NOT emit `needs_probing` on a second pass
 
 ### Step 2: Explore Context (for sufficient tasks)
 
@@ -102,6 +137,11 @@ Keep the spec focused and brief. No rigid template with dozens of fields — jus
 - [Belongs in a separate task]
 
 **This task delivers**: [one sentence — the single primary deliverable]
+
+## User Decisions
+<!-- Only include this section on second pass (when [BUILDCREW_INTERVIEW_ANSWERS] was present).
+     List each Q/A pair. Omit this section entirely on first pass. -->
+- **Q**: [Question asked]  **A**: [User's answer]
 
 ## Acceptance Criteria
 - [ ] AC-01: [Specific, verifiable condition]
@@ -179,6 +219,16 @@ Write `.claude/phase-result.json` using the Write tool before ending your respon
   "phase": "spec",
   "verdict": "complete",
   "details": "Specification written with N acceptance criteria"
+}
+```
+
+**If task needs probing (first pass only):**
+```json
+{
+  "phase": "spec",
+  "verdict": "needs_probing",
+  "details": "[summary of ambiguities]",
+  "questions": ["[specific question 1]", "[specific question 2]"]
 }
 ```
 
