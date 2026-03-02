@@ -27,4 +27,8 @@ Thumbs.db
 workflow.log
 
 # BuildCrew runtime state
-.buildcrew/logs/
+.buildcrew/
+
+# Skills installed by buildcrew init (symlinks)
+.claude/skills/buildcrew-*
+.claude/.buildcrew-link
