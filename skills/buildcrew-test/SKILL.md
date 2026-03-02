@@ -39,6 +39,24 @@ If the context mentions **CHUNKED TEST PHASE**:
 - **Phase 1 of 2**: Create the test plan and write all test files. Do NOT run tests. Write phase-result.json with `{"phase":"test","verdict":"approved","details":"Test plan and files written"}`.
 - **Phase 2 of 2**: Test files already exist. Run the full suite, fix failures (up to 3 attempts), write the test report and final phase-result.json with the appropriate verdict (`approved`, `test_failure`, or `needs_rebuild` per normal rules).
 
+### TDD Validation Mode
+
+If the context mentions **TDD VALIDATION MODE**:
+
+#### Step 0: Tamper Detection
+Before anything else, verify TDD test file integrity:
+1. Read `.claude/tdd-manifest.json` and its `checksums` field
+2. For each test file, compute `openssl dgst -sha256 <file>` and compare to the recorded checksum
+3. If ANY checksum mismatches: issue `needs_rebuild` with details listing which files were modified by the build agent. Do NOT proceed with testing.
+
+#### Then proceed:
+- TDD tests already exist in files listed in `.claude/tdd-manifest.json` — do NOT rewrite or delete them
+- Test planning focuses on what TDD scaffold could NOT cover: adversarial scenarios, edge cases from implementation, integration/smoke tests, experience harness
+- Do NOT duplicate scenarios already covered by TDD tests — check before writing
+- Write new tests in SEPARATE files from TDD scaffold tests
+- Run ALL tests (TDD + new + harness) in execution step
+- If any TDD test fails, this is a build regression — issue `needs_rebuild`, not `test_failure`
+
 ### Step 1: Create Test Plan
 
 Before running tests, create a test plan in `.claude/current-test-plan.md`:

@@ -239,6 +239,8 @@ Write your plan to `.claude/current-plan.md` using this structure:
 ## Testing Strategy
 - [How to verify this works]
 - [Test types needed: unit, integration, e2e]
+- **Interface contracts for TDD**: [Public interfaces — functions, CLI commands, API endpoints — that tests can exercise before implementation exists]
+- **TDD-exempt areas**: [Anything untestable before implementation — visual, perf, etc.]
 
 ## Dependencies & Ordering Rationale
 - [Any prerequisites that must be done first]

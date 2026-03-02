@@ -104,6 +104,20 @@ If the context mentions **CHUNKED BUILD MODE**, you are executing a single step 
 
 A chunked build exists because the full build exceeded the session turn limit. Stay focused on your assigned step.
 
+### TDD Mode
+
+If the context mentions **TDD MODE**, failing tests already exist:
+
+1. **Read `.claude/tdd-manifest.json`** for test file locations and run command
+2. **Run the test suite** to confirm TDD tests are failing (RED state)
+3. **Work in vertical slices** — for each test (grouped by AC):
+   a. Read the test to understand expected interface/behavior
+   b. Write minimum implementation to make that test pass (GREEN)
+   c. Run tests — verify targeted test passes, no regressions
+4. **After all TDD tests pass**, complete remaining plan items
+5. **Do NOT modify TDD test files** — if a test seems wrong, note it in phase-result details
+6. **Run the full test suite** before writing phase-result.json
+
 ### Documentation Maintenance
 
 After implementing changes, update `README.md` to reflect the actual implementation:

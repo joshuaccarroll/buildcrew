@@ -90,6 +90,15 @@ load_buildcrew_config() {
                         fi
                     fi
                     ;;
+                TDD_MODE)
+                    if [[ -z "${TDD_MODE+x}" ]]; then
+                        if [[ "$value" == "true" || "$value" == "false" ]]; then
+                            TDD_MODE="$value"
+                        else
+                            echo "Warning: invalid TDD_MODE in .buildcrew/config: $value (ignored, must be true or false)" >&2
+                        fi
+                    fi
+                    ;;
                 KEEP_LOGS)
                     if [[ -z "${KEEP_LOGS+x}" ]]; then
                         if [[ "$value" == "true" || "$value" == "false" ]]; then
@@ -106,6 +115,12 @@ load_buildcrew_config() {
                         else
                             echo "Warning: invalid MAX_PARALLEL in .buildcrew/config: $value (ignored, must be 1-99)" >&2
                         fi
+                    fi
+                    ;;
+                TARGET_DIR)
+                    # Batch-mode only: default target directory for tasks without [dir:...] prefix
+                    if [[ -z "${TARGET_DIR+x}" ]]; then
+                        TARGET_DIR="$value"
                     fi
                     ;;
                 # Add future config keys here
@@ -129,8 +144,10 @@ load_buildcrew_config
 MAX_INVOCATIONS=${MAX_INVOCATIONS:-15}
 COMPLEXITY_AWARE=${COMPLEXITY_AWARE:-true}
 AUTO_MODE=${AUTO_MODE:-false}
+TDD_MODE=${TDD_MODE:-false}
 KEEP_LOGS=${KEEP_LOGS:-false}
 MAX_PARALLEL=${MAX_PARALLEL:-5}
+TARGET_DIR=${TARGET_DIR:-}
 __INVOCATION_COUNT=0
 __RESUME_PHASES=""
 __DISCOVERY_HEARTBEAT_PID=""
@@ -142,6 +159,7 @@ get_phase_max_turns() {
         spec)       echo 50 ;;
         research)   echo 40 ;;
         review)     echo 50 ;;
+        tdd-scaffold) echo 40 ;;
         build)      echo 50 ;;
         simplify)   echo 30 ;;
         codereview) echo 40 ;;
@@ -162,6 +180,7 @@ HUMAN_REVIEW=false
 GIT_BRANCH=false
 RESUME_MODE=false
 TARGET_TASK=""
+TARGET_TASK_EXACT=""
 ORIGINAL_BRANCH=""
 HAS_REMOTE=false
 GH_AVAILABLE=false
@@ -213,6 +232,15 @@ parse_args() {
                 TARGET_TASK="$2"
                 shift 2
                 ;;
+            --task-exact)
+                if [[ -z "${2:-}" ]]; then
+                    echo "Error: --task-exact requires a value (exact task text)"
+                    exit 1
+                fi
+                TARGET_TASK_EXACT="$2"
+                SINGLE_TASK=true
+                shift 2
+                ;;
             --skip-spec)
                 SKIP_SPEC=true
                 shift
@@ -242,6 +270,10 @@ parse_args() {
             --uat)
                 UAT_MODE=true
                 AUTO_MODE=true  # --uat implies --auto
+                shift
+                ;;
+            --tdd)
+                TDD_MODE=true
                 shift
                 ;;
             --batch)
@@ -285,6 +317,7 @@ parse_args() {
                 echo "  --full-pipeline  Force all phases regardless of complexity assessment"
                 echo "  --auto       Run fully unattended — auto-approve all interactive pauses"
                 echo "  --uat        After build completes, enter watch mode for UAT verdicts (implies --auto)"
+                echo "  --tdd        Enable test-driven development: write failing tests before implementation"
                 echo "  --keep-logs  Retain the activity log after a successful run (log is always kept on failure)"
                 echo "  --batch      Run pending tasks in parallel using git worktrees"
                 echo "  --max-parallel N  Max concurrent tasks in batch mode (default: 5)"
@@ -308,6 +341,50 @@ parse_args() {
 # ─────────────────────────────────────────────────────────────────────────────────
 # Workflow-specific helpers
 # ─────────────────────────────────────────────────────────────────────────────────
+
+# Augment a prompt string with TDD context for build/test/codereview phases.
+# Args: $1=phase_name $2=prompt_string
+# Echoes: augmented prompt (or original if TDD inactive/inapplicable)
+__inject_tdd_prompt() {
+    local phase="$1" prompt="$2"
+    if [[ "$TDD_MODE" != "true" ]] || [[ ! -f ".claude/tdd-manifest.json" ]]; then
+        printf '%s' "$prompt"; return
+    fi
+    local tdd_test_count
+    tdd_test_count=$(jq -r '.test_count // 0' ".claude/tdd-manifest.json" 2>/dev/null)
+    if (( tdd_test_count == 0 )); then
+        printf '%s' "$prompt"; return
+    fi
+    case "$phase" in
+        build)
+            printf '%s\n\n%s' "$prompt" "TDD MODE: $tdd_test_count failing tests exist. Read .claude/tdd-manifest.json for test locations. PRIMARY goal: make all TDD tests pass. Run tests after each major change. Do NOT modify TDD test files." ;;
+        test)
+            printf '%s\n\n%s' "$prompt" "TDD VALIDATION MODE: TDD tests already exist (see .claude/tdd-manifest.json). Do NOT rewrite/delete them. Verify TDD test file checksums match tdd-manifest.json (use openssl dgst -sha256) — if any were modified, issue needs_rebuild with tampered file list. Role: (1) verify TDD tests pass, (2) add adversarial/edge-case tests in SEPARATE files, (3) extend experience harness, (4) run full suite. If a TDD test fails, issue needs_rebuild." ;;
+        codereview)
+            printf '%s\n\n%s' "$prompt" "TDD MODE ACTIVE: Test files listed in .claude/tdd-manifest.json were written by the tdd-scaffold phase, not the build phase. Do NOT flag them as issues. Do NOT request they be moved, renamed, or rewritten. Verify the build made them pass." ;;
+        *)
+            printf '%s' "$prompt" ;;
+    esac
+}
+
+# Clean up TDD scaffold artifacts before re-planning.
+# Safe: only removes files in the dedicated tests/tdd/ directory and stubs.
+__cleanup_tdd_artifacts() {
+    [[ "$TDD_MODE" == "true" ]] || return 0
+    [[ -f ".claude/tdd-manifest.json" ]] || return 0
+    # Remove the dedicated TDD test directory (safe — only contains scaffold-created files)
+    local tdd_dir
+    tdd_dir=$(jq -r '.test_dir // ""' ".claude/tdd-manifest.json" 2>/dev/null) || true
+    if [[ -n "$tdd_dir" && -d "$tdd_dir" ]]; then
+        rm -rf "$tdd_dir"
+    fi
+    # Remove stub files (build agent should have replaced these, but clean up if not)
+    local _f
+    for _f in $(jq -r '.stub_files[]? // empty' ".claude/tdd-manifest.json" 2>/dev/null); do
+        [[ -f "$_f" ]] && rm -f "$_f"
+    done
+    rm -f .claude/tdd-manifest.json
+}
 
 # Run the simplify phase if the skill is installed. Always non-blocking (|| true).
 # Must only be called from within complexity-gated else branches (i.e. not for trivial/simple tasks).
@@ -407,6 +484,12 @@ __BATCH_HEARTBEAT_PID=""
 # Batch state arrays (indexed, bash 3.2 compatible — no declare -A)
 _batch_tasks=()
 _batch_slugs=()
+_batch_target_dirs=()
+
+# Non-git parent mode detection (set in main())
+__BATCH_PARENT_IS_GIT=true
+# Absolute CWD captured once at batch startup (avoids repeated $(pwd) calls)
+__BATCH_CWD=""
 _batch_pids=()
 _batch_running=0
 _batch_completed=0
@@ -435,16 +518,18 @@ _batch_init_manifest() {
 
 # Add a task entry to the manifest.
 _batch_add_task() {
-    local index="$1" text="$2" slug="$3"
+    local index="$1" text="$2" slug="$3" target_dir="${4:-}"
     local branch="buildcrew/$slug"
-    local worktree="$BATCH_WORKTREE_DIR/$slug"
+    local worktree
+    worktree=$(_batch_worktree_path "$slug" "$target_dir")
     jq --argjson idx "$index" \
        --arg text "$text" \
        --arg slug "$slug" \
        --arg branch "$branch" \
        --arg wt "$worktree" \
+       --arg td "$target_dir" \
        '.tasks += [{index: $idx, text: $text, slug: $slug, branch: $branch,
-                    worktree: $wt, status: "pending", exit_code: null,
+                    worktree: $wt, target_dir: $td, status: "pending", exit_code: null,
                     started_at: null, completed_at: null}]' \
        "$BATCH_MANIFEST" > "$BATCH_MANIFEST.tmp" \
        && mv "$BATCH_MANIFEST.tmp" "$BATCH_MANIFEST"
@@ -492,41 +577,67 @@ _batch_get_task_status() {
 
 # ── Worktree management ──────────────────────────────────────────────────────
 
+# Resolve worktree path: absolute when target_dir is set, relative otherwise.
+_batch_worktree_path() {
+    local slug="$1" target_dir="${2:-}"
+    if [[ -n "$target_dir" ]]; then
+        echo "${__BATCH_CWD}/$BATCH_WORKTREE_DIR/$slug"
+    else
+        echo "$BATCH_WORKTREE_DIR/$slug"
+    fi
+}
+
 # Create a git worktree for a task. Returns 0 on success, 1 on failure.
+# When target_dir is set, creates the worktree from that repo instead of CWD.
 _batch_create_worktree() {
-    local slug="$1" base_branch="$2"
-    local worktree_path="$BATCH_WORKTREE_DIR/$slug"
+    local slug="$1" base_branch="$2" target_dir="${3:-}"
     local branch_name="buildcrew/$slug"
+    local worktree_path abs_target_dir
+
+    # Resolve git repo directory and worktree path based on mode
+    local repo_dir="." source_dir="."
+    if [[ -n "$target_dir" ]]; then
+        # Non-git parent mode: resolve target repo
+        abs_target_dir="$(cd "$target_dir" 2>/dev/null && pwd)" || {
+            print_error "Target directory '$target_dir' does not exist"
+            return 1
+        }
+        repo_dir="$abs_target_dir"
+        source_dir="$abs_target_dir"
+        worktree_path=$(_batch_worktree_path "$slug" "$target_dir")
+        # Resolve base branch from target repo (ignore caller's base_branch)
+        base_branch=$(git -C "$repo_dir" rev-parse --abbrev-ref HEAD)
+    else
+        worktree_path=$(_batch_worktree_path "$slug")
+    fi
 
     # Clean up stale branch/worktree from previous run
-    if git rev-parse --verify "$branch_name" >/dev/null 2>&1; then
-        git branch -D "$branch_name" 2>/dev/null || true
+    if git -C "$repo_dir" rev-parse --verify "$branch_name" >/dev/null 2>&1; then
+        git -C "$repo_dir" branch -D "$branch_name" 2>/dev/null || true
     fi
     if [[ -d "$worktree_path" ]]; then
-        git worktree remove --force "$worktree_path" 2>/dev/null || true
+        git -C "$repo_dir" worktree remove --force "$worktree_path" 2>/dev/null || rm -rf "$worktree_path"
     fi
 
     # Create worktree with new branch
-    if ! git worktree add -b "$branch_name" "$worktree_path" "$base_branch" 2>/dev/null; then
+    if ! git -C "$repo_dir" worktree add -b "$branch_name" "$worktree_path" "$base_branch" 2>/dev/null; then
         return 1
     fi
 
-    # Copy skills (preserving symlinks)
-    if [[ -d ".claude/skills" ]] || [[ -L ".claude/skills" ]]; then
+    # Copy skills (preserving symlinks) and settings from source repo
+    if [[ -d "$source_dir/.claude/skills" ]] || [[ -L "$source_dir/.claude/skills" ]]; then
         mkdir -p "$worktree_path/.claude"
-        cp -a ".claude/skills" "$worktree_path/.claude/skills"
+        cp -a "$source_dir/.claude/skills" "$worktree_path/.claude/skills"
     fi
-
-    # Copy settings files
     local f
     for f in .claude/settings.json .claude/settings.local.json .claude/.buildcrew-link; do
-        if [[ -f "$f" ]]; then
+        if [[ -f "$source_dir/$f" ]]; then
             mkdir -p "$worktree_path/$(dirname "$f")"
-            cp "$f" "$worktree_path/$f" 2>/dev/null || true
+            cp "$source_dir/$f" "$worktree_path/$f" 2>/dev/null || true
         fi
     done
 
-    # Copy buildcrew config and context (NOT lock, state, or batch dir)
+    # Copy buildcrew config, lessons, and context from CWD (parent/orchestrator state)
     mkdir -p "$worktree_path/.buildcrew"
     if [[ -f ".buildcrew/config" ]]; then
         cp ".buildcrew/config" "$worktree_path/.buildcrew/config"
@@ -545,9 +656,34 @@ _batch_create_worktree() {
 }
 
 # Remove a worktree (keeps the branch for review).
+# Tries relative path first, then absolute path (non-git parent mode).
 _batch_remove_worktree() {
     local slug="$1"
-    git worktree remove --force "$BATCH_WORKTREE_DIR/$slug" 2>/dev/null || true
+    local wt_path="$BATCH_WORKTREE_DIR/$slug"
+
+    # Also check absolute path for non-git parent mode
+    [[ -n "$__BATCH_CWD" ]] && [[ ! -d "$wt_path" ]] && wt_path="${__BATCH_CWD}/$BATCH_WORKTREE_DIR/$slug"
+
+    # Try standard removal first
+    if git worktree remove --force "$wt_path" 2>/dev/null; then
+        return 0
+    fi
+
+    # Fallback: discover git repo from inside the worktree and remove from there
+    if [[ -d "$wt_path" ]]; then
+        local git_dir
+        git_dir=$(git -C "$wt_path" rev-parse --git-common-dir 2>/dev/null) || true
+        if [[ -n "$git_dir" ]]; then
+            local repo_dir
+            repo_dir=$(cd "$wt_path" && cd "$git_dir/.." 2>/dev/null && pwd) || true
+            if [[ -n "$repo_dir" ]]; then
+                git -C "$repo_dir" worktree remove --force "$wt_path" 2>/dev/null || rm -rf "$wt_path"
+                return 0
+            fi
+        fi
+        # Last resort
+        rm -rf "$wt_path"
+    fi
 }
 
 # Clean up worktrees for completed tasks only.
@@ -566,8 +702,11 @@ _batch_launch_task() {
     local idx="$1"
     local task="${_batch_tasks[$idx]}"
     local slug="${_batch_slugs[$idx]}"
-    local worktree="$BATCH_WORKTREE_DIR/$slug"
+    local target_dir="${_batch_target_dirs[$idx]:-}"
     local manifest_idx=$((idx + 1))
+
+    local worktree
+    worktree=$(_batch_worktree_path "$slug" "$target_dir")
 
     _batch_mark_task "$manifest_idx" "running"
 
@@ -575,8 +714,14 @@ _batch_launch_task() {
         cd "$worktree" || exit 1
         export BUILDCREW_BATCH_NONCE="${slug}-${idx}"
         export BUILDCREW_HOME
+
+        # When target_dir is set, export absolute BACKLOG_FILE path back to parent
+        if [[ -n "$target_dir" ]]; then
+            export BACKLOG_FILE="${__BATCH_CWD}/${BACKLOG_FILE}"
+        fi
+
         exec "$BUILDCREW_HOME/lib/workflow.sh" \
-            --single --task "$task" --auto \
+            --single --task-exact "$task" --auto \
             --max-invocations "$MAX_INVOCATIONS" \
             ${KEEP_LOGS:+--keep-logs} \
             ${SKIP_SPEC:+--skip-spec} \
@@ -718,6 +863,11 @@ _batch_parallel_cleanup() {
 # Push branches and create PRs for completed tasks.
 _batch_create_prs() {
     local base_branch="$1"
+    # PR creation not supported in non-git-parent mode (multi-repo)
+    if [[ "$__BATCH_PARENT_IS_GIT" == "false" ]]; then
+        print_info "PR creation not supported in multi-repo mode. Push branches manually from each target repo."
+        return
+    fi
     local i
     for i in "${!_batch_tasks[@]}"; do
         local manifest_idx=$((i + 1))
@@ -792,8 +942,8 @@ _batch_post_completion() {
         echo ""
     fi
 
-    # PR creation offer (only if gh is available and remote exists)
-    if (( _batch_completed > 0 )); then
+    # PR creation offer (only if gh is available, remote exists, and parent is a git repo)
+    if (( _batch_completed > 0 )) && [[ "$__BATCH_PARENT_IS_GIT" == "true" ]]; then
         if command -v gh &>/dev/null && gh auth status &>/dev/null 2>&1; then
             if git remote get-url origin &>/dev/null 2>&1; then
                 if [[ -t 0 ]] && [[ "$AUTO_MODE" != "true" ]]; then
@@ -828,20 +978,36 @@ _batch_post_completion() {
 
 # ── Parse task list and handle slug collisions ────────────────────────────────
 
-# Parse the numbered task list into _batch_tasks[] and _batch_slugs[] arrays.
+# Parse the numbered task list into _batch_tasks[], _batch_slugs[], and _batch_target_dirs[] arrays.
+# gather_pending_tasks preserves [dir:...] prefixes; this function extracts and strips them.
 _batch_parse_task_list() {
     local task_list="$1"
     _batch_tasks=()
     _batch_slugs=()
+    _batch_target_dirs=()
     local i=0
     local line
     while IFS= read -r line; do
         [[ -z "$line" ]] && continue
         local text="${line#*. }"  # strip " 1. " prefix
         [[ -z "$text" ]] && continue
+
+        # Extract and strip [dir:...] prefix
+        local target_dir
+        target_dir=$(resolve_task_target_dir "$text")
+        text=$(strip_task_dir "$text")
+
         _batch_tasks[$i]="$text"
+        _batch_target_dirs[$i]="$target_dir"
+
+        # Prefix slug with dir name for uniqueness across repos
         local slug
         slug=$(task_to_slug "$text")
+        if [[ -n "$target_dir" ]]; then
+            slug="$(task_to_slug "$target_dir")-${slug}"
+            slug="${slug:0:60}"
+        fi
+
         # Collision check: deduplicate slugs
         local j=0 collision=false
         while (( j < i )); do
@@ -882,8 +1048,11 @@ _batch_dispatch_loop() {
 
             # Ensure worktree exists (resume case — fresh runs already created them)
             local slug="${_batch_slugs[$_batch_next_idx]}"
-            if [[ ! -d "$BATCH_WORKTREE_DIR/$slug" ]]; then
-                if ! _batch_create_worktree "$slug" "$base_branch"; then
+            local target_dir="${_batch_target_dirs[$_batch_next_idx]:-}"
+            local wt_check_path
+            wt_check_path=$(_batch_worktree_path "$slug" "$target_dir")
+            if [[ ! -d "$wt_check_path" ]]; then
+                if ! _batch_create_worktree "$slug" "$base_branch" "$target_dir"; then
                     _batch_mark_task "$manifest_idx" "failed" "1"
                     _batch_failed=$(( _batch_failed + 1 ))
                     (( _batch_next_idx++ )) || true
@@ -908,19 +1077,25 @@ _batch_resume() {
     # Force auto mode
     AUTO_MODE=true
 
+    # Capture CWD once for consistent path resolution
+    __BATCH_CWD="$(pwd)"
+
     # Load tasks from manifest
     _batch_tasks=()
     _batch_slugs=()
+    _batch_target_dirs=()
     local count base_branch
     count=$(jq '.tasks | length' "$BATCH_MANIFEST")
     base_branch=$(jq -r '.base_branch' "$BATCH_MANIFEST")
 
+    # Load all task fields in a single jq call (avoids 3N process spawns)
     local i=0
-    while (( i < count )); do
-        _batch_tasks[$i]=$(jq -r --argjson i "$i" '.tasks[$i].text' "$BATCH_MANIFEST")
-        _batch_slugs[$i]=$(jq -r --argjson i "$i" '.tasks[$i].slug' "$BATCH_MANIFEST")
+    while IFS=$'\t' read -r t_text t_slug t_td; do
+        _batch_tasks[$i]="$t_text"
+        _batch_slugs[$i]="$t_slug"
+        _batch_target_dirs[$i]="$t_td"
         (( i++ )) || true
-    done
+    done < <(jq -r '.tasks[] | [.text, .slug, (.target_dir // "")] | @tsv' "$BATCH_MANIFEST")
 
     local total=${#_batch_tasks[@]}
     local already_done
@@ -956,16 +1131,24 @@ _batch_resume() {
 enter_batch_mode() {
     local task_list="$1"
 
+    # Capture CWD once for consistent path resolution
+    __BATCH_CWD="$(pwd)"
+
     # Force auto mode for background processes
     if [[ "$AUTO_MODE" != "true" ]]; then
         print_warning "Batch mode implies --auto (background processes cannot be interactive)"
         AUTO_MODE=true
     fi
 
-    # Determine base branch and commit
+    # Determine base branch and commit (conditional on git availability)
     local base_branch base_commit
-    base_branch=$(git rev-parse --abbrev-ref HEAD)
-    base_commit=$(git rev-parse HEAD)
+    if [[ "$__BATCH_PARENT_IS_GIT" == "true" ]]; then
+        base_branch=$(git rev-parse --abbrev-ref HEAD)
+        base_commit=$(git rev-parse HEAD)
+    else
+        base_branch="none"
+        base_commit="none"
+    fi
 
     # Parse task list into arrays
     _batch_parse_task_list "$task_list"
@@ -975,11 +1158,39 @@ enter_batch_mode() {
         exit 1
     fi
 
+    # Validate target directories when parent is not a git repo
+    if [[ "$__BATCH_PARENT_IS_GIT" == "false" ]]; then
+        local validation_errors=()
+        local i=0
+        while (( i < total )); do
+            local td="${_batch_target_dirs[$i]:-}"
+            local task_text="${_batch_tasks[$i]}"
+            if [[ -z "$td" ]]; then
+                validation_errors+=("Task $((i+1)) '$task_text': no target directory (add [dir:...] prefix or set TARGET_DIR in .buildcrew/config)")
+            elif [[ ! -d "$td" ]]; then
+                validation_errors+=("Task $((i+1)) '$task_text': target directory '$td' does not exist")
+            elif ! git -C "$td" rev-parse --is-inside-work-tree &>/dev/null 2>&1; then
+                validation_errors+=("Task $((i+1)) '$task_text': target directory '$td' is not a git repository")
+            elif [[ -n "$(git -C "$td" status --porcelain 2>/dev/null)" ]]; then
+                validation_errors+=("Task $((i+1)) '$task_text': target repo '$td' has uncommitted changes")
+            fi
+            (( i++ )) || true
+        done
+        if [[ ${#validation_errors[@]} -gt 0 ]]; then
+            print_error "Target directory validation failed:"
+            local err
+            for err in "${validation_errors[@]}"; do
+                echo "  - $err" >&2
+            done
+            exit 1
+        fi
+    fi
+
     # Initialize manifest
     _batch_init_manifest "$base_branch" "$base_commit"
     local i=0
     while (( i < total )); do
-        _batch_add_task $((i + 1)) "${_batch_tasks[$i]}" "${_batch_slugs[$i]}"
+        _batch_add_task $((i + 1)) "${_batch_tasks[$i]}" "${_batch_slugs[$i]}" "${_batch_target_dirs[$i]:-}"
         (( i++ )) || true
     done
 
@@ -987,7 +1198,7 @@ enter_batch_mode() {
     print_info "Creating $total worktrees..."
     i=0
     while (( i < total )); do
-        if ! _batch_create_worktree "${_batch_slugs[$i]}" "$base_branch"; then
+        if ! _batch_create_worktree "${_batch_slugs[$i]}" "$base_branch" "${_batch_target_dirs[$i]:-}"; then
             print_warning "Failed to create worktree for task $((i + 1)): ${_batch_tasks[$i]}"
             _batch_mark_task $((i + 1)) "failed" "1"
             _batch_failed=$(( _batch_failed + 1 ))
@@ -1240,6 +1451,32 @@ task_to_slug() {
     echo "$slug"
 }
 
+# Extract [dir:X] value from a task string. Returns X or empty string.
+extract_task_dir() {
+    local task="$1"
+    if [[ "$task" =~ ^\[dir:([^\]]+)\] ]]; then
+        echo "${BASH_REMATCH[1]}"
+    fi
+}
+
+# Strip [dir:X] prefix (and trailing space) from a task string.
+strip_task_dir() {
+    local task="$1"
+    echo "$task" | sed 's/^\[dir:[^]]*\] *//'
+}
+
+# Resolve the target directory for a task: inline [dir:...] > TARGET_DIR config > empty.
+resolve_task_target_dir() {
+    local task="$1"
+    local dir
+    dir=$(extract_task_dir "$task")
+    if [[ -n "$dir" ]]; then
+        echo "$dir"
+        return
+    fi
+    echo "${TARGET_DIR:-}"
+}
+
 task_to_branch_name() {
     local task="$1"
     echo "buildcrew/$(task_to_slug "$task")"
@@ -1487,16 +1724,18 @@ assess_task_complexity() {
 }
 
 # Mark a task as completed in the backlog
+# Tolerates optional [dir:...] prefix in the BACKLOG line, preserving it in output.
 mark_task_complete() {
     local task="$1"
-    TASK="$task" perl -i -pe 's/^- \[ \] \Q$ENV{TASK}\E(\s*\{(?:trivial|simple|standard)\})?$/- [x] $ENV{TASK}/' "$BACKLOG_FILE"
+    TASK="$task" perl -i -pe 's/^- \[ \] (\[dir:[^\]]+\] )?\Q$ENV{TASK}\E(\s*\{(?:trivial|simple|standard)\})?$/- [x] ${1}$ENV{TASK}/' "$BACKLOG_FILE"
 }
 
 # Mark a task as blocked in the backlog
+# Tolerates optional [dir:...] prefix in the BACKLOG line, preserving it in output.
 mark_task_blocked() {
     local task="$1"
     local reason="$2"
-    TASK="$task" REASON="$reason" perl -i -pe 's/^- \[ \] \Q$ENV{TASK}\E.*/- [!] $ENV{TASK} (blocked: $ENV{REASON})/' "$BACKLOG_FILE"
+    TASK="$task" REASON="$reason" perl -i -pe 's/^- \[ \] (\[dir:[^\]]+\] )?\Q$ENV{TASK}\E.*/- [!] ${1}$ENV{TASK} (blocked: $ENV{REASON})/' "$BACKLOG_FILE"
 }
 
 # ─────────────────────────────────────────────────────────────────────────────────
@@ -1720,6 +1959,7 @@ ARTIFACT_FILES=(
     .claude/plan-review-prev.md .claude/review-pass1-pe-prev.md .claude/review-pass2-pm-prev.md
     .claude/code-review.md .claude/test-report.md .claude/outcome-report.md
     .claude/security-audit.md .claude/verify-report.md .claude/current-test-plan.md
+    .claude/tdd-manifest.json
 )
 
 # Archive any existing .claude/ artifacts before cleanup.
@@ -1756,6 +1996,14 @@ archive_task_artifacts() {
             cp "$f" "$archive_dir/"
         fi
     done
+
+    # Archive TDD test files if present
+    if [[ -f ".claude/tdd-manifest.json" ]]; then
+        local _tdd_f
+        for _tdd_f in $(jq -r '.test_files[]? // empty' ".claude/tdd-manifest.json" 2>/dev/null); do
+            [[ -f "$_tdd_f" ]] && cp "$_tdd_f" "$archive_dir/"
+        done
+    fi
 
     print_info "Archived artifacts to $archive_dir"
 }
@@ -2194,6 +2442,9 @@ __run_phase_group_impl() {
         prompt="$prompt"$'\n\nSkill Catalog:\n'"$skill_catalog"
     fi
 
+    # Inject TDD context for build/test/codereview phases
+    prompt=$(__inject_tdd_prompt "$phase" "$prompt")
+
     # Build --allowedTools flag if declared in skill frontmatter
     local allowed_tools_flag=""
     if [[ -n "$allowed_tools" ]]; then
@@ -2422,6 +2673,9 @@ run_chunked_test() {
     local chunk1_context="CHUNKED TEST PHASE 1 of 2: Create test plan and write test files ONLY. Do NOT run tests yet."
     if [[ -n "$spec_context" ]]; then
         chunk1_context="$chunk1_context | $spec_context"
+    fi
+    if [[ "$TDD_MODE" == "true" && -f ".claude/tdd-manifest.json" ]]; then
+        chunk1_context="$chunk1_context TDD tests already exist in tests/tdd/ — do NOT rewrite them. Only write ADDITIONAL test files for adversarial/edge cases."
     fi
 
     local result1=0
@@ -2927,6 +3181,9 @@ process_task_isolated() {
         if [[ -n "$__replan_context" ]]; then
             research_extra="${research_extra:+$research_extra | }REPLAN: $__replan_context"
         fi
+        if [[ "$TDD_MODE" == "true" ]]; then
+            research_extra="${research_extra:+$research_extra | }TDD MODE: Tests will be written BEFORE implementation. Your plan MUST include a section documenting public interface contracts (function signatures, CLI commands, API endpoints) with enough detail that tests can be written against them before any code exists. Mark any areas that cannot be tested before implementation (visual, perf) as TDD-exempt."
+        fi
         run_phase_group "research" "$task" "$research_extra" || { mark_task_blocked "$task" "research phase failed to produce a valid result"; clear_task_progress; return 1; }
         __completed_phases="${__completed_phases:+$__completed_phases }research"
         save_task_progress "$task" "$__completed_phases" "$__INVOCATION_COUNT"
@@ -3034,6 +3291,7 @@ process_task_isolated() {
                         print_debug "Re-plan context: $__replan_context"
                         __need_replan=true
                         __completed_phases=""
+                        __cleanup_tdd_artifacts
                         clear_task_progress
                         update_workflow_state "replanning" "running"
                         rm -f .claude/plan-review-prev.md .claude/review-pass1-pe-prev.md .claude/review-pass2-pm-prev.md
@@ -3054,6 +3312,33 @@ process_task_isolated() {
 
         __completed_phases="${__completed_phases:+$__completed_phases }review"
         save_task_progress "$task" "$__completed_phases" "$__INVOCATION_COUNT"
+    fi
+
+    # --- tdd-scaffold (optional: --tdd + standard complexity) ---
+    if [[ "$TDD_MODE" == "true" && "$task_complexity" == "standard" ]]; then
+        if phase_completed "tdd-scaffold"; then
+            print_info "Skipping phase: tdd-scaffold (completed in previous run)"
+            update_workflow_state "tdd-scaffold" "skipped"
+        else
+            local tdd_context="$__spec_context"
+            run_phase_group "tdd-scaffold" "$task" "$tdd_context" || {
+                mark_task_blocked "$task" "tdd-scaffold phase failed"
+                clear_task_progress; return 1
+            }
+            local tdd_verdict
+            tdd_verdict=$(jq -r '.verdict // "unknown"' "$PHASE_RESULT_FILE")
+            case "$tdd_verdict" in
+                complete) print_info "TDD scaffold complete — failing tests written" ;;
+                blocked)  print_warning "TDD scaffold blocked — proceeding without TDD" ;;
+                *) mark_task_blocked "$task" "Unexpected tdd-scaffold verdict: $tdd_verdict"
+                   clear_task_progress; return 1 ;;
+            esac
+            __completed_phases="${__completed_phases:+$__completed_phases }tdd-scaffold"
+            save_task_progress "$task" "$__completed_phases" "$__INVOCATION_COUNT"
+        fi
+    elif [[ "$TDD_MODE" == "true" ]]; then
+        print_info "Skipping phase: tdd-scaffold (complexity: $task_complexity)"
+        update_workflow_state "tdd-scaffold" "skipped"
     fi
 
     # --- build → codereview → test (with rebuild loop, circuit breaker) ---
@@ -3136,6 +3421,7 @@ process_task_isolated() {
                         print_debug "Re-plan context: $__replan_context"
                         __need_replan=true
                         __completed_phases=""
+                        __cleanup_tdd_artifacts
                         clear_task_progress
                         update_workflow_state "replanning" "running"
                         break
@@ -3209,6 +3495,7 @@ process_task_isolated() {
                         print_debug "Re-plan context: $__replan_context"
                         __need_replan=true
                         __completed_phases=""
+                        __cleanup_tdd_artifacts
                         clear_task_progress
                         update_workflow_state "replanning" "running"
                         break
@@ -3241,6 +3528,7 @@ process_task_isolated() {
                         __replan_context="CIRCUIT BREAKER: Smoke test NEEDS_REBUILD twice. Failure: $failure_summary. Knowing everything you know now, scrap this and implement the elegant solution."
                         __need_replan=true
                         __completed_phases=""
+                        __cleanup_tdd_artifacts
                         clear_task_progress
                         update_workflow_state "replanning" "running"
                         break
@@ -3320,6 +3608,7 @@ process_task_isolated() {
                             print_debug "Re-plan context: $__replan_context"
                             __need_replan=true
                             __completed_phases=""
+                            __cleanup_tdd_artifacts
                             clear_task_progress
                             update_workflow_state "replanning" "running"
                             break
@@ -3377,6 +3666,7 @@ process_task_isolated() {
                         print_debug "Re-plan context: $__replan_context"
                         __need_replan=true
                         __completed_phases=""
+                        __cleanup_tdd_artifacts
                         clear_task_progress
                         update_workflow_state "replanning" "running"
                         break
@@ -3458,6 +3748,7 @@ process_task_isolated() {
                     print_debug "Re-plan context: $__replan_context"
                     __need_replan=true
                     __completed_phases=""
+                    __cleanup_tdd_artifacts
                     clear_task_progress
                     update_workflow_state "replanning" "running"
                     break
@@ -3608,16 +3899,17 @@ main() {
             exit 1
         fi
 
-        # 3. Git is required (worktrees)
-        if ! git rev-parse --is-inside-work-tree &>/dev/null 2>&1; then
-            print_error "Batch mode requires a git repository"
-            exit 1
-        fi
-
-        # 4. Working tree must be clean
-        if [[ -n "$(git status --porcelain 2>/dev/null)" ]]; then
-            print_error "Working tree is not clean. Commit or stash changes before using --batch."
-            exit 1
+        # 3. Detect git repo (required for standard mode, optional for non-git parent)
+        if git rev-parse --is-inside-work-tree &>/dev/null 2>&1; then
+            __BATCH_PARENT_IS_GIT=true
+            # 4. Working tree must be clean (only when parent is a git repo)
+            if [[ -n "$(git status --porcelain 2>/dev/null)" ]]; then
+                print_error "Working tree is not clean. Commit or stash changes before using --batch."
+                exit 1
+            fi
+        else
+            __BATCH_PARENT_IS_GIT=false
+            print_info "Non-git parent directory detected. Tasks must specify target directories via [dir:...] or TARGET_DIR config."
         fi
 
         # 5. Resume mode
@@ -3684,12 +3976,17 @@ main() {
     fi
 
     if [[ "$COMPLEXITY_AWARE" == "true" ]] && [[ "$FULL_PIPELINE" != "true" ]]; then
-        print_info "Mode: Phase-isolated (complexity-aware: 2-8 invocations per task)"
+        if [[ "$TDD_MODE" == "true" ]]; then
+            print_info "Mode: Phase-isolated (complexity-aware: 2-9 invocations per task, TDD enabled)"
+        else
+            print_info "Mode: Phase-isolated (complexity-aware: 2-8 invocations per task)"
+        fi
     else
         local _phase_count=6
         [[ "$SKIP_SPEC" != "true" ]] && [[ -d ".claude/skills/buildcrew-spec" ]] && _phase_count=$((_phase_count + 1))
         [[ -d ".claude/skills/buildcrew-outcome" ]] && _phase_count=$((_phase_count + 1))
         [[ -d ".claude/skills/buildcrew-simplify" ]] && _phase_count=$((_phase_count + 1))
+        [[ "$TDD_MODE" == "true" ]] && [[ -d ".claude/skills/buildcrew-tdd-scaffold" ]] && _phase_count=$((_phase_count + 1))
         print_info "Mode: Phase-isolated ($_phase_count invocations per task)"
     fi
     print_debug "Flags: skip_spec=$SKIP_SPEC strict=$STRICT_MODE review=$HUMAN_REVIEW branch=$GIT_BRANCH resume=$RESUME_MODE full_pipeline=$FULL_PIPELINE complexity_aware=$COMPLEXITY_AWARE auto=$AUTO_MODE"
@@ -3774,7 +4071,11 @@ main() {
 
         # Get next task (or targeted task)
         local task
-        if [[ -n "$TARGET_TASK" ]]; then
+        if [[ -n "$TARGET_TASK_EXACT" ]]; then
+            # Exact task text provided (e.g., from batch child) — use directly, skip backlog search
+            task="$TARGET_TASK_EXACT"
+            TARGET_TASK_EXACT=""
+        elif [[ -n "$TARGET_TASK" ]]; then
             task=$(get_task_by_target "$TARGET_TASK")
             if [[ -z "$task" ]]; then
                 print_error "No pending task matching '$TARGET_TASK'"
@@ -3935,6 +4236,10 @@ main() {
 
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
     parse_args "$@"
+    if [[ "$TDD_MODE" == "true" && "$SKIP_SPEC" == "true" ]]; then
+        echo "Error: --tdd requires spec phase (incompatible with --skip-spec)" >&2
+        exit 1
+    fi
     if [[ "$STRICT_EXPLICIT" == "true" ]] && [[ "$STRICT_MODE" == "true" ]] && [[ "$SKIP_SPEC" == "true" ]]; then
         print_warning "--strict has no effect with --skip-spec (outcome phase requires a spec)"
     fi

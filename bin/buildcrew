@@ -74,6 +74,7 @@ print_help() {
     echo "    --max-invocations N  Max Claude invocations per run (default: 15, with 'run')"
     echo "    --full-pipeline  Force all phases regardless of complexity assessment (with 'run')"
     echo "    --auto        Run fully unattended — auto-approve all interactive pauses (with 'run')"
+    echo "    --tdd         Enable TDD mode (write failing tests before build, standard complexity only)"
     echo "    --uat         After build completes, enter watch mode for UAT verdicts (with 'run')"
     echo "    --batch       Run pending tasks in parallel using git worktrees (with 'run')"
     echo "    --max-parallel N  Max concurrent tasks in batch mode (default: 5, with 'run --batch')"
