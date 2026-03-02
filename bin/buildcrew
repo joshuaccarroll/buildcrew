@@ -2023,8 +2023,8 @@ cmd_uat() {
     [[ -n "$signal_dir" ]] && export UAT_SIGNAL_DIR_OVERRIDE="$signal_dir"
 
     # Initialize and run UAT phases
-    uat_init "$project_name" "$readme_path" "$artifact_dir" "$signal_dir"
-    uat_run_phases "$project_name" "$readme_path" "$uat_auto"
+    uat_init "$readme_path" "$project_name"
+    uat_run_phases "$readme_path" "$project_name" "$uat_auto"
 }
 
 cmd_dash() {
