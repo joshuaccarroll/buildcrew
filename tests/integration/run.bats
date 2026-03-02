@@ -190,12 +190,19 @@ EOF
     [[ "$output" == *"No pending tasks"* ]]
 }
 
-@test "run: --batch outside git repo exits with error about git" {
+@test "run: --batch outside git repo without target dirs exits with validation error" {
     echo "- [ ] Test task" > BACKLOG.md
     # TEST_DIR is not a git repo (setup_test_dir uses mktemp, no git init)
+    # Without [dir:...] prefix or TARGET_DIR, validation fails
     run "$BUILDCREW_HOME/lib/workflow.sh" --batch
     [ "$status" -ne 0 ]
-    [[ "$output" == *"git repository"* ]]
+    [[ "$output" == *"no target directory"* ]]
+}
+
+@test "run: --batch outside git repo shows non-git info message" {
+    echo "- [ ] [dir:nonexistent] Test task" > BACKLOG.md
+    run "$BUILDCREW_HOME/lib/workflow.sh" --batch
+    [[ "$output" == *"Non-git parent directory"* ]]
 }
 
 @test "run: --batch --dry-run shows task list and count" {

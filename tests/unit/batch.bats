@@ -247,3 +247,184 @@ EOF
  2. Task two"
     [ "${#_batch_tasks[@]}" -eq 2 ]
 }
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Non-git parent: extract_task_dir / strip_task_dir / resolve_task_target_dir
+# ─────────────────────────────────────────────────────────────────────────────
+
+@test "extract_task_dir: extracts dir from [dir:project-a] prefix" {
+    result=$(extract_task_dir "[dir:project-a] Fix the bug")
+    [ "$result" = "project-a" ]
+}
+
+@test "extract_task_dir: returns empty for task without prefix" {
+    result=$(extract_task_dir "Fix the bug")
+    [ -z "$result" ]
+}
+
+@test "extract_task_dir: handles nested-path dirs" {
+    result=$(extract_task_dir "[dir:apps/frontend] Add feature")
+    [ "$result" = "apps/frontend" ]
+}
+
+@test "strip_task_dir: removes [dir:...] prefix and space" {
+    result=$(strip_task_dir "[dir:project-a] Fix the bug")
+    [ "$result" = "Fix the bug" ]
+}
+
+@test "strip_task_dir: passes through task without prefix" {
+    result=$(strip_task_dir "Fix the bug")
+    [ "$result" = "Fix the bug" ]
+}
+
+@test "resolve_task_target_dir: inline dir wins over TARGET_DIR" {
+    TARGET_DIR="fallback-project"
+    result=$(resolve_task_target_dir "[dir:project-a] Fix the bug")
+    [ "$result" = "project-a" ]
+}
+
+@test "resolve_task_target_dir: falls back to TARGET_DIR" {
+    TARGET_DIR="default-project"
+    result=$(resolve_task_target_dir "Fix the bug")
+    [ "$result" = "default-project" ]
+}
+
+@test "resolve_task_target_dir: returns empty when no dir and no TARGET_DIR" {
+    TARGET_DIR=""
+    result=$(resolve_task_target_dir "Fix the bug")
+    [ -z "$result" ]
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Non-git parent: _batch_parse_task_list with dir prefixes
+# ─────────────────────────────────────────────────────────────────────────────
+
+@test "_batch_parse_task_list: extracts and strips [dir:...] prefix" {
+    _batch_parse_task_list " 1. [dir:project-a] Implement feature X
+ 2. [dir:project-b] Fix bug Y"
+    [ "${_batch_tasks[0]}" = "Implement feature X" ]
+    [ "${_batch_tasks[1]}" = "Fix bug Y" ]
+    [ "${_batch_target_dirs[0]}" = "project-a" ]
+    [ "${_batch_target_dirs[1]}" = "project-b" ]
+}
+
+@test "_batch_parse_task_list: prefixes slug with dir name" {
+    _batch_parse_task_list " 1. [dir:project-a] Fix bug"
+    [[ "${_batch_slugs[0]}" == project-a-* ]]
+}
+
+@test "_batch_parse_task_list: uses TARGET_DIR fallback" {
+    TARGET_DIR="my-project"
+    _batch_parse_task_list " 1. Fix bug"
+    [ "${_batch_target_dirs[0]}" = "my-project" ]
+    [[ "${_batch_slugs[0]}" == my-project-* ]]
+}
+
+@test "_batch_parse_task_list: empty target_dir for plain tasks" {
+    TARGET_DIR=""
+    _batch_parse_task_list " 1. Fix bug"
+    [ -z "${_batch_target_dirs[0]}" ]
+    # Slug should NOT have a dir prefix
+    [[ "${_batch_slugs[0]}" == fix-* ]]
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Non-git parent: mark_task_complete/blocked with [dir:...] prefix
+# ─────────────────────────────────────────────────────────────────────────────
+
+@test "mark_task_complete: marks task with [dir:...] prefix preserving prefix" {
+    cat > BACKLOG.md << 'EOF'
+- [ ] [dir:project-a] Fix the bug
+- [ ] [dir:project-b] Add feature
+EOF
+    mark_task_complete "Fix the bug"
+    grep -q '^\- \[x\] \[dir:project-a\] Fix the bug' BACKLOG.md
+    # Other task unchanged
+    grep -q '^\- \[ \] \[dir:project-b\] Add feature' BACKLOG.md
+}
+
+@test "mark_task_complete: still works without [dir:...] prefix" {
+    cat > BACKLOG.md << 'EOF'
+- [ ] Fix the bug
+EOF
+    mark_task_complete "Fix the bug"
+    grep -q '^\- \[x\] Fix the bug' BACKLOG.md
+}
+
+@test "mark_task_blocked: marks task with [dir:...] prefix preserving prefix" {
+    cat > BACKLOG.md << 'EOF'
+- [ ] [dir:project-a] Fix the bug
+EOF
+    mark_task_blocked "Fix the bug" "dependency missing"
+    grep -q '^\- \[!\] \[dir:project-a\] Fix the bug (blocked: dependency missing)' BACKLOG.md
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Non-git parent: _batch_add_task stores target_dir in manifest
+# ─────────────────────────────────────────────────────────────────────────────
+
+@test "_batch_add_task: stores target_dir in manifest" {
+    _batch_init_manifest "main" "abc123"
+    _batch_add_task 1 "Fix bug" "project-a-fix-bug" "project-a"
+    [ "$(jq -r '.tasks[0].target_dir' "$BATCH_MANIFEST")" = "project-a" ]
+}
+
+@test "_batch_add_task: target_dir defaults to empty string" {
+    _batch_init_manifest "main" "abc123"
+    _batch_add_task 1 "Fix bug" "fix-bug"
+    [ "$(jq -r '.tasks[0].target_dir' "$BATCH_MANIFEST")" = "" ]
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Non-git parent: TARGET_DIR config loading
+# ─────────────────────────────────────────────────────────────────────────────
+
+@test "TARGET_DIR: loaded from .buildcrew/config" {
+    mkdir -p .buildcrew
+    echo "TARGET_DIR=my-project" > .buildcrew/config
+    unset TARGET_DIR
+    load_buildcrew_config
+    TARGET_DIR=${TARGET_DIR:-}
+    [ "$TARGET_DIR" = "my-project" ]
+}
+
+@test "TARGET_DIR: env var wins over config" {
+    mkdir -p .buildcrew
+    echo "TARGET_DIR=from-config" > .buildcrew/config
+    TARGET_DIR="from-env"
+    load_buildcrew_config
+    [ "$TARGET_DIR" = "from-env" ]
+}
+
+@test "TARGET_DIR: defaults to empty" {
+    [ "$TARGET_DIR" = "" ] || [ -z "$TARGET_DIR" ]
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# parse_args: --task-exact tests
+# ─────────────────────────────────────────────────────────────────────────────
+
+@test "parse_args: --task-exact sets TARGET_TASK_EXACT and SINGLE_TASK" {
+    parse_args --task-exact "Fix the bug"
+    [ "$TARGET_TASK_EXACT" = "Fix the bug" ]
+    [ "$SINGLE_TASK" = "true" ]
+}
+
+@test "parse_args: --task-exact rejects missing value" {
+    run bash -c "source '$BUILDCREW_ROOT/lib/workflow.sh' 2>/dev/null; parse_args --task-exact"
+    [ "$status" -eq 1 ]
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# gather_pending_tasks preserves [dir:...] prefixes
+# ─────────────────────────────────────────────────────────────────────────────
+
+@test "gather_pending_tasks: preserves [dir:...] prefixes in task list" {
+    cat > BACKLOG.md << 'EOF'
+- [ ] [dir:project-a] Fix the bug
+- [ ] [dir:project-b] Add feature
+EOF
+    gather_pending_tasks
+    [[ "$__BATCH_TASK_LIST" == *"[dir:project-a] Fix the bug"* ]]
+    [[ "$__BATCH_TASK_LIST" == *"[dir:project-b] Add feature"* ]]
+}
