@@ -422,6 +422,8 @@ Tag each task with its complexity profile using a `{trivial}` or `{simple}` suff
 - `{simple}` — config change, small bug fix, small update, enable/disable setting (research + build + test + verify)
 - no tag — anything substantial, requiring research, planning, and full review
 
+Prefix every task with `[plan:PROJECT_[name].md]` to link it back to its source plan file. This annotation is used by the orchestrator to inject plan context into the spec phase.
+
 Combine trivially related tasks into a single backlog item when they form a natural atomic unit.
 
 ```markdown
@@ -429,21 +431,22 @@ Combine trivially related tasks into a single backlog item when they form a natu
 
 *Generated from PROJECT_[name].md*
 *Run with: ./workflow.sh*
+*Task prefixes [plan:...] and [dir:...] are orchestrator metadata — do not remove or reorder*
 
 ## Phase 1: [Phase Name]
 
-- [ ] [Task 1 from Phase 1] {trivial}
-- [ ] [Task 2 from Phase 1]
+- [ ] [plan:PROJECT_[name].md] [Task 1 from Phase 1] {trivial}
+- [ ] [plan:PROJECT_[name].md] [Task 2 from Phase 1]
 
 ## Phase 2: [Phase Name]
 
-- [ ] [Task 1 from Phase 2]
-- [ ] [Task 2 from Phase 2]
+- [ ] [plan:PROJECT_[name].md] [Task 1 from Phase 2]
+- [ ] [plan:PROJECT_[name].md] [Task 2 from Phase 2]
 
 ## Phase 3: [Phase Name]
 
-- [ ] [Task 1 from Phase 3]
-- [ ] [Task 2 from Phase 3]
+- [ ] [plan:PROJECT_[name].md] [Task 1 from Phase 3]
+- [ ] [plan:PROJECT_[name].md] [Task 2 from Phase 3]
 
 ---
 *Source: PROJECT_[name].md*

@@ -485,6 +485,7 @@ __BATCH_HEARTBEAT_PID=""
 _batch_tasks=()
 _batch_slugs=()
 _batch_target_dirs=()
+_batch_plan_refs=()
 
 # Non-git parent mode detection (set in main())
 __BATCH_PARENT_IS_GIT=true
@@ -518,7 +519,7 @@ _batch_init_manifest() {
 
 # Add a task entry to the manifest.
 _batch_add_task() {
-    local index="$1" text="$2" slug="$3" target_dir="${4:-}"
+    local index="$1" text="$2" slug="$3" target_dir="${4:-}" plan_ref="${5:-}"
     local branch="buildcrew/$slug"
     local worktree
     worktree=$(_batch_worktree_path "$slug" "$target_dir")
@@ -528,9 +529,10 @@ _batch_add_task() {
        --arg branch "$branch" \
        --arg wt "$worktree" \
        --arg td "$target_dir" \
+       --arg pr "$plan_ref" \
        '.tasks += [{index: $idx, text: $text, slug: $slug, branch: $branch,
-                    worktree: $wt, target_dir: $td, status: "pending", exit_code: null,
-                    started_at: null, completed_at: null}]' \
+                    worktree: $wt, target_dir: $td, plan_ref: $pr, status: "pending",
+                    exit_code: null, started_at: null, completed_at: null}]' \
        "$BATCH_MANIFEST" > "$BATCH_MANIFEST.tmp" \
        && mv "$BATCH_MANIFEST.tmp" "$BATCH_MANIFEST"
 }
@@ -723,7 +725,13 @@ _batch_launch_task() {
     local task="${_batch_tasks[$idx]}"
     local slug="${_batch_slugs[$idx]}"
     local target_dir="${_batch_target_dirs[$idx]:-}"
+    local plan_ref="${_batch_plan_refs[$idx]:-}"
     local manifest_idx=$((idx + 1))
+
+    # Prepend [plan:...] to task text so child workflow receives it
+    if [[ -n "$plan_ref" ]]; then
+        task="[plan:${plan_ref}] ${task}"
+    fi
 
     local worktree
     worktree=$(_batch_worktree_path "$slug" "$target_dir")
@@ -1005,12 +1013,18 @@ _batch_parse_task_list() {
     _batch_tasks=()
     _batch_slugs=()
     _batch_target_dirs=()
+    _batch_plan_refs=()
     local i=0
     local line
     while IFS= read -r line; do
         [[ -z "$line" ]] && continue
         local text="${line#*. }"  # strip " 1. " prefix
         [[ -z "$text" ]] && continue
+
+        # Extract and strip [plan:...] prefix (before [dir:...])
+        local plan_ref
+        plan_ref=$(extract_task_plan_ref "$text")
+        text=$(strip_task_plan_ref "$text")
 
         # Extract and strip [dir:...] prefix
         local target_dir
@@ -1019,6 +1033,7 @@ _batch_parse_task_list() {
 
         _batch_tasks[$i]="$text"
         _batch_target_dirs[$i]="$target_dir"
+        _batch_plan_refs[$i]="$plan_ref"
 
         # Prefix slug with dir name for uniqueness across repos
         local slug
@@ -1104,18 +1119,20 @@ _batch_resume() {
     _batch_tasks=()
     _batch_slugs=()
     _batch_target_dirs=()
+    _batch_plan_refs=()
     local count base_branch
     count=$(jq '.tasks | length' "$BATCH_MANIFEST")
     base_branch=$(jq -r '.base_branch' "$BATCH_MANIFEST")
 
-    # Load all task fields in a single jq call (avoids 3N process spawns)
+    # Load all task fields in a single jq call (avoids 4N process spawns)
     local i=0
-    while IFS=$'\t' read -r t_text t_slug t_td; do
+    while IFS=$'\t' read -r t_text t_slug t_td t_pr; do
         _batch_tasks[$i]="$t_text"
         _batch_slugs[$i]="$t_slug"
         _batch_target_dirs[$i]="$t_td"
+        _batch_plan_refs[$i]="$t_pr"
         (( i++ )) || true
-    done < <(jq -r '.tasks[] | [.text, .slug, (.target_dir // "")] | @tsv' "$BATCH_MANIFEST")
+    done < <(jq -r '.tasks[] | [.text, .slug, (.target_dir // ""), (.plan_ref // "")] | @tsv' "$BATCH_MANIFEST")
 
     local total=${#_batch_tasks[@]}
     local already_done
@@ -1210,7 +1227,7 @@ enter_batch_mode() {
     _batch_init_manifest "$base_branch" "$base_commit"
     local i=0
     while (( i < total )); do
-        _batch_add_task $((i + 1)) "${_batch_tasks[$i]}" "${_batch_slugs[$i]}" "${_batch_target_dirs[$i]:-}"
+        _batch_add_task $((i + 1)) "${_batch_tasks[$i]}" "${_batch_slugs[$i]}" "${_batch_target_dirs[$i]:-}" "${_batch_plan_refs[$i]:-}"
         (( i++ )) || true
     done
 
@@ -1471,19 +1488,25 @@ task_to_slug() {
     echo "$slug"
 }
 
-# Extract [dir:X] value from a task string. Returns X or empty string.
-extract_task_dir() {
-    local task="$1"
-    if [[ "$task" =~ ^\[dir:([^\]]+)\] ]]; then
+# Extract value from a [key:value] annotation at the start of a task string.
+# Returns the value or empty string.
+_extract_task_annotation() {
+    local key="$1" task="$2"
+    if [[ "$task" =~ ^\[${key}:([^\]]+)\] ]]; then
         echo "${BASH_REMATCH[1]}"
     fi
 }
 
-# Strip [dir:X] prefix (and trailing space) from a task string.
-strip_task_dir() {
-    local task="$1"
-    echo "$task" | sed 's/^\[dir:[^]]*\] *//'
+# Strip a [key:value] annotation (and trailing space) from the start of a task string.
+_strip_task_annotation() {
+    local key="$1" task="$2"
+    echo "$task" | sed "s/^\\[${key}:[^]]*\\] *//"
 }
+
+extract_task_dir()      { _extract_task_annotation "dir"  "$1"; }
+strip_task_dir()        { _strip_task_annotation   "dir"  "$1"; }
+extract_task_plan_ref() { _extract_task_annotation "plan" "$1"; }
+strip_task_plan_ref()   { _strip_task_annotation   "plan" "$1"; }
 
 # Resolve the target directory for a task: inline [dir:...] > TARGET_DIR config > empty.
 resolve_task_target_dir() {
@@ -1744,18 +1767,20 @@ assess_task_complexity() {
 }
 
 # Mark a task as completed in the backlog
-# Tolerates optional [dir:...] prefix in the BACKLOG line, preserving it in output.
+# Tolerates optional [plan:...] and [dir:...] prefixes in the BACKLOG line, preserving them in output.
+# Line format: - [ ] [plan:X]? [dir:Y]? <task text> {trivial|simple|standard}?
 mark_task_complete() {
     local task="$1"
-    TASK="$task" perl -i -pe 's/^- \[ \] (\[dir:[^\]]+\] )?\Q$ENV{TASK}\E(\s*\{(?:trivial|simple|standard)\})?$/- [x] ${1}$ENV{TASK}/' "$BACKLOG_FILE"
+    TASK="$task" perl -i -pe 's/^- \[ \] (\[plan:[^\]]+\] )?(\[dir:[^\]]+\] )?\Q$ENV{TASK}\E(\s*\{(?:trivial|simple|standard)\})?$/- [x] ${1}${2}$ENV{TASK}/' "$BACKLOG_FILE"
 }
 
 # Mark a task as blocked in the backlog
-# Tolerates optional [dir:...] prefix in the BACKLOG line, preserving it in output.
+# Tolerates optional [plan:...] and [dir:...] prefixes in the BACKLOG line, preserving them in output.
+# Line format: - [ ] [plan:X]? [dir:Y]? <task text> ...
 mark_task_blocked() {
     local task="$1"
     local reason="$2"
-    TASK="$task" REASON="$reason" perl -i -pe 's/^- \[ \] (\[dir:[^\]]+\] )?\Q$ENV{TASK}\E.*/- [!] ${1}$ENV{TASK} (blocked: $ENV{REASON})/' "$BACKLOG_FILE"
+    TASK="$task" REASON="$reason" perl -i -pe 's/^- \[ \] (\[plan:[^\]]+\] )?(\[dir:[^\]]+\] )?\Q$ENV{TASK}\E.*/- [!] ${1}${2}$ENV{TASK} (blocked: $ENV{REASON})/' "$BACKLOG_FILE"
 }
 
 # ─────────────────────────────────────────────────────────────────────────────────
@@ -1811,7 +1836,8 @@ load_task_progress() {
     fi
 
     # Validate saved task is still pending in backlog
-    if ! TASK="$saved_task" perl -ne 'if (/^- \[ \] \Q$ENV{TASK}\E(\s*\{(?:trivial|simple|standard)\})?$/) { $f=1; last } END { exit($f ? 0 : 1) }' "$BACKLOG_FILE"; then
+    # Line format: - [ ] [plan:X]? [dir:Y]? <task text> {trivial|simple|standard}?
+    if ! TASK="$saved_task" perl -ne 'if (/^- \[ \] (\[plan:[^\]]+\] )?(\[dir:[^\]]+\] )?\Q$ENV{TASK}\E(\s*\{(?:trivial|simple|standard)\})?$/) { $f=1; last } END { exit($f ? 0 : 1) }' "$BACKLOG_FILE"; then
         print_warning "Saved task no longer pending in backlog — clearing progress"
         clear_task_progress
         return 1
@@ -3027,6 +3053,7 @@ process_task_isolated() {
     local task_num="${2:-}"
     local total_tasks="${3:-}"
     local task_complexity="${4:-standard}"
+    local plan_ref="${5:-}"
     local __completed_phases=""
     local __is_resuming=false
     local __replan_count=0           # circuit breaker: how many times we've re-planned
@@ -3076,6 +3103,14 @@ process_task_isolated() {
     __WF_TOTAL_TASKS="$total_tasks"
     __WF_TASK_NAME="$task"
 
+    # Build plan context from [plan:] reference if available
+    local plan_context=""
+    if [[ -n "$plan_ref" ]] && [[ -f "$plan_ref" ]]; then
+        plan_context="$(printf '\n\n## Discovery Plan Context\n\nThis task was generated from the discovery plan file `%s`. Its contents follow:\n\n```\n%s\n```\n\nUse this plan as starting context for understanding the task scope and intent.' "$plan_ref" "$(cat "$plan_ref")")"
+    elif [[ -n "$plan_ref" ]]; then
+        plan_context="$(printf '\n\n## Discovery Plan Context\n\nThis task references plan file `%s`, but the file was not found. Proceed based on the task description alone.' "$plan_ref")"
+    fi
+
     # ─────────────────────────────────────────────────────────────────────────
     # Outer loop: supports circuit breaker re-planning
     # ─────────────────────────────────────────────────────────────────────────
@@ -3123,7 +3158,7 @@ process_task_isolated() {
         print_info "Skipping phase: spec (complexity: $task_complexity)"
         update_workflow_state "spec" "skipped"
     elif [[ "$__run_spec" == "true" ]]; then
-        run_phase_group "spec" "$task" "${__replan_context:+Re-planning context: $__replan_context}" || { mark_task_blocked "$task" "spec phase failed to produce a valid result"; clear_task_progress; return 1; }
+        run_phase_group "spec" "$task" "${__replan_context:+Re-planning context: $__replan_context}${plan_context}" || { mark_task_blocked "$task" "spec phase failed to produce a valid result"; clear_task_progress; return 1; }
 
         local spec_verdict
         spec_verdict=$(jq -r '.verdict // "complete"' "$PHASE_RESULT_FILE")
@@ -3147,7 +3182,7 @@ process_task_isolated() {
         if (( ac_count < 2 )); then
             print_warning "Spec has only $ac_count acceptance criteria (minimum 2). Re-running spec phase."
             run_phase_group "spec" "$task" \
-                "RETRY: Previous spec had only $ac_count acceptance criteria. Minimum is 2 concrete, testable acceptance criteria. Read .claude/spec.md and add more specific ACs." \
+                "RETRY: Previous spec had only $ac_count acceptance criteria. Minimum is 2 concrete, testable acceptance criteria. Read .claude/spec.md and add more specific ACs.${plan_context}" \
                 || { mark_task_blocked "$task" "spec phase failed to produce a valid result on AC retry"; clear_task_progress; return 1; }
             # Re-validate
             ac_count=$(grep -c '^- \[ \] AC-' ".claude/spec.md" 2>/dev/null) || ac_count=0
@@ -4107,6 +4142,11 @@ main() {
             break
         fi
 
+        # Extract and strip [plan:] annotation before complexity assessment
+        local plan_ref=""
+        plan_ref=$(extract_task_plan_ref "$task")
+        task=$(strip_task_plan_ref "$task")
+
         # Assess complexity and strip tag before processing
         local task_complexity="standard"
         if [[ "$FULL_PIPELINE" != "true" ]] && [[ "$COMPLEXITY_AWARE" == "true" ]]; then
@@ -4171,7 +4211,7 @@ main() {
             ((task_num++))
             __WF_TASK_NUM="$task_num"
             local task_result=0
-            if process_task_isolated "$task" "$task_num" "$total_tasks" "$task_complexity"; then
+            if process_task_isolated "$task" "$task_num" "$total_tasks" "$task_complexity" "$plan_ref"; then
                 task_result=0
             else
                 task_result=1
