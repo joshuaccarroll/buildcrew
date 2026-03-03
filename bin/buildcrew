@@ -1918,6 +1918,7 @@ cmd_uat() {
     local signal_dir=""
     local uat_auto=false
     local regress_path=""
+    local uat_preview=false
 
     # Parse arguments
     while [[ $# -gt 0 ]]; do
@@ -1966,6 +1967,10 @@ cmd_uat() {
                 uat_auto=true
                 shift
                 ;;
+            --preview)
+                uat_preview=true
+                shift
+                ;;
             --help|-h)
                 echo -e "${BOLD}buildcrew uat${NC} — Blind scenario-based acceptance testing"
                 echo ""
@@ -1979,11 +1984,13 @@ cmd_uat() {
                 echo "    --signal-dir <path>    Where to write signal/verdict files"
                 echo "    --regress <path>       Run UAT standalone against an existing artifact directory (implies --auto)"
                 echo "    --auto                 Auto mode: log disputes without pausing"
+                echo "    --preview              List existing scenarios without running agents (read-only)"
                 echo "    --help, -h             Show this help message"
                 echo ""
                 echo -e "${BOLD}EXAMPLES:${NC}"
                 echo "    buildcrew uat --readme ../my-project/README.md"
                 echo "    buildcrew uat --readme ../my-project/README.md --regress /path/to/artifact"
+                echo "    buildcrew uat --preview"
                 exit 0
                 ;;
             *)
@@ -1993,6 +2000,25 @@ cmd_uat() {
                 ;;
         esac
     done
+
+    # Conflict check: --preview + --regress
+    if [[ "$uat_preview" == "true" ]] && [[ -n "$regress_path" ]]; then
+        echo -e "${RED}Error:${NC} --preview and --regress cannot be used together"
+        exit 1
+    fi
+
+    # Preview short-circuit (read-only, no --readme required)
+    if [[ "$uat_preview" == "true" ]]; then
+        source "$BUILDCREW_HOME/lib/uat_signal.sh"
+        source "$BUILDCREW_HOME/lib/uat.sh"
+        print_header "UAT Preview"
+        if [[ ! -d "scenarios" ]]; then
+            print_info "No scenarios found. Run 'buildcrew uat --readme <path>' first."
+        else
+            _uat_list_scenarios
+        fi
+        exit 0
+    fi
 
     # Validate --readme is provided and readable
     if [[ -z "$readme_path" ]]; then

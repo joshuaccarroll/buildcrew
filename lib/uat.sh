@@ -181,6 +181,203 @@ _uat_read_manifest() {
     return 0
 }
 
+# ─────────────────────────────────────────────────────────────────────────────────
+# UAT Display Utilities
+# ─────────────────────────────────────────────────────────────────────────────────
+
+# _uat_format_duration — format seconds as human-readable duration
+# Args: total_seconds
+# Output: "Ys" for < 60, "Xm YYs" for 60-3599, "Xh YYm ZZs" for >= 3600
+_uat_format_duration() {
+    local total="$1"
+
+    # Guard against non-numeric input
+    if ! [[ "$total" =~ ^[0-9]+$ ]]; then
+        echo "?"
+        return 0
+    fi
+
+    if [[ $total -lt 60 ]]; then
+        echo "${total}s"
+    elif [[ $total -lt 3600 ]]; then
+        local mins=$((total / 60))
+        local secs=$((total % 60))
+        printf '%dm %02ds\n' "$mins" "$secs"
+    else
+        local hours=$((total / 3600))
+        local mins=$(( (total % 3600) / 60 ))
+        local secs=$((total % 60))
+        printf '%dh %02dm %02ds\n' "$hours" "$mins" "$secs"
+    fi
+}
+
+# _uat_list_scenarios — list scenarios discovered from scenarios/*.md files
+# Skips user-stories.md (input file). Handles Bash 3.2 nullglob.
+_uat_list_scenarios() {
+    # Collect scenario files (excluding user-stories.md)
+    local files=()
+    local f
+    for f in scenarios/*.md; do
+        [[ -f "$f" ]] || continue
+        [[ "$(basename "$f")" == "user-stories.md" ]] && continue
+        files+=("$f")
+    done
+
+    if [[ ${#files[@]} -eq 0 ]]; then
+        print_info "No scenarios found"
+        return 0
+    fi
+
+    # Extract scenario names from ## Scenario: headers
+    local names=()
+    local line
+    while IFS= read -r line; do
+        names+=("$line")
+    done < <(grep -h '^## Scenario: ' "${files[@]}" 2>/dev/null | sed 's/^## Scenario: //')
+
+    if [[ ${#names[@]} -eq 0 ]]; then
+        print_info "No scenarios found"
+        return 0
+    fi
+
+    print_info "Scenarios discovered:"
+    local i=1
+    for line in "${names[@]}"; do
+        echo "  ${i}. ${line}"
+        i=$((i + 1))
+    done
+    print_info "Total: ${#names[@]} scenarios"
+    return 0
+}
+
+# _uat_print_scenario_table — print color-coded scenario results table
+# Args: scenarios_json (JSON array string)
+_uat_print_scenario_table() {
+    local scenarios_json="$1"
+
+    # Guard against empty/null input
+    if [[ -z "$scenarios_json" ]] || [[ "$scenarios_json" == "null" ]] || [[ "$scenarios_json" == "[]" ]]; then
+        echo "  No scenario results"
+        return 0
+    fi
+
+    echo "  Scenario Results:"
+    echo "  ─────────────────────────────────────────────────────"
+
+    local scenario status summary status_label
+    while IFS=$'\t' read -r scenario status summary; do
+        case "$status" in
+            pass)     status_label="${GREEN}PASS${NC}" ;;
+            fail)     status_label="${RED}FAIL${NC}" ;;
+            error)    status_label="${RED}ERR ${NC}" ;;
+            disputed) status_label="${YELLOW}DISP${NC}" ;;
+            *)        status_label="????"; ;;
+        esac
+        printf '  %b  %s\n' "$status_label" "$scenario"
+        if [[ "$status" != "pass" ]] && [[ -n "$summary" ]] && [[ "$summary" != "(no summary)" ]]; then
+            # Truncate long summaries at 80 chars
+            if [[ ${#summary} -gt 80 ]]; then
+                summary="${summary:0:77}..."
+            fi
+            printf '        %s\n' "$summary"
+        fi
+    done < <(echo "$scenarios_json" | jq -r '.[] | [.scenario, .status, (.summary // "(no summary)")] | @tsv')
+
+    return 0
+}
+
+# _uat_print_retry_context — print which scenarios failed/errored for retry
+# Args: scenarios_json (JSON array string)
+_uat_print_retry_context() {
+    local scenarios_json="$1"
+
+    # Guard against empty/null input
+    if [[ -z "$scenarios_json" ]] || [[ "$scenarios_json" == "null" ]] || [[ "$scenarios_json" == "[]" ]]; then
+        return 0
+    fi
+
+    # Filter to only fail/error entries
+    local filtered
+    filtered=$(echo "$scenarios_json" | jq -r '[.[] | select(.status == "fail" or .status == "error")] | .[] | [.scenario, .status, (.summary // "(no summary)")] | @tsv' 2>/dev/null)
+
+    if [[ -z "$filtered" ]]; then
+        return 0
+    fi
+
+    echo "  Scenarios to retry:"
+    local scenario status summary status_label
+    while IFS=$'\t' read -r scenario status summary; do
+        case "$status" in
+            fail)  status_label="${RED}FAIL${NC}" ;;
+            error) status_label="${RED}ERR ${NC}" ;;
+            *)     status_label="????"; ;;
+        esac
+        if [[ -n "$summary" ]] && [[ "$summary" != "(no summary)" ]]; then
+            # Truncate long summaries
+            if [[ ${#summary} -gt 80 ]]; then
+                summary="${summary:0:77}..."
+            fi
+            printf '  %b  %s — %s\n' "$status_label" "$scenario" "$summary"
+        else
+            printf '  %b  %s\n' "$status_label" "$scenario"
+        fi
+    done <<< "$filtered"
+
+    return 0
+}
+
+# _uat_print_report — print structured UAT post-run report
+# Args: signal_dir, run_start_time
+_uat_print_report() {
+    local signal_dir="$1"
+    local run_start_time="${2:-}"
+
+    # Refresh verdict globals from disk
+    read_verdict "$signal_dir" || {
+        print_warning "Could not read verdict for report"
+        return 0
+    }
+
+    # Status label
+    local status_label="$__VERDICT_STATUS"
+    case "$__VERDICT_STATUS" in
+        pass) status_label="${GREEN}PASS${NC}" ;;
+        fail) status_label="${RED}FAIL${NC}" ;;
+        error) status_label="${RED}ERROR${NC}" ;;
+        disputed) status_label="${YELLOW}DISPUTED${NC}" ;;
+    esac
+
+    echo ""
+    echo -e "═══════════════════════════════════════"
+    echo -e "   ${BOLD}UAT Report${NC}"
+    echo -e "═══════════════════════════════════════"
+    printf '  Status:     %b\n' "$status_label"
+    echo "  Iteration:  ${__VERDICT_BUILD_ITERATION:-?}"
+
+    # Duration (only if run_start_time is set and numeric)
+    if [[ -n "$run_start_time" ]] && [[ "$run_start_time" =~ ^[0-9]+$ ]]; then
+        local run_end; run_end=$(date +%s)
+        echo "  Duration:   $(_uat_format_duration $((run_end - run_start_time)))"
+    fi
+
+    echo ""
+    echo "  Results:"
+    echo "    Passed:   ${__VERDICT_PASSED:-0}"
+    echo "    Failed:   ${__VERDICT_FAILED:-0}"
+    echo "    Errored:  ${__VERDICT_ERRORED:-0}"
+    echo "    Disputed: ${__VERDICT_DISPUTED:-0}"
+    echo "    Total:    ${__VERDICT_TOTAL:-0}"
+    echo ""
+
+    _uat_print_scenario_table "$__VERDICT_SCENARIOS_JSON"
+
+    if [[ "${__VERDICT_DISPUTED:-0}" -gt 0 ]]; then
+        echo ""
+        echo "  See disputes.md for disputed scenario details."
+    fi
+    echo ""
+}
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # 1. uat_init — UAT directory initialization
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -341,6 +538,8 @@ uat_run_phases() {
     # Load config
     load_uat_config
 
+    local run_start_time; run_start_time=$(date +%s)
+
     # Set up cleanup trap
     trap 'uat_cleanup' EXIT INT TERM
 
@@ -389,7 +588,10 @@ uat_run_phases() {
     if [[ "$need_phases_1_3" == "true" ]]; then
         uat_phase_stories || return 1
         uat_phase_scenarios || return 1
+        _uat_list_scenarios
         uat_phase_harness || return 1
+    else
+        _uat_list_scenarios
     fi
 
     # ── Retry loop: Phase 4 → Phase 6 ────────────────────────────────────────
@@ -423,6 +625,7 @@ uat_run_phases() {
                     failing_scenarios=""
                     uat_phase_stories || return 1
                     uat_phase_scenarios || return 1
+                    _uat_list_scenarios
                     uat_phase_harness || return 1
                 fi
             fi
@@ -480,6 +683,7 @@ uat_run_phases() {
             retry_count=$((retry_count + 1))
             if [[ $retry_count -ge $UAT_MAX_RETRIES ]]; then
                 print_error "UAT max retries ($UAT_MAX_RETRIES) exhausted"
+                _uat_print_report "$signal_dir" "$run_start_time"
                 return 1
             fi
             continue
@@ -493,6 +697,7 @@ uat_run_phases() {
             # Phase 6 failed (e.g., no valid scenario results)
             if [[ -n "$regress_path" ]]; then
                 print_error "Phase 6 verdict failed in regress mode"
+                _uat_print_report "$signal_dir" "$run_start_time"
                 return 1
             fi
             retry_count=$((retry_count + 1))
@@ -511,6 +716,7 @@ uat_run_phases() {
 
         if [[ "$__VERDICT_STATUS" == "pass" ]]; then
             print_success "All scenarios passed!"
+            _uat_print_report "$signal_dir" "$run_start_time"
             return 0
         fi
 
@@ -519,9 +725,11 @@ uat_run_phases() {
             # Only disputed scenarios remain
             if [[ "$auto_mode" == "true" ]]; then
                 print_info "Only disputed scenarios remain (auto mode) — exiting with code 2"
+                _uat_print_report "$signal_dir" "$run_start_time"
                 return 2
             else
                 print_warning "Only disputed scenarios remain. Check disputes.md for details."
+                _uat_print_report "$signal_dir" "$run_start_time"
                 return 2
             fi
         fi
@@ -529,6 +737,7 @@ uat_run_phases() {
         # In regress mode, exit after single pass — no retry loop
         if [[ -n "$regress_path" ]]; then
             print_error "Regress mode: ${__VERDICT_FAILED} failures, ${__VERDICT_ERRORED} errors"
+            _uat_print_report "$signal_dir" "$run_start_time"
             return 1
         fi
 
@@ -539,10 +748,12 @@ uat_run_phases() {
         retry_count=$((retry_count + 1))
         if [[ $retry_count -ge $UAT_MAX_RETRIES ]]; then
             print_error "UAT max retries ($UAT_MAX_RETRIES) exhausted — $__VERDICT_FAILED failures, $__VERDICT_ERRORED errors remain"
+            _uat_print_report "$signal_dir" "$run_start_time"
             return 1
         fi
 
         print_info "Retry $retry_count/$UAT_MAX_RETRIES — waiting for new artifact (${__VERDICT_FAILED} failures, ${__VERDICT_ERRORED} errors)"
+        _uat_print_retry_context "$__VERDICT_SCENARIOS_JSON"
     done
 }
 
@@ -593,6 +804,7 @@ _uat_run_agent_phase() {
     local task="$2"
     local extra_context="${3:-}"
     local max_turns=50
+    local phase_start; phase_start=$(date +%s)
 
     rm -f "$UAT_PHASE_RESULT_FILE"
 
@@ -687,6 +899,8 @@ _uat_run_agent_phase() {
         [[ -n "$__saved_stty" ]] && stty "$__saved_stty" 2>/dev/null || true
 
         if [[ ! -f "$UAT_PHASE_RESULT_FILE" ]] || ! jq -e . "$UAT_PHASE_RESULT_FILE" >/dev/null 2>&1; then
+            local phase_end; phase_end=$(date +%s)
+            print_info "Phase $phase_name completed in $(_uat_format_duration $((phase_end - phase_start)))"
             print_error "Phase $phase_name failed after retry"
             return 1
         fi
@@ -700,10 +914,14 @@ _uat_run_agent_phase() {
     if [[ "$verdict" == "fail" ]]; then
         local details
         details=$(jq -r '.details // "No details"' "$UAT_PHASE_RESULT_FILE")
+        local phase_end; phase_end=$(date +%s)
+        print_info "Phase $phase_name completed in $(_uat_format_duration $((phase_end - phase_start)))"
         print_error "Phase $phase_name verdict: fail — $details"
         return 1
     fi
 
+    local phase_end; phase_end=$(date +%s)
+    print_info "Phase $phase_name completed in $(_uat_format_duration $((phase_end - phase_start)))"
     return 0
 }
 
@@ -1020,6 +1238,7 @@ uat_phase_verdict() {
     fi
 
     print_header "UAT Phase 6: Write Verdict"
+    local verdict_start; verdict_start=$(date +%s)
 
     # Find the scenario results file
     local results_file="results/iteration-${build_iteration}/scenario-results.json"
@@ -1085,7 +1304,11 @@ uat_phase_verdict() {
     disputed=$(echo "$scenarios_json" | jq '[.[] | select(.status == "disputed")] | length')
 
     print_info "Verdict: total=$total passed=$passed failed=$failed errored=$errored disputed=$disputed"
+    _uat_print_scenario_table "$scenarios_json"
     print_success "Verdict written for build iteration $build_iteration"
+
+    local verdict_end; verdict_end=$(date +%s)
+    print_info "Phase verdict completed in $(_uat_format_duration $((verdict_end - verdict_start)))"
 
     return 0
 }

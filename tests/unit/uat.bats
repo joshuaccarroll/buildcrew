@@ -941,3 +941,257 @@ MOCK_EOF
     [ -n "$UAT_HEALTH_CHECK_TIMEOUT" ]
     [ -n "$UAT_MAX_RETRIES" ]
 }
+
+# ─────────────────────────────────────────────────────────────────────────────
+# _uat_format_duration tests
+# ─────────────────────────────────────────────────────────────────────────────
+
+@test "_uat_format_duration: formats seconds-only for < 60s" {
+    run _uat_format_duration 45
+    [ "$status" -eq 0 ]
+    [ "$output" = "45s" ]
+}
+
+@test "_uat_format_duration: formats Xm YYs for 60-3599s" {
+    run _uat_format_duration 83
+    [ "$status" -eq 0 ]
+    [ "$output" = "1m 23s" ]
+}
+
+@test "_uat_format_duration: formats Xh YYm ZZs for >= 3600s" {
+    run _uat_format_duration 3661
+    [ "$status" -eq 0 ]
+    [ "$output" = "1h 01m 01s" ]
+}
+
+@test "_uat_format_duration: handles zero -> 0s" {
+    run _uat_format_duration 0
+    [ "$status" -eq 0 ]
+    [ "$output" = "0s" ]
+}
+
+@test "_uat_format_duration: handles non-numeric input -> ?" {
+    run _uat_format_duration "abc"
+    [ "$status" -eq 0 ]
+    [ "$output" = "?" ]
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# _uat_list_scenarios tests
+# ─────────────────────────────────────────────────────────────────────────────
+
+@test "_uat_list_scenarios: lists scenarios from files" {
+    mkdir -p scenarios
+    cat > scenarios/login.md << 'EOF'
+## Scenario: User logs in successfully
+Steps here...
+
+## Scenario: User fails login with bad password
+Steps here...
+EOF
+    cat > scenarios/signup.md << 'EOF'
+## Scenario: User creates account
+Steps here...
+EOF
+    run _uat_list_scenarios
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"1. User logs in successfully"* ]]
+    [[ "$output" == *"2. User fails login with bad password"* ]]
+    [[ "$output" == *"3. User creates account"* ]]
+    [[ "$output" == *"Total: 3 scenarios"* ]]
+}
+
+@test "_uat_list_scenarios: skips user-stories.md" {
+    mkdir -p scenarios
+    cat > scenarios/user-stories.md << 'EOF'
+## Scenario: This should be skipped
+EOF
+    cat > scenarios/login.md << 'EOF'
+## Scenario: User logs in
+EOF
+    run _uat_list_scenarios
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"User logs in"* ]]
+    [[ "$output" != *"This should be skipped"* ]]
+    [[ "$output" == *"Total: 1 scenarios"* ]]
+}
+
+@test "_uat_list_scenarios: handles no scenario files" {
+    mkdir -p scenarios
+    # Only user-stories.md, no actual scenario files
+    cat > scenarios/user-stories.md << 'EOF'
+## Scenario: Ignored
+EOF
+    run _uat_list_scenarios
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"No scenarios found"* ]]
+}
+
+@test "_uat_list_scenarios: handles files with no Scenario headers" {
+    mkdir -p scenarios
+    cat > scenarios/notes.md << 'EOF'
+# Some notes
+No scenario headers here.
+EOF
+    run _uat_list_scenarios
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"No scenarios found"* ]]
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# _uat_print_scenario_table tests
+# ─────────────────────────────────────────────────────────────────────────────
+
+@test "_uat_print_scenario_table: prints pass/fail/error/disputed with correct labels" {
+    local json='[
+        {"scenario":"Test A","status":"pass","summary":"OK"},
+        {"scenario":"Test B","status":"fail","summary":"Wrong output"},
+        {"scenario":"Test C","status":"error","summary":"Crashed"},
+        {"scenario":"Test D","status":"disputed","summary":"Ambiguous"}
+    ]'
+    run _uat_print_scenario_table "$json"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"PASS"* ]]
+    [[ "$output" == *"FAIL"* ]]
+    [[ "$output" == *"ERR"* ]]
+    [[ "$output" == *"DISP"* ]]
+    [[ "$output" == *"Test A"* ]]
+    [[ "$output" == *"Test B"* ]]
+    [[ "$output" == *"Wrong output"* ]]
+    [[ "$output" == *"Crashed"* ]]
+    [[ "$output" == *"Ambiguous"* ]]
+}
+
+@test "_uat_print_scenario_table: handles empty JSON array" {
+    run _uat_print_scenario_table "[]"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"No scenario results"* ]]
+}
+
+@test "_uat_print_scenario_table: handles null/missing summary field" {
+    local json='[{"scenario":"Test X","status":"fail","summary":null}]'
+    run _uat_print_scenario_table "$json"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Test X"* ]]
+    [[ "$output" == *"FAIL"* ]]
+}
+
+@test "_uat_print_scenario_table: truncates long summaries at 80 chars" {
+    local long_summary
+    long_summary=$(printf 'A%.0s' {1..100})
+    local json="[{\"scenario\":\"Test Long\",\"status\":\"fail\",\"summary\":\"${long_summary}\"}]"
+    run _uat_print_scenario_table "$json"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"..."* ]]
+    # The summary line should not contain all 100 A's
+    [[ "$output" != *"${long_summary}"* ]]
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# _uat_print_retry_context tests
+# ─────────────────────────────────────────────────────────────────────────────
+
+@test "_uat_print_retry_context: shows failing scenarios from JSON arg" {
+    local json='[
+        {"scenario":"Test A","status":"pass","summary":"OK"},
+        {"scenario":"Test B","status":"fail","summary":"Wrong output"},
+        {"scenario":"Test C","status":"error","summary":"Timeout"}
+    ]'
+    run _uat_print_retry_context "$json"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Scenarios to retry"* ]]
+    [[ "$output" == *"FAIL"* ]]
+    [[ "$output" == *"Test B"* ]]
+    [[ "$output" == *"Wrong output"* ]]
+    [[ "$output" == *"ERR"* ]]
+    [[ "$output" == *"Test C"* ]]
+    [[ "$output" == *"Timeout"* ]]
+    # Should NOT include passing scenarios
+    [[ "$output" != *"Test A"* ]]
+}
+
+@test "_uat_print_retry_context: skips disputed-only" {
+    local json='[
+        {"scenario":"Test A","status":"pass","summary":"OK"},
+        {"scenario":"Test B","status":"disputed","summary":"Ambiguous"}
+    ]'
+    run _uat_print_retry_context "$json"
+    [ "$status" -eq 0 ]
+    # No fail/error entries, so no output
+    [[ "$output" != *"Scenarios to retry"* ]]
+}
+
+@test "_uat_print_retry_context: handles empty input" {
+    run _uat_print_retry_context "[]"
+    [ "$status" -eq 0 ]
+    [ -z "$output" ]
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# _uat_print_report tests
+# ─────────────────────────────────────────────────────────────────────────────
+
+@test "_uat_print_report: prints structured report from verdict on disk" {
+    local signal_dir
+    signal_dir=$(mktemp -d)
+    # Write a verdict file directly
+    cat > "$signal_dir/verdict.json" << 'EOF'
+{
+    "status": "fail",
+    "total": 3,
+    "passed": 1,
+    "failed": 1,
+    "errored": 0,
+    "disputed": 1,
+    "build_iteration": 2,
+    "scenarios": [
+        {"scenario":"Test A","status":"pass","summary":"OK"},
+        {"scenario":"Test B","status":"fail","summary":"Bad output"},
+        {"scenario":"Test C","status":"disputed","summary":"Ambiguous"}
+    ]
+}
+EOF
+    local start_time
+    start_time=$(date +%s)
+    run _uat_print_report "$signal_dir" "$start_time"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"UAT Report"* ]]
+    [[ "$output" == *"FAIL"* ]]
+    [[ "$output" == *"Iteration:  2"* ]]
+    [[ "$output" == *"Passed:   1"* ]]
+    [[ "$output" == *"Failed:   1"* ]]
+    [[ "$output" == *"Disputed: 1"* ]]
+    [[ "$output" == *"Total:    3"* ]]
+    [[ "$output" == *"Test A"* ]]
+    [[ "$output" == *"Test B"* ]]
+    [[ "$output" == *"disputes.md"* ]]
+    rm -rf "$signal_dir"
+}
+
+@test "_uat_print_report: handles missing signal dir gracefully" {
+    run _uat_print_report "/nonexistent/dir" ""
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Could not read verdict"* ]]
+}
+
+@test "_uat_print_report: omits duration when run_start_time is empty" {
+    local signal_dir
+    signal_dir=$(mktemp -d)
+    cat > "$signal_dir/verdict.json" << 'EOF'
+{
+    "status": "pass",
+    "total": 1,
+    "passed": 1,
+    "failed": 0,
+    "errored": 0,
+    "disputed": 0,
+    "build_iteration": 1,
+    "scenarios": [{"scenario":"Test A","status":"pass","summary":"OK"}]
+}
+EOF
+    run _uat_print_report "$signal_dir" ""
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"UAT Report"* ]]
+    [[ "$output" != *"Duration:"* ]]
+    rm -rf "$signal_dir"
+}
