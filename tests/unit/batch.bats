@@ -503,3 +503,371 @@ EOF
 
     git -C "$target" worktree remove --force "$worktree_path" 2>/dev/null || rm -rf "$worktree_path"
 }
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Stop signal in batch dispatch loop tests
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Helper: set up a minimal batch dispatch loop environment with mocked internals.
+# Usage: _setup_batch_dispatch_mocks [poll_behavior]
+# poll_behavior: "noop" (default) | "complete_one" | "fail_one"
+_setup_batch_dispatch_mocks() {
+    local poll_behavior="${1:-noop}"
+
+    # Initialize batch state globals
+    _batch_running=0
+    _batch_completed=0
+    _batch_failed=0
+    _batch_next_idx=0
+    _batch_dashboard_lines=0
+    _batch_start_time=$(date +%s)
+    _batch_tasks=("Task A" "Task B" "Task C")
+    _batch_slugs=("task-a" "task-b" "task-c")
+    _batch_pids=()
+    _batch_target_dirs=()
+    _batch_plan_refs=()
+    MAX_PARALLEL=2
+    __BATCH_HEARTBEAT_PID=""
+    __LOG_FILE=""
+
+    # Ensure STOP_FILE path directory exists
+    mkdir -p .buildcrew
+
+    # Mock sleep to be instant
+    sleep() { :; }
+    export -f sleep
+
+    # Mock _batch_refresh_dashboard to no-op
+    _batch_refresh_dashboard() { :; }
+
+    # Mock _batch_post_completion to no-op (real one calls exit)
+    _batch_post_completion() { :; }
+
+    # Mock _batch_launch_task to no-op (real one forks a subprocess)
+    _batch_launch_task() {
+        local idx="$1"
+        _batch_pids[$idx]=""
+        _batch_running=$(( _batch_running + 1 ))
+    }
+
+    # Mock _batch_get_task_status to return pending
+    _batch_get_task_status() { echo "pending"; }
+
+    # Mock _batch_create_worktree to no-op
+    _batch_create_worktree() { return 0; }
+
+    # Mock _batch_worktree_path to return a dummy path that exists
+    _batch_worktree_path() { echo "$TEST_DIR"; }
+
+    # Set up poll behavior
+    case "$poll_behavior" in
+        noop)
+            _batch_poll_tasks() { :; }
+            ;;
+        complete_one)
+            # Completes one task per poll call
+            _batch_poll_tasks() {
+                if (( _batch_running > 0 )); then
+                    _batch_running=$(( _batch_running - 1 ))
+                    _batch_completed=$(( _batch_completed + 1 ))
+                fi
+            }
+            ;;
+        fail_one)
+            # Fails one task per poll call
+            _batch_poll_tasks() {
+                if (( _batch_running > 0 )); then
+                    _batch_running=$(( _batch_running - 1 ))
+                    _batch_failed=$(( _batch_failed + 1 ))
+                fi
+            }
+            ;;
+    esac
+}
+
+# HP-02: Stop signal triggers drain mode, breaks when running=0
+@test "batch stop: stop signal with 0 running tasks breaks immediately" {
+    _setup_batch_dispatch_mocks
+    touch "$STOP_FILE"
+
+    run _batch_dispatch_loop 3 main
+    [ "$status" -eq 0 ]
+    # Stop file should be cleared
+    [ ! -f "$STOP_FILE" ]
+    # Output should contain stop warning
+    [[ "$output" == *"Stop signal received"* ]]
+    # Should contain resume hint (3 tasks skipped)
+    [[ "$output" == *"3 task(s) were not started"* ]]
+}
+
+# HP-03: Stop signal during drain waits for running tasks to complete
+@test "batch stop: drain waits for running tasks to complete" {
+    _setup_batch_dispatch_mocks "complete_one"
+    # Simulate 1 running task
+    _batch_running=1
+    _batch_next_idx=1
+    touch "$STOP_FILE"
+
+    run _batch_dispatch_loop 3 main
+    [ "$status" -eq 0 ]
+    [ ! -f "$STOP_FILE" ]
+    [[ "$output" == *"Stop signal received"* ]]
+    [[ "$output" == *"Draining 1 running task(s)"* ]]
+    # After drain: 1 completed, 2 skipped
+    [[ "$output" == *"2 task(s) were not started"* ]]
+}
+
+# HP-04: Resume hint printed with correct skipped count
+@test "batch stop: resume hint shows correct skipped count" {
+    _setup_batch_dispatch_mocks
+    _batch_completed=2
+    _batch_next_idx=2
+    touch "$STOP_FILE"
+
+    run _batch_dispatch_loop 5 main
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"3 task(s) were not started"* ]]
+    [[ "$output" == *"buildcrew run --batch --resume"* ]]
+}
+
+# HP-05: clear_stop_signal called in enter_batch_mode before dispatch
+@test "batch stop: enter_batch_mode calls clear_stop_signal before dispatch loop" {
+    # Verify source code: clear_stop_signal must appear before _batch_dispatch_loop in enter_batch_mode
+    local in_func=false
+    local found_clear=false
+    local found_dispatch=false
+    while IFS= read -r line; do
+        if [[ "$line" == *"enter_batch_mode()"* ]]; then
+            in_func=true
+        fi
+        if [[ "$in_func" == "true" ]]; then
+            if [[ "$line" == *"clear_stop_signal"* ]]; then
+                found_clear=true
+            fi
+            if [[ "$line" == *"_batch_dispatch_loop"* ]]; then
+                found_dispatch=true
+                break
+            fi
+        fi
+    done < "$BUILDCREW_ROOT/lib/workflow.sh"
+    [ "$found_clear" = "true" ]
+    [ "$found_dispatch" = "true" ]
+}
+
+# HP-06: clear_stop_signal called in _batch_resume before dispatch
+@test "batch stop: _batch_resume calls clear_stop_signal before dispatch loop" {
+    local in_func=false
+    local found_clear=false
+    local found_dispatch=false
+    while IFS= read -r line; do
+        if [[ "$line" == *"_batch_resume()"* ]]; then
+            in_func=true
+        fi
+        if [[ "$in_func" == "true" ]]; then
+            if [[ "$line" == *"clear_stop_signal"* ]]; then
+                found_clear=true
+            fi
+            if [[ "$line" == *"_batch_dispatch_loop"* ]]; then
+                found_dispatch=true
+                break
+            fi
+        fi
+    done < "$BUILDCREW_ROOT/lib/workflow.sh"
+    [ "$found_clear" = "true" ]
+    [ "$found_dispatch" = "true" ]
+}
+
+# HP-07: _batch_post_completion is called after stop-signal drain
+@test "batch stop: _batch_post_completion called after drain" {
+    local post_completion_called=false
+    _setup_batch_dispatch_mocks
+    _batch_post_completion() { post_completion_called=true; }
+    touch "$STOP_FILE"
+
+    _batch_dispatch_loop 3 main
+    [ "$post_completion_called" = "true" ]
+}
+
+# ERR-01: Stop signal detected only once (sticky _batch_stopping flag)
+@test "batch stop: stop file recreated during drain is ignored" {
+    local poll_count=0
+    _setup_batch_dispatch_mocks
+    _batch_running=1
+    _batch_next_idx=1
+
+    # Custom poll that recreates stop file on second call, completes task on third
+    _batch_poll_tasks() {
+        poll_count=$(( poll_count + 1 ))
+        if (( poll_count == 2 )); then
+            # Recreate stop file during drain — should be ignored
+            touch "$STOP_FILE"
+        fi
+        if (( poll_count >= 3 && _batch_running > 0 )); then
+            _batch_running=$(( _batch_running - 1 ))
+            _batch_completed=$(( _batch_completed + 1 ))
+        fi
+    }
+    touch "$STOP_FILE"
+
+    run _batch_dispatch_loop 3 main
+    [ "$status" -eq 0 ]
+    # Warning should appear exactly once
+    local warn_count
+    warn_count=$(echo "$output" | grep -c "Stop signal received" || true)
+    [ "$warn_count" -eq 1 ]
+}
+
+# ERR-02: Stop file cleared after flag set (sequence verification)
+@test "batch stop: stop file removed after detection" {
+    _setup_batch_dispatch_mocks
+    touch "$STOP_FILE"
+
+    _batch_dispatch_loop 3 main
+    [ ! -f "$STOP_FILE" ]
+}
+
+# ERR-03: Running task fails during drain
+@test "batch stop: task failure during drain handled correctly" {
+    _setup_batch_dispatch_mocks "fail_one"
+    _batch_running=1
+    _batch_next_idx=1
+    touch "$STOP_FILE"
+
+    run _batch_dispatch_loop 3 main
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Stop signal received"* ]]
+    # 3 total - 0 completed - 1 failed = 2 skipped
+    [[ "$output" == *"2 task(s) were not started"* ]]
+}
+
+# EDGE-01: Stop signal when no tasks launched yet
+@test "batch stop: stop at very start with no running tasks" {
+    _setup_batch_dispatch_mocks
+    touch "$STOP_FILE"
+
+    run _batch_dispatch_loop 3 main
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Stop signal received"* ]]
+    [[ "$output" == *"Draining 0 running task(s)"* ]]
+    [[ "$output" == *"3 task(s) were not started"* ]]
+}
+
+# EDGE-03: _batch_stopping is local to _batch_dispatch_loop
+@test "batch stop: _batch_stopping variable is declared local" {
+    grep -q 'local _batch_stopping' "$BUILDCREW_ROOT/lib/workflow.sh"
+}
+
+# EDGE-04: All tasks complete during drain — no resume hint
+@test "batch stop: no resume hint when all tasks completed during drain" {
+    _setup_batch_dispatch_mocks "complete_one"
+    _batch_running=3
+    _batch_completed=0
+    _batch_next_idx=3
+    touch "$STOP_FILE"
+
+    run _batch_dispatch_loop 3 main
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Stop signal received"* ]]
+    # All 3 complete during drain, 0 skipped — no hint
+    [[ "$output" != *"task(s) were not started"* ]]
+}
+
+# EDGE-06: Last task completes in same poll cycle as stop detection
+@test "batch stop: last task completing and stop in same cycle breaks immediately" {
+    local poll_count=0
+    _setup_batch_dispatch_mocks
+    _batch_running=1
+    _batch_completed=2
+    _batch_next_idx=3
+
+    # Poll completes the last task in the same cycle stop is detected
+    _batch_poll_tasks() {
+        if (( _batch_running > 0 )); then
+            _batch_running=$(( _batch_running - 1 ))
+            _batch_completed=$(( _batch_completed + 1 ))
+        fi
+    }
+    touch "$STOP_FILE"
+
+    run _batch_dispatch_loop 3 main
+    [ "$status" -eq 0 ]
+    # All 3 completed, 0 skipped — no hint
+    [[ "$output" != *"task(s) were not started"* ]]
+}
+
+# EDGE-08: Stop between batches (some completed, none running, more pending)
+@test "batch stop: stop between completed batches with pending tasks" {
+    _setup_batch_dispatch_mocks
+    _batch_completed=2
+    _batch_running=0
+    _batch_next_idx=2
+    touch "$STOP_FILE"
+
+    run _batch_dispatch_loop 5 main
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Stop signal received"* ]]
+    # 5 total - 2 completed - 0 failed = 3 skipped
+    [[ "$output" == *"3 task(s) were not started"* ]]
+}
+
+# EDGE-09: _batch_dispatch_loop called with total=0
+@test "batch stop: dispatch loop with total=0 never enters loop" {
+    _setup_batch_dispatch_mocks
+    touch "$STOP_FILE"
+
+    run _batch_dispatch_loop 0 main
+    [ "$status" -eq 0 ]
+    # Never entered loop, stop not checked
+    [[ "$output" != *"Stop signal received"* ]]
+    # Stop file still exists (not cleared by the loop)
+    [ -f "$STOP_FILE" ]
+}
+
+# ADV-01: Stale stop file cleared on batch entry
+@test "batch stop: stale stop file cleared by clear_stop_signal" {
+    mkdir -p .buildcrew
+    touch "$STOP_FILE"
+    [ -f "$STOP_FILE" ]
+    clear_stop_signal
+    [ ! -f "$STOP_FILE" ]
+}
+
+# ADV-04: Multiple tasks finish during a single drain poll cycle
+@test "batch stop: multiple tasks complete in one drain poll" {
+    _setup_batch_dispatch_mocks
+    _batch_running=3
+    _batch_next_idx=3
+
+    # Poll completes all 3 in one call
+    _batch_poll_tasks() {
+        while (( _batch_running > 0 )); do
+            _batch_running=$(( _batch_running - 1 ))
+            _batch_completed=$(( _batch_completed + 1 ))
+        done
+    }
+    touch "$STOP_FILE"
+
+    run _batch_dispatch_loop 3 main
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Stop signal received"* ]]
+    # All completed during drain, no skipped
+    [[ "$output" != *"task(s) were not started"* ]]
+}
+
+# HP-01: Normal completion without stop signal
+@test "batch stop: normal completion without stop signal" {
+    _setup_batch_dispatch_mocks "complete_one"
+
+    # The real loop does (( _batch_next_idx++ )) after _batch_launch_task,
+    # so our mock must NOT also increment it — only set running.
+    _batch_launch_task() {
+        _batch_running=$(( _batch_running + 1 ))
+    }
+
+    run _batch_dispatch_loop 3 main
+    [ "$status" -eq 0 ]
+    # No stop signal warning
+    [[ "$output" != *"Stop signal received"* ]]
+    # No resume hint
+    [[ "$output" != *"task(s) were not started"* ]]
+}

@@ -358,3 +358,67 @@ COMMON_SH="$BUILDCREW_ROOT/lib/common.sh"
     [ "$status" -eq 0 ]
     [[ "$output" == *'if [[ -n "$skill_catalog" ]]'* ]]
 }
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Task: Wire buildcrew stop signal into batch dispatch loop
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Happy path: user runs `buildcrew stop` during batch — the dispatch loop has stop-check code.
+# Verifies check_stop_signal is called within _batch_dispatch_loop, not just anywhere in the file.
+@test "experience: _batch_dispatch_loop contains check_stop_signal call" {
+    grep -q 'check_stop_signal' "$WORKFLOW_SH"
+    # Extract function body using sed (from function header to next function at column 0)
+    local body
+    body=$(sed -n '/^_batch_dispatch_loop()/,/^[a-zA-Z_].*() *{/p' "$WORKFLOW_SH")
+    [[ "$body" == *"check_stop_signal"* ]]
+}
+
+# Happy path: stop signal detection sets _batch_stopping flag and clears the file.
+@test "experience: batch dispatch clears stop signal after detection" {
+    local body
+    body=$(sed -n '/^_batch_dispatch_loop()/,/^[a-zA-Z_].*() *{/p' "$WORKFLOW_SH")
+    [[ "$body" == *"clear_stop_signal"* ]]
+    [[ "$body" == *"_batch_stopping=true"* ]]
+}
+
+# Happy path: drain mode breaks when running count hits zero.
+@test "experience: batch dispatch drain breaks when _batch_running is 0" {
+    local body
+    body=$(sed -n '/^_batch_dispatch_loop()/,/^[a-zA-Z_].*() *{/p' "$WORKFLOW_SH")
+    [[ "$body" == *'_batch_running == 0'* ]]
+    [[ "$body" == *'break'* ]]
+}
+
+# Happy path: stale stop files cleared before dispatch in both entry points.
+@test "experience: enter_batch_mode and _batch_resume both clear stop signal before dispatch" {
+    # enter_batch_mode
+    local enter_body
+    enter_body=$(sed -n '/^enter_batch_mode()/,/^[a-zA-Z_].*() *{/p' "$WORKFLOW_SH")
+    [[ "$enter_body" == *"clear_stop_signal"* ]]
+    # _batch_resume
+    local resume_body
+    resume_body=$(sed -n '/^_batch_resume()/,/^[a-zA-Z_].*() *{/p' "$WORKFLOW_SH")
+    [[ "$resume_body" == *"clear_stop_signal"* ]]
+}
+
+# Happy path: resume hint tells user how to continue after stop.
+@test "experience: batch dispatch prints resume hint after stop with skipped tasks" {
+    local body
+    body=$(sed -n '/^_batch_dispatch_loop()/,/^[a-zA-Z_].*() *{/p' "$WORKFLOW_SH")
+    [[ "$body" == *"buildcrew run --batch --resume"* ]]
+    [[ "$body" == *"task(s) were not started"* ]]
+}
+
+# Error recovery: _batch_stopping flag prevents re-reading stop file every cycle.
+@test "experience: _batch_stopping guard prevents repeated stop file checks" {
+    local body
+    body=$(sed -n '/^_batch_dispatch_loop()/,/^[a-zA-Z_].*() *{/p' "$WORKFLOW_SH")
+    [[ "$body" == *'_batch_stopping" != "true"'* ]]
+}
+
+# Adversarial: _batch_stopping is local — does not leak state between invocations.
+@test "experience: _batch_stopping is declared local in _batch_dispatch_loop" {
+    run grep 'local _batch_stopping' "$WORKFLOW_SH"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"local _batch_stopping"* ]]
+}
