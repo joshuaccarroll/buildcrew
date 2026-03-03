@@ -139,28 +139,29 @@ If you're starting fresh, Discovery mode runs automatically. Once it creates you
 ## The Workflow
 
 ```
-┌───────────────────────────────────────────────────────────────────┐
-│                         BuildCrew Pipeline                         │
-├───────────────────────────────────────────────────────────────────┤
-│                                                                    │
-│   SPEC ──► RESEARCH+PLAN ──► PLAN REVIEW ──► BUILD ──► SIMPLIFY   │
-│   (PM)     (Research Agent)   (3-Pass:        (Feature) (non-      │
-│                               adversarial)              blocking)  │
-│                                                                    │
-│   COMMIT ◄── VERIFY ◄── OUTCOME ◄── TEST ◄── CODE REVIEW          │
-│              (Security   (Acceptance   (QA)   (adversarial         │
-│               blocks!)    criteria)           + elegance)          │
-│                                                                    │
-└───────────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────────────┐
+│                            BuildCrew Pipeline                            │
+├──────────────────────────────────────────────────────────────────────────┤
+│                                                                          │
+│   SPEC ──► RESEARCH+PLAN ──► PLAN REVIEW ──► [TDD] ──► BUILD ──► SIMPLIFY│
+│   (PM)     (Research Agent)   (3-Pass:       (optional)  (Feature) (non- │
+│                               adversarial)                        block.) │
+│                                                                          │
+│   COMMIT ◄── VERIFY ◄── OUTCOME ◄── TEST ◄── CODE REVIEW                │
+│              (Security   (Acceptance   (QA)   (adversarial               │
+│               blocks!)    criteria)           + elegance)                │
+│                                                                          │
+└──────────────────────────────────────────────────────────────────────────┘
 ```
 
-Each task runs through **up to 9 distinct phases** (each a separate, isolated Claude invocation), keeping context focused per phase. Total invocations are bounded by `MAX_INVOCATIONS` (default: 15) — retries, chunked builds, and re-plans all count toward this ceiling:
+Each task runs through **up to 10 distinct phases** (each a separate, isolated Claude invocation), keeping context focused per phase. Total invocations are bounded by `MAX_INVOCATIONS` (default: 15) — retries, chunked builds, and re-plans all count toward this ceiling:
 
 | # | Phase | Description |
 |---|-------|-------------|
 | 1 | Spec | PM converts raw backlog item to testable acceptance criteria (skip with `--skip-spec`) |
 | 2 | Research + Plan | Gather context, create implementation plan |
 | 3 | Plan Review (3-pass) | Adversarial review: find the most serious flaw |
+| 3.5 | TDD Scaffold (optional) | Write failing tests from spec+plan before implementation (`--tdd`, standard complexity only) |
 | 4 | Build | Feature Engineer implements the plan |
 | 5 | Simplify | Non-blocking: review and apply targeted simplifications before formal review |
 | 6 | Code Review | Adversarial review + elegance check; may request rebuild |
@@ -186,6 +187,7 @@ Each task runs through **up to 9 distinct phases** (each a separate, isolated Cl
 - **Interactive permission recovery** - if a phase is blocked by missing permissions, BuildCrew prompts for recovery before continuing
 - **Status line integration** - wired in via `buildcrew init` for real-time progress in Claude Code
 - **Iterative sub-agent review** - research documents and test plans are refined through up to 5 sub-agent improvement passes before proceeding (or until convergence)
+- **TDD mode** (`--tdd`) - write failing tests before implementation; tests are verified to fail first, then the build phase must make them pass. Tamper detection via SHA-256 checksums prevents modification of TDD test files during build. Only active for `standard` complexity tasks
 - **Customizable** - modify phases or remove them entirely
 
 ---
@@ -277,6 +279,7 @@ buildcrew run --auto         # Run fully unattended — auto-approve all interac
 buildcrew run --full-pipeline  # Force all phases regardless of complexity assessment
 buildcrew run --batch        # Run pending tasks in parallel using git worktrees
 buildcrew run --max-parallel N   # Max concurrent tasks in batch mode (default: 5)
+buildcrew run --tdd          # Enable TDD mode (write failing tests before build, standard complexity only)
 buildcrew run --uat          # After build, enter watch mode for UAT verdicts (implies --auto)
 buildcrew run --keep-logs    # Retain the activity log after a successful run
 buildcrew run --max-invocations N  # Set max Claude invocations per run (default: 15)
@@ -284,6 +287,8 @@ buildcrew run --verbose      # Show orchestrator decisions, phase verdicts, and 
 buildcrew run --debug        # Alias for --verbose
 buildcrew uat --readme <path>  # Run blind UAT against a project's README
 buildcrew uat --readme <path> --auto  # Run UAT fully unattended
+buildcrew uat --readme <path> --regress /path/to/artifact  # Run UAT standalone against existing artifact
+buildcrew uat --preview      # List existing scenarios without running agents (read-only)
 buildcrew status             # Show backlog stats and last workflow result
 buildcrew stop               # Stop after current task completes
 buildcrew reset              # Clear blocked tasks and clean up artifacts
@@ -319,6 +324,7 @@ buildcrew uninstall          # Remove BuildCrew
 | `--auto` | Run fully unattended — auto-approve all interactive pauses |
 | `--batch` | Run all pending BACKLOG.md tasks in parallel, each through the full phase pipeline in its own git worktree. Use `--resume` to pick up where an interrupted batch left off. Incompatible with `--single` and `--task`. |
 | `--max-parallel N` | Max concurrent tasks in batch mode (default: 5). Also configurable via `MAX_PARALLEL` in `.buildcrew/config`. |
+| `--tdd` | Enable TDD mode: insert a `tdd-scaffold` phase between plan review and build. Tests are written and verified to fail before implementation; the build phase must make them pass. Tamper detection via SHA-256 checksums prevents test modification during build. Only active for `standard` complexity tasks. Also configurable via `TDD_MODE=true` in `.buildcrew/config`. |
 | `--uat` | After a successful build, publish the artifact and enter watch mode for UAT verdicts. Implies `--auto`. Use with `buildcrew uat` in a separate terminal. |
 | `--keep-logs` | Retain the activity log after a successful run (the log is always kept on failure) |
 | `--max-invocations N` | Set max Claude invocations per run (default: 15) |
@@ -338,6 +344,7 @@ Project-level configuration lives in `.buildcrew/config` (created from `.buildcr
 | `COMPLEXITY_AWARE` | `true` | Auto-detect task complexity and skip unnecessary phases. Set to `false` to always run all phases (equivalent to `--full-pipeline`). |
 | `AUTO_MODE` | `false` | Run fully unattended — auto-approve all interactive pauses. Equivalent to `--auto`. |
 | `KEEP_LOGS` | `false` | Retain the activity log after a successful run. Equivalent to `--keep-logs`. |
+| `TDD_MODE` | `false` | Enable TDD mode: write failing tests before implementation. Equivalent to `--tdd`. Only active for `standard` complexity tasks. |
 | `MAX_PARALLEL` | `5` | Max concurrent tasks in batch mode. Equivalent to `--max-parallel N`. |
 | `UAT_MAX_RETRIES` | `5` | Max build-fix-test iterations in UAT watch mode. |
 | `UAT_ARTIFACT_TYPE` | (auto-detected) | Override artifact type detection (`cli`, `api`, `library`, `tui`). |
@@ -438,10 +445,12 @@ UAT_RUN_COMMAND=./bin/myapp     # how to run the artifact
 
 | Flag | Description |
 |------|-------------|
-| `--readme <path>` | (Required) Path to the project's README.md |
+| `--readme <path>` | (Required unless `--preview`) Path to the project's README.md |
 | `--project <name>` | Project identifier (default: derived from README parent dir) |
 | `--artifact-dir <path>` | Override artifact discovery path |
 | `--signal-dir <path>` | Override signal file path |
+| `--regress <path>` | Run UAT standalone against an existing artifact directory (implies `--auto`). Incompatible with `--artifact-dir` and `--preview`. |
+| `--preview` | List existing scenarios without running agents (read-only). Incompatible with `--regress`. |
 | `--auto` | Auto mode: log disputes without pausing |
 
 ### How UAT phases work
