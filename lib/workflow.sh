@@ -189,7 +189,7 @@ STRICT_MODE=true
 STRICT_EXPLICIT=false   # true only when --strict or --no-strict is passed explicitly
 VERBOSE=false
 FULL_PIPELINE=false
-BATCH_MODE=false
+SEQUENTIAL_MODE=false
 BATCH_MAX_TURNS=200
 PLAN_MODE=false
 UAT_MODE=false
@@ -210,10 +210,12 @@ parse_args() {
                 ;;
             --single)
                 SINGLE_TASK=true
+                SEQUENTIAL_MODE=true
                 shift
                 ;;
             --review)
                 HUMAN_REVIEW=true
+                SEQUENTIAL_MODE=true
                 shift
                 ;;
             --branch)
@@ -230,6 +232,7 @@ parse_args() {
                     exit 1
                 fi
                 TARGET_TASK="$2"
+                SEQUENTIAL_MODE=true
                 shift 2
                 ;;
             --task-exact)
@@ -239,6 +242,7 @@ parse_args() {
                 fi
                 TARGET_TASK_EXACT="$2"
                 SINGLE_TASK=true
+                SEQUENTIAL_MODE=true
                 shift 2
                 ;;
             --skip-spec)
@@ -270,6 +274,7 @@ parse_args() {
             --uat)
                 UAT_MODE=true
                 AUTO_MODE=true  # --uat implies --auto
+                SEQUENTIAL_MODE=true
                 shift
                 ;;
             --tdd)
@@ -277,7 +282,11 @@ parse_args() {
                 shift
                 ;;
             --batch)
-                BATCH_MODE=true
+                print_warning "--batch is deprecated (batch mode is now the default). Use --sequential to opt out."
+                shift
+                ;;
+            --sequential)
+                SEQUENTIAL_MODE=true
                 shift
                 ;;
             --keep-logs)
@@ -319,8 +328,9 @@ parse_args() {
                 echo "  --uat        After build completes, enter watch mode for UAT verdicts (implies --auto)"
                 echo "  --tdd        Enable test-driven development: write failing tests before implementation"
                 echo "  --keep-logs  Retain the activity log after a successful run (log is always kept on failure)"
-                echo "  --batch      Run pending tasks in parallel using git worktrees"
-                echo "  --max-parallel N  Max concurrent tasks in batch mode (default: 5)"
+                echo "  --sequential Run tasks one at a time (opt out of parallel batch mode)"
+                echo "  --batch      (deprecated) Batch mode is now the default"
+                echo "  --max-parallel N  Max concurrent tasks in parallel mode (default: 5)"
                 echo "  --verbose    Show orchestrator decisions, phase verdicts, and invocation counts"
                 echo "  --debug      Alias for --verbose"
                 echo "  --help, -h   Show this help message"
@@ -751,10 +761,10 @@ _batch_launch_task() {
         exec "$BUILDCREW_HOME/lib/workflow.sh" \
             --single --task-exact "$task" --auto \
             --max-invocations "$MAX_INVOCATIONS" \
-            ${KEEP_LOGS:+--keep-logs} \
-            ${SKIP_SPEC:+--skip-spec} \
-            ${FULL_PIPELINE:+--full-pipeline} \
-            ${VERBOSE:+--verbose} \
+            $( [[ "$KEEP_LOGS" == "true" ]] && echo "--keep-logs" ) \
+            $( [[ "$SKIP_SPEC" == "true" ]] && echo "--skip-spec" ) \
+            $( [[ "$FULL_PIPELINE" == "true" ]] && echo "--full-pipeline" ) \
+            $( [[ "$VERBOSE" == "true" ]] && echo "--verbose" ) \
             > ".buildcrew/logs/batch-${slug}.log" 2>&1
     ) &
     _batch_pids[$idx]=$!
@@ -3896,10 +3906,6 @@ main() {
 
     if [[ "$PLAN_MODE" == "true" ]]; then
         # Validate flag compatibility
-        if [[ "$BATCH_MODE" == "true" ]]; then
-            print_error "--plan cannot be combined with --batch"
-            exit 1
-        fi
         if [[ "$SINGLE_TASK" == "true" ]] || [[ -n "$TARGET_TASK" ]]; then
             print_error "--plan cannot be combined with --single or --task"
             exit 1
@@ -3909,7 +3915,7 @@ main() {
             exit 1
         fi
 
-        # Check prerequisites inline (same as batch mode pattern)
+        # Check prerequisites inline
         if ! command -v claude &>/dev/null; then
             print_error "Claude Code CLI not found. Please install it first."
             exit 1
@@ -3925,19 +3931,12 @@ main() {
         # enter_discovery_mode calls exit 0, never returns
     fi
 
-    if [[ "$BATCH_MODE" == "true" ]]; then
-        # Batch mode has its own prerequisite/validation path
+    if [[ "$SEQUENTIAL_MODE" != "true" ]]; then
+        # Parallel batch mode (default execution path)
 
-        # 1. Validate flag compatibility (cheapest checks first)
-        if [[ "$SINGLE_TASK" == "true" ]] || [[ -n "$TARGET_TASK" ]]; then
-            print_error "--batch cannot be combined with --single or --task"
-            exit 1
-        fi
-        if [[ "$HUMAN_REVIEW" == "true" ]]; then
-            print_warning "--review has no effect with --batch (auto mode is implied)"
-        fi
+        # 1. Advisory: --branch has no effect in parallel mode
         if [[ "$GIT_BRANCH" == "true" ]]; then
-            print_warning "--branch has no effect with --batch (batch mode creates worktree branches automatically)"
+            print_warning "--branch has no effect in parallel mode (worktree branches are automatic). Use --sequential --branch for manual PR workflow."
         fi
 
         # 2. Check for claude and jq
@@ -3955,45 +3954,100 @@ main() {
             __BATCH_PARENT_IS_GIT=true
             # 4. Working tree must be clean (only when parent is a git repo)
             if [[ -n "$(git status --porcelain 2>/dev/null)" ]]; then
-                print_error "Working tree is not clean. Commit or stash changes before using --batch."
+                print_error "Working tree is not clean. Commit or stash changes first, or use --sequential."
                 exit 1
             fi
         else
             __BATCH_PARENT_IS_GIT=false
+            # Auto-fallback: non-git dirs without [dir:] prefixes can't use worktrees
+            if [[ -z "$TARGET_DIR" ]]; then
+                local _has_dir_prefix=false
+                if [[ -f "$BACKLOG_FILE" ]] && grep -q '^\- \[ \] \[dir:' "$BACKLOG_FILE" 2>/dev/null; then
+                    _has_dir_prefix=true
+                fi
+                if [[ "$_has_dir_prefix" != "true" ]]; then
+                    print_info "Non-git directory without [dir:...] prefixes — falling back to sequential mode."
+                    SEQUENTIAL_MODE=true
+                fi
+            fi
+        fi
+    fi
+
+    # After potential auto-fallback, check if we're still in parallel mode
+    if [[ "$SEQUENTIAL_MODE" != "true" ]]; then
+        # Non-git parent info message (when target dirs exist)
+        if [[ "$__BATCH_PARENT_IS_GIT" == "false" ]]; then
             print_info "Non-git parent directory detected. Tasks must specify target directories via [dir:...] or TARGET_DIR config."
         fi
 
-        # 5. Resume mode
+        # 5. Resume mode with auto-detection
         if [[ "$RESUME_MODE" == "true" ]]; then
             mkdir -p .buildcrew
             log_init
             echo $$ > "$LOCKFILE"
-            if _batch_load_manifest; then
+            local _has_manifest=false
+            local _has_progress=false
+            [[ -f "$BATCH_MANIFEST" ]] && _batch_load_manifest 2>/dev/null && _has_manifest=true
+            [[ -f "$PROGRESS_FILE" ]] && _has_progress=true
+
+            if [[ "$_has_manifest" == "true" && "$_has_progress" == "true" ]]; then
+                # Both exist — use more recent
+                local _manifest_mtime _progress_mtime
+                _manifest_mtime=$(stat -f %m "$BATCH_MANIFEST" 2>/dev/null || stat -c %Y "$BATCH_MANIFEST" 2>/dev/null || echo 0)
+                _progress_mtime=$(stat -f %m "$PROGRESS_FILE" 2>/dev/null || stat -c %Y "$PROGRESS_FILE" 2>/dev/null || echo 0)
+                if [[ "$_manifest_mtime" -ge "$_progress_mtime" ]]; then
+                    print_info "Found both sequential and batch progress — resuming the more recent one (batch). Use --sequential to force sequential resume."
+                    _batch_resume
+                else
+                    print_info "Found both sequential and batch progress — resuming the more recent one (sequential). Use --sequential to force sequential resume."
+                    SEQUENTIAL_MODE=true
+                    # Fall through to sequential path below
+                fi
+            elif [[ "$_has_manifest" == "true" ]]; then
                 print_info "Resuming batch from $BATCH_MANIFEST"
                 _batch_resume
+            elif [[ "$_has_progress" == "true" ]]; then
+                print_info "Detected sequential progress file — resuming in sequential mode."
+                SEQUENTIAL_MODE=true
+                # Fall through to sequential path below
             else
-                print_error "No resumable batch found at $BATCH_MANIFEST"
+                print_error "No resumable run found (no batch manifest or sequential progress file)"
                 exit 1
             fi
-            # _batch_resume calls exit 0, never returns
+            # _batch_resume calls exit 0 if it ran; if we fall through, sequential handles it
+        fi
+    fi
+
+    # Final check: if we fell through resume auto-detection into sequential mode
+    if [[ "$SEQUENTIAL_MODE" != "true" ]]; then
+        # 6. Discovery mode fallback (empty/complete backlogs)
+        if is_fresh_backlog; then
+            print_info "Empty backlog. Launching discovery mode..."
+            echo ""
+            enter_discovery_mode "Run /build to help define this project and create a backlog."
+        fi
+        if is_completed_phase; then
+            print_info "All tasks complete! Launching discovery mode to add scope..."
+            echo ""
+            enter_discovery_mode "Run /build to add new tasks to this project."
         fi
 
-        # 6. Gather and validate pending tasks
+        # 7. Gather and validate pending tasks
         gather_pending_tasks
         if [[ "$__BATCH_TASK_COUNT" -eq 0 ]]; then
-            print_error "No pending tasks in $BACKLOG_FILE to batch"
+            print_error "No pending tasks in $BACKLOG_FILE"
             exit 1
         fi
         local task_list="$__BATCH_TASK_LIST"
 
-        # 7. Advisory messages
+        # 8. Advisory messages
         if [[ "$__BATCH_TASK_COUNT" -eq 1 ]]; then
             print_info "Only 1 pending task -- batch mode will still work, but sequential mode may be more thorough"
         fi
 
-        # 8. Dry-run support
+        # 9. Dry-run support
         if [[ "$DRY_RUN" == "true" ]]; then
-            print_header "Batch Mode (Dry Run)"
+            print_header "Parallel Mode (Dry Run)"
             print_info "Would process $__BATCH_TASK_COUNT tasks in parallel (max $MAX_PARALLEL concurrent):"
             echo ""
             echo "$task_list"
@@ -4001,7 +4055,8 @@ main() {
             exit 0
         fi
 
-        # 9. Setup and execute
+        # 10. Setup and execute
+        print_info "Running in parallel mode (unattended). Use --sequential for interactive mode."
         mkdir -p .buildcrew
         log_init
         log_msg "Batch mode: $__BATCH_TASK_COUNT tasks, max_parallel=$MAX_PARALLEL"

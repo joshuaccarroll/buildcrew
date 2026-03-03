@@ -62,6 +62,27 @@ teardown() {
     [[ "$output" == *"USAGE:"* ]]
 }
 
+@test "cli: help mentions --sequential flag" {
+    run "$BUILDCREW_HOME/bin/buildcrew" help
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"--sequential"* ]]
+}
+
+@test "cli: help marks --batch as deprecated" {
+    run "$BUILDCREW_HOME/bin/buildcrew" help
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"--batch"* ]]
+    [[ "$output" == *"deprecated"* ]]
+}
+
+@test "cli: help mentions --max-parallel without 'with run --batch' qualifier" {
+    run "$BUILDCREW_HOME/bin/buildcrew" help
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"--max-parallel"* ]]
+    # Should not say "with 'run --batch'" — batch is now default
+    [[ "$output" != *"with 'run --batch'"* ]]
+}
+
 # ─────────────────────────────────────────────────────────────────────────────
 # unknown command test
 # ─────────────────────────────────────────────────────────────────────────────

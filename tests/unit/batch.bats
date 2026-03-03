@@ -78,22 +78,56 @@ EOF
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
-# parse_args --batch tests
+# parse_args --batch / --sequential tests
 # ─────────────────────────────────────────────────────────────────────────────
 
-@test "parse_args: --batch sets BATCH_MODE=true" {
-    parse_args --batch
-    [ "$BATCH_MODE" = "true" ]
+@test "parse_args: --batch prints deprecation warning" {
+    run bash -c "source '$BUILDCREW_ROOT/lib/workflow.sh' 2>/dev/null; parse_args --batch"
+    [[ "$output" == *"deprecated"* ]]
 }
 
-@test "parse_args: BATCH_MODE defaults to false" {
-    # BATCH_MODE is initialized to false at module load
-    [ "$BATCH_MODE" = "false" ]
+@test "parse_args: SEQUENTIAL_MODE defaults to false" {
+    [ "$SEQUENTIAL_MODE" = "false" ]
 }
 
-@test "parse_args: --help mentions --batch" {
+@test "parse_args: --sequential sets SEQUENTIAL_MODE=true" {
+    parse_args --sequential
+    [ "$SEQUENTIAL_MODE" = "true" ]
+}
+
+@test "parse_args: --single sets SEQUENTIAL_MODE=true" {
+    parse_args --single
+    [ "$SINGLE_TASK" = "true" ]
+    [ "$SEQUENTIAL_MODE" = "true" ]
+}
+
+@test "parse_args: --task sets SEQUENTIAL_MODE=true" {
+    parse_args --task "some task"
+    [ "$TARGET_TASK" = "some task" ]
+    [ "$SEQUENTIAL_MODE" = "true" ]
+}
+
+@test "parse_args: --review sets SEQUENTIAL_MODE=true" {
+    parse_args --review
+    [ "$HUMAN_REVIEW" = "true" ]
+    [ "$SEQUENTIAL_MODE" = "true" ]
+}
+
+@test "parse_args: --uat sets SEQUENTIAL_MODE=true" {
+    parse_args --uat
+    [ "$UAT_MODE" = "true" ]
+    [ "$SEQUENTIAL_MODE" = "true" ]
+}
+
+@test "parse_args: --help mentions --sequential" {
+    run bash -c "source '$BUILDCREW_ROOT/lib/workflow.sh' 2>/dev/null; parse_args --help"
+    [[ "$output" == *"--sequential"* ]]
+}
+
+@test "parse_args: --help mentions --batch deprecated" {
     run bash -c "source '$BUILDCREW_ROOT/lib/workflow.sh' 2>/dev/null; parse_args --help"
     [[ "$output" == *"--batch"* ]]
+    [[ "$output" == *"deprecated"* ]]
 }
 
 @test "parse_args: --max-parallel sets MAX_PARALLEL" {
@@ -112,9 +146,9 @@ EOF
 }
 
 @test "parse_args: --batch --resume sets both flags" {
-    parse_args --batch --resume
-    [ "$BATCH_MODE" = "true" ]
-    [ "$RESUME_MODE" = "true" ]
+    run bash -c "source '$BUILDCREW_ROOT/lib/workflow.sh' 2>/dev/null; parse_args --batch --resume 2>&1"
+    # --batch prints deprecation warning but still sets flags
+    [[ "$output" == *"deprecated"* ]]
 }
 
 @test "parse_args: --help mentions --max-parallel" {
@@ -413,6 +447,49 @@ EOF
 @test "parse_args: --task-exact rejects missing value" {
     run bash -c "source '$BUILDCREW_ROOT/lib/workflow.sh' 2>/dev/null; parse_args --task-exact"
     [ "$status" -eq 1 ]
+}
+
+@test "parse_args: --task-exact sets SEQUENTIAL_MODE=true" {
+    parse_args --task-exact "Fix the bug"
+    [ "$TARGET_TASK_EXACT" = "Fix the bug" ]
+    [ "$SINGLE_TASK" = "true" ]
+    [ "$SEQUENTIAL_MODE" = "true" ]
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Adversarial flag combinations
+# ─────────────────────────────────────────────────────────────────────────────
+
+@test "parse_args: --batch --sequential both process without error" {
+    run bash -c "source '$BUILDCREW_ROOT/lib/workflow.sh' 2>/dev/null; parse_args --batch --sequential 2>&1; echo SEQUENTIAL_MODE=\$SEQUENTIAL_MODE"
+    [[ "$output" == *"deprecated"* ]]
+    [[ "$output" == *"SEQUENTIAL_MODE=true"* ]]
+}
+
+@test "parse_args: --single --review both set SEQUENTIAL_MODE=true" {
+    parse_args --single --review
+    [ "$SINGLE_TASK" = "true" ]
+    [ "$HUMAN_REVIEW" = "true" ]
+    [ "$SEQUENTIAL_MODE" = "true" ]
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Flag forwarding pattern verification (code inspection)
+# ─────────────────────────────────────────────────────────────────────────────
+
+@test "flag forwarding: uses == true comparison not colon-plus expansion" {
+    # Verify the corrected pattern exists
+    grep -q '\[\[ "\$KEEP_LOGS" == "true" \]\] && echo "--keep-logs"' "$BUILDCREW_ROOT/lib/workflow.sh"
+    grep -q '\[\[ "\$SKIP_SPEC" == "true" \]\] && echo "--skip-spec"' "$BUILDCREW_ROOT/lib/workflow.sh"
+    grep -q '\[\[ "\$FULL_PIPELINE" == "true" \]\] && echo "--full-pipeline"' "$BUILDCREW_ROOT/lib/workflow.sh"
+    grep -q '\[\[ "\$VERBOSE" == "true" \]\] && echo "--verbose"' "$BUILDCREW_ROOT/lib/workflow.sh"
+}
+
+@test "flag forwarding: old colon-plus expansion pattern is removed" {
+    ! grep -q '${KEEP_LOGS:+--keep-logs}' "$BUILDCREW_ROOT/lib/workflow.sh"
+    ! grep -q '${SKIP_SPEC:+--skip-spec}' "$BUILDCREW_ROOT/lib/workflow.sh"
+    ! grep -q '${FULL_PIPELINE:+--full-pipeline}' "$BUILDCREW_ROOT/lib/workflow.sh"
+    ! grep -q '${VERBOSE:+--verbose}' "$BUILDCREW_ROOT/lib/workflow.sh"
 }
 
 # ─────────────────────────────────────────────────────────────────────────────

@@ -144,68 +144,10 @@ EOF
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
-# --batch flag tests
+# batch/sequential mode tests (batch is now the default)
 # ─────────────────────────────────────────────────────────────────────────────
 
-@test "run: --batch --single exits with error" {
-    echo "- [ ] Test task" > BACKLOG.md
-    git init && git config user.email "t@t.t" && git config user.name "T"
-    run "$BUILDCREW_HOME/lib/workflow.sh" --batch --single
-    [ "$status" -ne 0 ]
-    [[ "$output" == *"--batch cannot be combined with --single"* ]]
-}
-
-@test "run: --batch --task exits with error" {
-    echo "- [ ] Test task" > BACKLOG.md
-    git init && git config user.email "t@t.t" && git config user.name "T"
-    run "$BUILDCREW_HOME/lib/workflow.sh" --batch --task "some task"
-    [ "$status" -ne 0 ]
-    [[ "$output" == *"--batch cannot be combined"* ]]
-}
-
-@test "run: --batch --resume exits with error when no manifest" {
-    echo "- [ ] Test task" > BACKLOG.md
-    git init && git config user.email "t@t.t" && git config user.name "T"
-    git add . && git commit -m "init" --no-verify
-    run "$BUILDCREW_HOME/lib/workflow.sh" --batch --resume
-    [ "$status" -ne 0 ]
-    [[ "$output" == *"No resumable batch"* ]]
-}
-
-@test "run: --batch with empty backlog exits with error" {
-    echo "# No tasks" > BACKLOG.md
-    git init && git config user.email "t@t.t" && git config user.name "T"
-    git add . && git commit -m "init" --no-verify
-    run "$BUILDCREW_HOME/lib/workflow.sh" --batch
-    [ "$status" -ne 0 ]
-    [[ "$output" == *"No pending tasks"* ]]
-}
-
-@test "run: --batch with all tasks complete exits with error" {
-    echo "- [x] Done task" > BACKLOG.md
-    git init && git config user.email "t@t.t" && git config user.name "T"
-    git add . && git commit -m "init" --no-verify
-    run "$BUILDCREW_HOME/lib/workflow.sh" --batch
-    [ "$status" -ne 0 ]
-    [[ "$output" == *"No pending tasks"* ]]
-}
-
-@test "run: --batch outside git repo without target dirs exits with validation error" {
-    echo "- [ ] Test task" > BACKLOG.md
-    # TEST_DIR is not a git repo (setup_test_dir uses mktemp, no git init)
-    # Without [dir:...] prefix or TARGET_DIR, validation fails
-    run "$BUILDCREW_HOME/lib/workflow.sh" --batch
-    [ "$status" -ne 0 ]
-    [[ "$output" == *"no target directory"* ]]
-}
-
-@test "run: --batch outside git repo shows non-git info message" {
-    echo "- [ ] [dir:nonexistent] Test task" > BACKLOG.md
-    run "$BUILDCREW_HOME/lib/workflow.sh" --batch
-    [[ "$output" == *"Non-git parent directory"* ]]
-}
-
-@test "run: --batch --dry-run shows task list and count" {
+@test "run: default mode (no flags) enters batch path with --dry-run" {
     cat > BACKLOG.md << 'EOF'
 - [ ] Task one
 - [ ] Task two
@@ -213,7 +155,73 @@ EOF
 EOF
     git init && git config user.email "t@t.t" && git config user.name "T"
     git add . && git commit -m "init" --no-verify
-    run "$BUILDCREW_HOME/lib/workflow.sh" --batch --dry-run
+    run "$BUILDCREW_HOME/lib/workflow.sh" --dry-run
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"3 tasks"* ]]
+    [[ "$output" == *"parallel"* ]]
+    [[ "$output" == *"Task one"* ]]
+    [[ "$output" == *"Task two"* ]]
+    [[ "$output" == *"Task three"* ]]
+}
+
+@test "run: --task forces sequential path" {
+    setup_phase_isolation
+    echo "- [ ] Test task" > BACKLOG.md
+    run "$BUILDCREW_HOME/lib/workflow.sh" --task "Test task" --dry-run
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Test task"* ]]
+    [[ "$output" == *"[DRY RUN]"* ]]
+}
+
+@test "run: --resume exits with error when no manifest and no progress file" {
+    echo "- [ ] Test task" > BACKLOG.md
+    git init && git config user.email "t@t.t" && git config user.name "T"
+    git add . && git commit -m "init" --no-verify
+    run "$BUILDCREW_HOME/lib/workflow.sh" --resume
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"No resumable run"* ]]
+}
+
+@test "run: empty backlog triggers discovery mode (not error)" {
+    echo "# No tasks" > BACKLOG.md
+    git init && git config user.email "t@t.t" && git config user.name "T"
+    git add . && git commit -m "init" --no-verify
+    run "$BUILDCREW_HOME/lib/workflow.sh"
+    # Discovery mode runs claude which is mocked — check it doesn't error with "No pending tasks"
+    [[ "$output" != *"No pending tasks"* ]]
+    [[ "$output" == *"discovery"* ]] || [[ "$output" == *"backlog"* ]] || [[ "$output" == *"Empty backlog"* ]]
+}
+
+@test "run: all tasks complete triggers discovery mode (not error)" {
+    echo "- [x] Done task" > BACKLOG.md
+    git init && git config user.email "t@t.t" && git config user.name "T"
+    git add . && git commit -m "init" --no-verify
+    run "$BUILDCREW_HOME/lib/workflow.sh"
+    [[ "$output" != *"No pending tasks"* ]]
+}
+
+@test "run: outside git repo without target dirs falls back to sequential" {
+    echo "- [ ] Test task" > BACKLOG.md
+    # TEST_DIR is not a git repo (setup_test_dir uses mktemp, no git init)
+    run "$BUILDCREW_HOME/lib/workflow.sh"
+    [[ "$output" == *"falling back to sequential"* ]] || [[ "$output" == *"Non-git directory"* ]]
+}
+
+@test "run: outside git repo with [dir:...] prefix shows non-git info" {
+    echo "- [ ] [dir:nonexistent] Test task" > BACKLOG.md
+    run "$BUILDCREW_HOME/lib/workflow.sh"
+    [[ "$output" == *"Non-git parent directory"* ]]
+}
+
+@test "run: --dry-run (default batch) shows task list and count" {
+    cat > BACKLOG.md << 'EOF'
+- [ ] Task one
+- [ ] Task two
+- [ ] Task three
+EOF
+    git init && git config user.email "t@t.t" && git config user.name "T"
+    git add . && git commit -m "init" --no-verify
+    run "$BUILDCREW_HOME/lib/workflow.sh" --dry-run
     [ "$status" -eq 0 ]
     [[ "$output" == *"3 tasks"* ]]
     [[ "$output" == *"Task one"* ]]
@@ -221,11 +229,38 @@ EOF
     [[ "$output" == *"Task three"* ]]
 }
 
-@test "run: --batch --review prints warning and no error" {
+@test "run: --review forces sequential (no batch path)" {
+    setup_phase_isolation
+    echo "- [ ] Test task" > BACKLOG.md
+    run "$BUILDCREW_HOME/lib/workflow.sh" --review --dry-run --single
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"[DRY RUN]"* ]]
+}
+
+@test "run: --batch prints deprecation warning" {
     echo "- [ ] Test task" > BACKLOG.md
     git init && git config user.email "t@t.t" && git config user.name "T"
     git add . && git commit -m "init" --no-verify
-    run "$BUILDCREW_HOME/lib/workflow.sh" --batch --review --dry-run
+    run "$BUILDCREW_HOME/lib/workflow.sh" --batch --dry-run
     [ "$status" -eq 0 ]
-    [[ "$output" == *"--review has no effect"* ]]
+    [[ "$output" == *"deprecated"* ]]
+}
+
+@test "run: --sequential --dry-run uses sequential path" {
+    setup_phase_isolation
+    echo "- [ ] Test task" > BACKLOG.md
+    run "$BUILDCREW_HOME/lib/workflow.sh" --sequential --dry-run
+    [ "$status" -eq 0 ]
+    # Sequential path uses different dry-run output (no "tasks in parallel")
+    [[ "$output" == *"[DRY RUN]"* ]]
+    [[ "$output" != *"parallel"* ]]
+}
+
+@test "run: --batch --single --dry-run takes sequential path with deprecation warning" {
+    setup_phase_isolation
+    echo "- [ ] Test task" > BACKLOG.md
+    run "$BUILDCREW_HOME/lib/workflow.sh" --batch --single --dry-run
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"deprecated"* ]]
+    [[ "$output" == *"[DRY RUN]"* ]]
 }

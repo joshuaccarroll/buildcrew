@@ -278,8 +278,8 @@ buildcrew run --resume       # Resume an interrupted task from where it left off
 buildcrew run --task N       # Target a specific task by name or number
 buildcrew run --auto         # Run fully unattended — auto-approve all interactive pauses
 buildcrew run --full-pipeline  # Force all phases regardless of complexity assessment
-buildcrew run --batch        # Run pending tasks in parallel using git worktrees
-buildcrew run --max-parallel N   # Max concurrent tasks in batch mode (default: 5)
+buildcrew run --sequential   # Run tasks one at a time (opt out of parallel mode)
+buildcrew run --max-parallel N   # Max concurrent tasks in parallel mode (default: 5)
 buildcrew run --tdd          # Enable TDD mode (write failing tests before build, standard complexity only)
 buildcrew run --uat          # After build, enter watch mode for UAT verdicts (implies --auto)
 buildcrew run --keep-logs    # Retain the activity log after a successful run
@@ -323,8 +323,9 @@ buildcrew uninstall          # Remove BuildCrew
 | `--no-strict` | Allow partial acceptance criteria pass — unmet criteria trigger a warning but don't block the commit. |
 | `--full-pipeline` | Force all phases regardless of complexity assessment |
 | `--auto` | Run fully unattended — auto-approve all interactive pauses |
-| `--batch` | Run all pending BACKLOG.md tasks in parallel, each through the full phase pipeline in its own git worktree. Use `--resume` to pick up where an interrupted batch left off. Incompatible with `--single` and `--task`. |
-| `--max-parallel N` | Max concurrent tasks in batch mode (default: 5). Also configurable via `MAX_PARALLEL` in `.buildcrew/config`. |
+| `--sequential` | Run tasks one at a time instead of the default parallel batch mode. Required for `--review` and `--branch` workflows. Automatically forced by `--single`, `--task`, `--review`, and `--uat`. |
+| `--batch` | (deprecated) Batch mode is now the default. Use `--sequential` to opt out. |
+| `--max-parallel N` | Max concurrent tasks in parallel mode (default: 5). Also configurable via `MAX_PARALLEL` in `.buildcrew/config`. |
 | `--tdd` | Enable TDD mode: insert a `tdd-scaffold` phase between plan review and build. Tests are written and verified to fail before implementation; the build phase must make them pass. Tamper detection via SHA-256 checksums prevents test modification during build. Only active for `standard` complexity tasks. Also configurable via `TDD_MODE=true` in `.buildcrew/config`. |
 | `--uat` | After a successful build, publish the artifact and enter watch mode for UAT verdicts. Implies `--auto`. Use with `buildcrew uat` in a separate terminal. |
 | `--keep-logs` | Retain the activity log after a successful run (the log is always kept on failure) |
@@ -346,7 +347,7 @@ Project-level configuration lives in `.buildcrew/config` (created from `.buildcr
 | `AUTO_MODE` | `false` | Run fully unattended — auto-approve all interactive pauses. Equivalent to `--auto`. |
 | `KEEP_LOGS` | `false` | Retain the activity log after a successful run. Equivalent to `--keep-logs`. |
 | `TDD_MODE` | `false` | Enable TDD mode: write failing tests before implementation. Equivalent to `--tdd`. Only active for `standard` complexity tasks. |
-| `MAX_PARALLEL` | `5` | Max concurrent tasks in batch mode. Equivalent to `--max-parallel N`. |
+| `MAX_PARALLEL` | `5` | Max concurrent tasks in parallel mode. Equivalent to `--max-parallel N`. |
 | `UAT_MAX_RETRIES` | `5` | Max build-fix-test iterations in UAT watch mode. |
 | `UAT_ARTIFACT_TYPE` | (auto-detected) | Override artifact type detection (`cli`, `api`, `library`, `tui`). |
 | `UAT_RUN_COMMAND` | (auto-detected) | Override how to run/start the artifact. |

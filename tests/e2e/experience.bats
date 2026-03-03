@@ -358,3 +358,155 @@ COMMON_SH="$BUILDCREW_ROOT/lib/common.sh"
     [ "$status" -eq 0 ]
     [[ "$output" == *'if [[ -n "$skill_catalog" ]]'* ]]
 }
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Task: Make enter_batch_mode() the default execution path
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Happy path: user runs `buildcrew run` with no flags — batch mode is now default.
+# SEQUENTIAL_MODE defaults to false, so the dispatch condition `SEQUENTIAL_MODE != true`
+# routes to the batch path.
+@test "experience: SEQUENTIAL_MODE defaults to false (batch mode is default)" {
+    [ "$SEQUENTIAL_MODE" = "false" ]
+}
+
+# Happy path: --sequential flag sets SEQUENTIAL_MODE=true, opting out of batch.
+@test "experience: --sequential sets SEQUENTIAL_MODE to true" {
+    parse_args --sequential
+    [ "$SEQUENTIAL_MODE" = "true" ]
+}
+
+# Happy path: --single implicitly sets SEQUENTIAL_MODE=true (single task can't be parallel).
+@test "experience: --single implies sequential mode" {
+    parse_args --single
+    [ "$SINGLE_TASK" = "true" ]
+    [ "$SEQUENTIAL_MODE" = "true" ]
+}
+
+# Happy path: --task implicitly sets SEQUENTIAL_MODE=true (targeting a specific task is sequential).
+@test "experience: --task implies sequential mode" {
+    parse_args --task "Fix the bug"
+    [ "$TARGET_TASK" = "Fix the bug" ]
+    [ "$SEQUENTIAL_MODE" = "true" ]
+}
+
+# Happy path: --review implicitly sets SEQUENTIAL_MODE=true (human review requires sequential).
+@test "experience: --review implies sequential mode" {
+    parse_args --review
+    [ "$HUMAN_REVIEW" = "true" ]
+    [ "$SEQUENTIAL_MODE" = "true" ]
+}
+
+# Happy path: --uat implicitly sets SEQUENTIAL_MODE=true (UAT requires sequential).
+@test "experience: --uat implies sequential mode" {
+    parse_args --uat
+    [ "$UAT_MODE" = "true" ]
+    [ "$SEQUENTIAL_MODE" = "true" ]
+}
+
+# Happy path: --batch prints deprecation warning (no longer needed, batch is default).
+@test "experience: --batch prints deprecation warning about being default now" {
+    run bash -c "source '$BUILDCREW_ROOT/lib/workflow.sh' 2>/dev/null; parse_args --batch"
+    [[ "$output" == *"deprecated"* ]]
+    [[ "$output" == *"batch mode is now the default"* ]]
+}
+
+# Happy path: workflow.sh help text documents --sequential and deprecated --batch.
+@test "experience: workflow.sh --help documents --sequential flag" {
+    run bash -c "source '$BUILDCREW_ROOT/lib/workflow.sh' 2>/dev/null; parse_args --help"
+    [[ "$output" == *"--sequential"* ]]
+    [[ "$output" == *"opt out of parallel batch mode"* ]]
+}
+
+@test "experience: workflow.sh --help marks --batch as deprecated" {
+    run bash -c "source '$BUILDCREW_ROOT/lib/workflow.sh' 2>/dev/null; parse_args --help"
+    [[ "$output" == *"--batch"* ]]
+    [[ "$output" == *"deprecated"* ]]
+}
+
+# Happy path: bin/buildcrew help text documents --sequential and deprecated --batch.
+@test "experience: bin/buildcrew help documents --sequential flag" {
+    run "$BUILDCREW_ROOT/bin/buildcrew" help
+    [[ "$output" == *"--sequential"* ]]
+}
+
+@test "experience: bin/buildcrew help marks --batch as deprecated" {
+    run "$BUILDCREW_ROOT/bin/buildcrew" help
+    [[ "$output" == *"--batch"* ]]
+    [[ "$output" == *"deprecated"* ]]
+}
+
+# Happy path: README documents --sequential and deprecated --batch in run options.
+@test "experience: README.md documents --sequential flag" {
+    grep -q '\-\-sequential' "$BUILDCREW_ROOT/README.md"
+}
+
+@test "experience: README.md marks --batch as deprecated" {
+    grep -q '\-\-batch.*deprecated\|deprecated.*\-\-batch' "$BUILDCREW_ROOT/README.md"
+}
+
+# Happy path: main() dispatch uses SEQUENTIAL_MODE != true (not BATCH_MODE == true).
+# This is the core behavioral change — batch is the default path.
+@test "experience: main() dispatch condition checks SEQUENTIAL_MODE not BATCH_MODE" {
+    # The dispatch gate should be SEQUENTIAL_MODE != true, not BATCH_MODE == true
+    grep -q 'if \[\[ "\$SEQUENTIAL_MODE" != "true" \]\]' "$WORKFLOW_SH"
+    # Old BATCH_MODE dispatch gate should be gone
+    ! grep -q 'if \[\[ "\$BATCH_MODE" == "true" \]\]' "$WORKFLOW_SH"
+}
+
+# Happy path: batch mode prints info line about parallel mode.
+@test "experience: batch mode prints parallel mode info line" {
+    grep -q 'Running in parallel mode (unattended). Use --sequential for interactive mode.' "$WORKFLOW_SH"
+}
+
+# Happy path: flag forwarding in _batch_launch_task uses == true comparison (not :+).
+# The old ${VAR:+--flag} pattern fires for any non-empty value including "false".
+@test "experience: flag forwarding uses == true comparison not colon-plus expansion" {
+    # Verify the corrected pattern
+    grep -q '\[\[ "\$KEEP_LOGS" == "true" \]\] && echo "--keep-logs"' "$WORKFLOW_SH"
+    grep -q '\[\[ "\$SKIP_SPEC" == "true" \]\] && echo "--skip-spec"' "$WORKFLOW_SH"
+    grep -q '\[\[ "\$FULL_PIPELINE" == "true" \]\] && echo "--full-pipeline"' "$WORKFLOW_SH"
+    grep -q '\[\[ "\$VERBOSE" == "true" \]\] && echo "--verbose"' "$WORKFLOW_SH"
+    # Verify the old broken pattern is gone
+    ! grep -q '${KEEP_LOGS:+--keep-logs}' "$WORKFLOW_SH"
+    ! grep -q '${SKIP_SPEC:+--skip-spec}' "$WORKFLOW_SH"
+    ! grep -q '${FULL_PIPELINE:+--full-pipeline}' "$WORKFLOW_SH"
+    ! grep -q '${VERBOSE:+--verbose}' "$WORKFLOW_SH"
+}
+
+# Error recovery: dirty worktree error message mentions --sequential as the opt-out.
+@test "experience: dirty worktree error suggests --sequential as opt-out" {
+    grep -q 'Commit or stash changes first, or use --sequential' "$WORKFLOW_SH"
+}
+
+# Adversarial: user passes --batch --sequential — both flags process without conflict.
+# --batch prints deprecation, --sequential sets SEQUENTIAL_MODE=true, sequential wins.
+@test "experience: --batch --sequential combo processes without error" {
+    run bash -c "source '$BUILDCREW_ROOT/lib/workflow.sh' 2>/dev/null; parse_args --batch --sequential 2>&1"
+    [[ "$output" == *"deprecated"* ]]
+    # Can't check SEQUENTIAL_MODE in subshell, but no crash is the assertion
+    [ "$status" -eq 0 ] || [ "$status" -eq 143 ] # 143 = SIGTERM from help exit
+}
+
+# Adversarial: user passes --batch --single — both flags process, --single forces sequential.
+@test "experience: --batch --single combo processes without error" {
+    run bash -c "source '$BUILDCREW_ROOT/lib/workflow.sh' 2>/dev/null; parse_args --batch --single 2>&1"
+    [[ "$output" == *"deprecated"* ]]
+}
+
+# Adversarial: user passes --single --review (multiple sequential-forcing flags).
+# Both should set their respective flags AND SEQUENTIAL_MODE=true.
+@test "experience: multiple sequential-forcing flags all set SEQUENTIAL_MODE" {
+    parse_args --single --review
+    [ "$SINGLE_TASK" = "true" ]
+    [ "$HUMAN_REVIEW" = "true" ]
+    [ "$SEQUENTIAL_MODE" = "true" ]
+}
+
+# Adversarial: --task-exact also forces sequential mode.
+@test "experience: --task-exact implies sequential mode" {
+    parse_args --task-exact "Fix the bug"
+    [ "$TARGET_TASK_EXACT" = "Fix the bug" ]
+    [ "$SINGLE_TASK" = "true" ]
+    [ "$SEQUENTIAL_MODE" = "true" ]
+}
