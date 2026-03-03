@@ -358,3 +358,85 @@ COMMON_SH="$BUILDCREW_ROOT/lib/common.sh"
     [ "$status" -eq 0 ]
     [[ "$output" == *'if [[ -n "$skill_catalog" ]]'* ]]
 }
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Task: Change AUTO_MODE default to true
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Happy path: user runs buildcrew with no flags — AUTO_MODE defaults to true,
+# skipping all interactive pauses. This is the new default experience.
+@test "experience: default AUTO_MODE is true after sourcing workflow.sh" {
+    # AUTO_MODE is set at source time via ${AUTO_MODE:-true}
+    [ "$AUTO_MODE" = "true" ]
+}
+
+# Happy path: user passes --interactive to restore the old interactive behavior.
+# The dashboard sees AUTO_MODE=false, meaning prompts will fire.
+@test "experience: --interactive flag sets AUTO_MODE=false for interactive review pauses" {
+    parse_args --interactive
+    [ "$AUTO_MODE" = "false" ]
+    [ "$INTERACTIVE_FLAG" = "true" ]
+}
+
+# Happy path: user passes deprecated --auto flag and sees a deprecation warning.
+# AUTO_MODE still ends up true (same as default) but with a clear signal to update scripts.
+@test "experience: --auto flag emits deprecation warning telling user to use --interactive" {
+    run parse_args --auto
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"--auto is deprecated"* ]]
+    [[ "$output" == *"--interactive"* ]]
+}
+
+# Happy path: help text documents --interactive and marks --auto as deprecated.
+# Users running --help should see the new flag and know --auto is obsolete.
+@test "experience: help text shows --interactive and deprecation note for --auto" {
+    run parse_args --help
+    [[ "$output" == *"--interactive"* ]]
+    [[ "$output" == *"deprecated"* ]]
+}
+
+# Happy path: --plan --dry-run exits cleanly without launching Claude.
+# This was a latent bug (real Claude session launched in dry-run) — now fixed.
+@test "experience: --plan --dry-run prints dry-run message and exits 0" {
+    run "$BUILDCREW_HOME/lib/workflow.sh" --plan --dry-run
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"[DRY RUN]"* ]]
+    [[ "$output" == *"discovery mode"* ]]
+}
+
+# Error recovery: user accidentally passes both --auto and --interactive.
+# BuildCrew resolves the conflict — --interactive wins because --auto is deprecated.
+@test "experience: --auto --interactive conflict warns and resolves to interactive" {
+    run parse_args --auto --interactive
+    [[ "$output" == *"Both --auto and --interactive"* ]]
+    [[ "$output" == *"Using --interactive"* ]]
+}
+
+# Adversarial: batch worker exec line no longer passes --auto flag.
+# This prevents deprecation spam in CI logs from batch mode workers.
+@test "experience: batch worker exec line does not pass --auto flag" {
+    # The exec line in _batch_launch_task should have no --auto argument
+    run grep 'exec.*workflow\.sh' "$WORKFLOW_SH"
+    [[ "$output" != *"--auto"* ]]
+}
+
+# Adversarial: batch worker exports AUTO_MODE=true before exec.
+# Since --auto is removed from the exec line, AUTO_MODE must be exported directly.
+@test "experience: batch worker exports AUTO_MODE=true in environment" {
+    grep -q 'export AUTO_MODE=true.*Batch workers' "$WORKFLOW_SH"
+}
+
+# Adversarial: no stale AUTO_MODE:-false default remains anywhere in workflow.sh.
+# The only default should be AUTO_MODE:-true on line 146.
+@test "experience: no stale AUTO_MODE:-false fallback in workflow.sh" {
+    count=$(grep -c 'AUTO_MODE:-false' "$WORKFLOW_SH" || true)
+    [ "$count" -eq 0 ]
+}
+
+# Adversarial: README does not recommend buildcrew run --auto anywhere.
+# Since --auto is deprecated, no usage example should suggest it as a primary flag.
+@test "experience: README does not have buildcrew run --auto as recommended usage" {
+    # Check there's no 'buildcrew run --auto' usage line (uat --auto is separate and OK)
+    count=$(grep 'buildcrew run.*--auto' "$BUILDCREW_ROOT/README.md" || true)
+    [ -z "$count" ]
+}
