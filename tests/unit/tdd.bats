@@ -31,8 +31,44 @@ teardown() {
     [ "$TDD_MODE" = "true" ]
 }
 
-@test "parse_args: TDD_MODE defaults to false" {
+@test "parse_args: TDD_MODE defaults to true" {
+    [ "$TDD_MODE" = "true" ]
+}
+
+@test "parse_args: --no-tdd sets TDD_MODE=false" {
+    parse_args --no-tdd
     [ "$TDD_MODE" = "false" ]
+}
+
+@test "parse_args: --tdd sets TDD_MODE_FLAG_USED=true" {
+    TDD_MODE=false
+    parse_args --tdd
+    [ "$TDD_MODE_FLAG_USED" = "true" ]
+}
+
+@test "parse_args: --tdd --no-tdd last flag wins" {
+    parse_args --tdd --no-tdd
+    [ "$TDD_MODE" = "false" ]
+}
+
+@test "parse_args: --no-tdd sets TDD_MODE_EXPLICIT=true" {
+    parse_args --no-tdd
+    [ "$TDD_MODE_EXPLICIT" = "true" ]
+}
+
+@test "parse_args: --tdd sets TDD_MODE_EXPLICIT=true" {
+    TDD_MODE=false
+    parse_args --tdd
+    [ "$TDD_MODE_EXPLICIT" = "true" ]
+}
+
+@test "parse_args: TDD_MODE_EXPLICIT defaults to false" {
+    [ "$TDD_MODE_EXPLICIT" = "false" ]
+}
+
+@test "parse_args: --no-tdd does not set TDD_MODE_FLAG_USED" {
+    parse_args --no-tdd
+    [ "${TDD_MODE_FLAG_USED:-}" != "true" ]
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -70,6 +106,33 @@ teardown() {
     TDD_MODE=true
     load_buildcrew_config
     [ "$TDD_MODE" = "true" ]
+}
+
+@test "load_buildcrew_config: config sets TDD_MODE_EXPLICIT=true" {
+    mkdir -p .buildcrew
+    echo "TDD_MODE=true" > .buildcrew/config
+    unset TDD_MODE
+    TDD_MODE_EXPLICIT=false
+    load_buildcrew_config
+    [ "$TDD_MODE_EXPLICIT" = "true" ]
+}
+
+@test "load_buildcrew_config: config TDD_MODE=false sets TDD_MODE_EXPLICIT=true" {
+    mkdir -p .buildcrew
+    echo "TDD_MODE=false" > .buildcrew/config
+    unset TDD_MODE
+    TDD_MODE_EXPLICIT=false
+    load_buildcrew_config
+    [ "$TDD_MODE" = "false" ]
+    [ "$TDD_MODE_EXPLICIT" = "true" ]
+}
+
+@test "env var TDD_MODE sets TDD_MODE_EXPLICIT=true" {
+    # Re-source with TDD_MODE set as env var to trigger module-level detection
+    TDD_MODE_EXPLICIT=false
+    TDD_MODE=true
+    source_lib "workflow.sh"
+    [ "$TDD_MODE_EXPLICIT" = "true" ]
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
