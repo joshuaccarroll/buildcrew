@@ -428,3 +428,78 @@ EOF
     [[ "$__BATCH_TASK_LIST" == *"[dir:project-a] Fix the bug"* ]]
     [[ "$__BATCH_TASK_LIST" == *"[dir:project-b] Add feature"* ]]
 }
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Worktree skill fallback tests
+# ─────────────────────────────────────────────────────────────────────────────
+
+@test "_batch_create_worktree: installs skills from BUILDCREW_HOME when source repo lacks them" {
+    # __BATCH_CWD must be set — _batch_worktree_path uses it for target_dir mode
+    __BATCH_CWD="$TEST_DIR"
+
+    # Create a git repo to act as a target dir without skills
+    local target="$TEST_DIR/no-skills-project"
+    mkdir -p "$target"
+    git -C "$target" init -b main >/dev/null 2>&1
+    git -C "$target" config user.email "test@buildcrew.test"
+    git -C "$target" config user.name "Test"
+    git -C "$target" commit --allow-empty -m "init" >/dev/null 2>&1
+
+    # Ensure BUILDCREW_HOME/skills has content (it does via setup.bash)
+    [ -d "$BUILDCREW_HOME/skills/buildcrew" ]
+
+    _batch_create_worktree "test-slug" "main" "$target"
+    local worktree_path
+    worktree_path=$(_batch_worktree_path "test-slug" "$target")
+
+    # Verify skills were symlinked from BUILDCREW_HOME
+    [ -L "$worktree_path/.claude/skills/buildcrew" ]
+    [ -d "$worktree_path/.claude/skills/buildcrew-research" ]
+    [ -d "$worktree_path/.claude/skills/buildcrew-verify" ]
+
+    # Clean up worktree to avoid polluting the git repo
+    git -C "$target" worktree remove --force "$worktree_path" 2>/dev/null || rm -rf "$worktree_path"
+}
+
+@test "_batch_create_worktree: creates .buildcrew-link fallback when source repo lacks it" {
+    __BATCH_CWD="$TEST_DIR"
+
+    local target="$TEST_DIR/no-link-project"
+    mkdir -p "$target"
+    git -C "$target" init -b main >/dev/null 2>&1
+    git -C "$target" config user.email "test@buildcrew.test"
+    git -C "$target" config user.name "Test"
+    git -C "$target" commit --allow-empty -m "init" >/dev/null 2>&1
+
+    _batch_create_worktree "test-slug2" "main" "$target"
+    local worktree_path
+    worktree_path=$(_batch_worktree_path "test-slug2" "$target")
+
+    [ -f "$worktree_path/.claude/.buildcrew-link" ]
+    grep -q "BUILDCREW_HOME=" "$worktree_path/.claude/.buildcrew-link"
+
+    git -C "$target" worktree remove --force "$worktree_path" 2>/dev/null || rm -rf "$worktree_path"
+}
+
+@test "_batch_create_worktree: does not overwrite existing skills from source repo" {
+    __BATCH_CWD="$TEST_DIR"
+
+    local target="$TEST_DIR/has-skills-project"
+    mkdir -p "$target/.claude/skills/buildcrew"
+    echo "custom skill" > "$target/.claude/skills/buildcrew/SKILL.md"
+    git -C "$target" init -b main >/dev/null 2>&1
+    git -C "$target" config user.email "test@buildcrew.test"
+    git -C "$target" config user.name "Test"
+    git -C "$target" add -A >/dev/null 2>&1
+    git -C "$target" commit -m "init" >/dev/null 2>&1
+
+    _batch_create_worktree "test-slug3" "main" "$target"
+    local worktree_path
+    worktree_path=$(_batch_worktree_path "test-slug3" "$target")
+
+    # Skills were copied from source, not symlinked from BUILDCREW_HOME
+    [ ! -L "$worktree_path/.claude/skills/buildcrew" ]
+    grep -q "custom skill" "$worktree_path/.claude/skills/buildcrew/SKILL.md"
+
+    git -C "$target" worktree remove --force "$worktree_path" 2>/dev/null || rm -rf "$worktree_path"
+}

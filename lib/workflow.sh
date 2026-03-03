@@ -629,6 +629,20 @@ _batch_create_worktree() {
         mkdir -p "$worktree_path/.claude/skills"
         cp -a "$source_dir/.claude/skills/"* "$worktree_path/.claude/skills/" 2>/dev/null || true
     fi
+
+    # Fallback: if source repo had no skills, symlink from BUILDCREW_HOME
+    if [[ ! -d "$worktree_path/.claude/skills/buildcrew" ]] && [[ -d "$BUILDCREW_HOME/skills" ]]; then
+        mkdir -p "$worktree_path/.claude/skills"
+        local skill_dir skill_name
+        for skill_dir in "$BUILDCREW_HOME/skills"/*/; do
+            [ -d "$skill_dir" ] || continue
+            skill_name="$(basename "$skill_dir")"
+            if [[ ! -e "$worktree_path/.claude/skills/$skill_name" ]]; then
+                ln -s "$skill_dir" "$worktree_path/.claude/skills/$skill_name"
+            fi
+        done
+    fi
+
     local f
     for f in .claude/settings.json .claude/settings.local.json .claude/.buildcrew-link; do
         if [[ -f "$source_dir/$f" ]]; then
@@ -636,6 +650,12 @@ _batch_create_worktree() {
             cp "$source_dir/$f" "$worktree_path/$f" 2>/dev/null || true
         fi
     done
+
+    # Fallback: create .buildcrew-link if source repo didn't have one
+    if [[ ! -f "$worktree_path/.claude/.buildcrew-link" ]]; then
+        mkdir -p "$worktree_path/.claude"
+        echo "BUILDCREW_HOME=$BUILDCREW_HOME" > "$worktree_path/.claude/.buildcrew-link"
+    fi
 
     # Copy buildcrew config, lessons, and context from CWD (parent/orchestrator state)
     mkdir -p "$worktree_path/.buildcrew"
