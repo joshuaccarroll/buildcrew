@@ -181,7 +181,7 @@ Each task runs through **up to 10 distinct phases** (each a separate, isolated C
 - **Automatic iteration** when reviews find issues
 - **Blocking security** - no commit until vulnerabilities are fixed
 - **Feature branches** (`--branch`) - create a branch per task with automatic PR creation
-- **Activity logging** - full activity log kept on failure at `.buildcrew/activity.log`; use `--keep-logs` to retain after success
+- **Activity logging** - full activity log always retained at `.buildcrew/logs/`
 - **Auto mode** (`--auto`) - fully unattended; auto-approves all interactive pauses
 - **Chunked phase execution** - large builds that hit max-turns are automatically split and retried
 - **Interactive permission recovery** - if a phase is blocked by missing permissions, BuildCrew prompts for recovery before continuing
@@ -282,7 +282,6 @@ buildcrew run --batch        # Run pending tasks in parallel using git worktrees
 buildcrew run --max-parallel N   # Max concurrent tasks in batch mode (default: 5)
 buildcrew run --tdd          # Enable TDD mode (write failing tests before build, standard complexity only)
 buildcrew run --uat          # After build, enter watch mode for UAT verdicts (implies --auto)
-buildcrew run --keep-logs    # Retain the activity log after a successful run
 buildcrew run --max-invocations N  # Set max Claude invocations per run (default: 15)
 buildcrew run --verbose      # Show orchestrator decisions, phase verdicts, and invocation counts
 buildcrew run --debug        # Alias for --verbose
@@ -327,7 +326,6 @@ buildcrew uninstall          # Remove BuildCrew
 | `--max-parallel N` | Max concurrent tasks in batch mode (default: 5). Also configurable via `MAX_PARALLEL` in `.buildcrew/config`. |
 | `--tdd` | Enable TDD mode: insert a `tdd-scaffold` phase between plan review and build. Tests are written and verified to fail before implementation; the build phase must make them pass. Tamper detection via SHA-256 checksums prevents test modification during build. Only active for `standard` complexity tasks. Also configurable via `TDD_MODE=true` in `.buildcrew/config`. |
 | `--uat` | After a successful build, publish the artifact and enter watch mode for UAT verdicts. Implies `--auto`. Use with `buildcrew uat` in a separate terminal. |
-| `--keep-logs` | Retain the activity log after a successful run (the log is always kept on failure) |
 | `--max-invocations N` | Set max Claude invocations per run (default: 15) |
 | `--verbose` / `--debug` | Show orchestrator decisions, phase verdicts, and invocation counts |
 
@@ -344,7 +342,6 @@ Project-level configuration lives in `.buildcrew/config` (created from `.buildcr
 | `MAX_INVOCATIONS` | `15` | Maximum Claude invocations per `buildcrew run`. Equivalent to `--max-invocations N`. |
 | `COMPLEXITY_AWARE` | `true` | Auto-detect task complexity and skip unnecessary phases. Set to `false` to always run all phases (equivalent to `--full-pipeline`). |
 | `AUTO_MODE` | `false` | Run fully unattended — auto-approve all interactive pauses. Equivalent to `--auto`. |
-| `KEEP_LOGS` | `false` | Retain the activity log after a successful run. Equivalent to `--keep-logs`. |
 | `TDD_MODE` | `false` | Enable TDD mode: write failing tests before implementation. Equivalent to `--tdd`. Only active for `standard` complexity tasks. |
 | `MAX_PARALLEL` | `5` | Max concurrent tasks in batch mode. Equivalent to `--max-parallel N`. |
 | `UAT_MAX_RETRIES` | `5` | Max build-fix-test iterations in UAT watch mode. |
@@ -358,7 +355,6 @@ Example `.buildcrew/config`:
 MAX_INVOCATIONS=20
 COMPLEXITY_AWARE=true
 AUTO_MODE=false
-KEEP_LOGS=true
 ```
 
 ---

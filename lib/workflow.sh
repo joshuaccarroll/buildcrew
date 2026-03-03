@@ -100,13 +100,7 @@ load_buildcrew_config() {
                     fi
                     ;;
                 KEEP_LOGS)
-                    if [[ -z "${KEEP_LOGS+x}" ]]; then
-                        if [[ "$value" == "true" || "$value" == "false" ]]; then
-                            KEEP_LOGS="$value"
-                        else
-                            echo "Warning: invalid KEEP_LOGS in .buildcrew/config: $value (ignored, must be true or false)" >&2
-                        fi
-                    fi
+                    echo "Warning: KEEP_LOGS in .buildcrew/config is deprecated (logs are now always retained). Remove it from your config." >&2
                     ;;
                 MAX_PARALLEL)
                     if [[ -z "${MAX_PARALLEL+x}" ]]; then
@@ -145,7 +139,6 @@ MAX_INVOCATIONS=${MAX_INVOCATIONS:-15}
 COMPLEXITY_AWARE=${COMPLEXITY_AWARE:-true}
 AUTO_MODE=${AUTO_MODE:-false}
 TDD_MODE=${TDD_MODE:-false}
-KEEP_LOGS=${KEEP_LOGS:-false}
 MAX_PARALLEL=${MAX_PARALLEL:-5}
 TARGET_DIR=${TARGET_DIR:-}
 __INVOCATION_COUNT=0
@@ -281,7 +274,7 @@ parse_args() {
                 shift
                 ;;
             --keep-logs)
-                KEEP_LOGS=true
+                echo "Warning: --keep-logs is deprecated (logs are now always retained). This flag will be removed in a future release." >&2
                 shift
                 ;;
             --max-invocations)
@@ -318,7 +311,6 @@ parse_args() {
                 echo "  --auto       Run fully unattended — auto-approve all interactive pauses"
                 echo "  --uat        After build completes, enter watch mode for UAT verdicts (implies --auto)"
                 echo "  --tdd        Enable test-driven development: write failing tests before implementation"
-                echo "  --keep-logs  Retain the activity log after a successful run (log is always kept on failure)"
                 echo "  --batch      Run pending tasks in parallel using git worktrees"
                 echo "  --max-parallel N  Max concurrent tasks in batch mode (default: 5)"
                 echo "  --verbose    Show orchestrator decisions, phase verdicts, and invocation counts"
@@ -416,18 +408,12 @@ cleanup() {
 }
 
 # cleanup_log — called at the normal end of main() with the failed task count.
-# Deletes the log on a clean run; retains it on failures or when --keep-logs is set.
-# On error() exits, the EXIT trap fires cleanup() (not cleanup_log), so the log is
-# silently retained — the startup "Activity log: ..." message tells the user where it is.
+# Logs are always retained. On error() exits, the EXIT trap fires cleanup()
+# (not cleanup_log), so the log is silently retained — the startup
+# "Activity log: ..." message tells the user where it is.
 cleanup_log() {
-    local failed_count="${1:-0}"
     [[ -z "$__LOG_FILE" ]] && return 0
-    if [[ "$KEEP_LOGS" == "true" ]] || (( failed_count > 0 )); then
-        print_info "Activity log saved: $__LOG_FILE"
-    else
-        rm -f "$__LOG_FILE"
-        print_debug "Activity log removed (no failures; use --keep-logs to retain)"
-    fi
+    print_info "Activity log saved: $__LOG_FILE"
 }
 
 # Cleanup handler for discovery mode EXIT/INT/TERM trap.
@@ -464,9 +450,6 @@ enter_discovery_mode() {
     __DISCOVERY_HEARTBEAT_PID=""
     clear_workflow_state
     rm -f "$LOCKFILE"
-    if [[ "$KEEP_LOGS" != "true" ]]; then
-        rm -f "$__LOG_FILE"
-    fi
     trap - EXIT INT TERM
     exit 0
 }
@@ -751,7 +734,6 @@ _batch_launch_task() {
         exec "$BUILDCREW_HOME/lib/workflow.sh" \
             --single --task-exact "$task" --auto \
             --max-invocations "$MAX_INVOCATIONS" \
-            ${KEEP_LOGS:+--keep-logs} \
             ${SKIP_SPEC:+--skip-spec} \
             ${FULL_PIPELINE:+--full-pipeline} \
             ${VERBOSE:+--verbose} \
@@ -992,10 +974,6 @@ _batch_post_completion() {
 
     clear_workflow_state
     rm -f "$LOCKFILE"
-
-    if [[ "$KEEP_LOGS" != "true" ]] && (( _batch_failed == 0 )); then
-        rm -f "$__LOG_FILE"
-    fi
 
     trap - EXIT INT TERM
     if (( _batch_failed > 0 )); then
@@ -4007,7 +3985,7 @@ main() {
         log_msg "Batch mode: $__BATCH_TASK_COUNT tasks, max_parallel=$MAX_PARALLEL"
         print_info "Activity log: $__LOG_FILE"
         echo $$ > "$LOCKFILE"
-        print_debug "Flags: verbose=$VERBOSE keep_logs=$KEEP_LOGS auto=$AUTO_MODE max_parallel=$MAX_PARALLEL"
+        print_debug "Flags: verbose=$VERBOSE auto=$AUTO_MODE max_parallel=$MAX_PARALLEL"
 
         enter_batch_mode "$task_list"
         # enter_batch_mode calls exit 0, control does not return here

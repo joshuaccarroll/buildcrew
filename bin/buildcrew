@@ -78,7 +78,6 @@ print_help() {
     echo "    --uat         After build completes, enter watch mode for UAT verdicts (with 'run')"
     echo "    --batch       Run pending tasks in parallel using git worktrees (with 'run')"
     echo "    --max-parallel N  Max concurrent tasks in batch mode (default: 5, with 'run --batch')"
-    echo "    --keep-logs   Retain the activity log after a successful run (log is always kept on failure)"
     echo "    --verbose     Show orchestrator decisions, phase verdicts, and invocation counts"
     echo "    --debug       Alias for --verbose"
     echo ""
@@ -303,9 +302,6 @@ EOF
 
 # Run fully unattended — auto-approve all interactive pauses (default: false)
 # AUTO_MODE=false
-
-# Retain the activity log after a successful run (log is always kept on failure) (default: false)
-# KEEP_LOGS=false
 EOF
         echo -e "  ${GREEN}✓${NC} Created .buildcrew/config.example"
     else
