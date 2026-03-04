@@ -478,15 +478,13 @@ EOF
 # ─────────────────────────────────────────────────────────────────────────────
 
 @test "flag forwarding: uses == true comparison not colon-plus expansion" {
-    # Verify the corrected pattern exists
-    grep -q '\[\[ "\$KEEP_LOGS" == "true" \]\] && echo "--keep-logs"' "$BUILDCREW_ROOT/lib/workflow.sh"
+    # Verify the corrected pattern exists (KEEP_LOGS removed — logs always retained)
     grep -q '\[\[ "\$SKIP_SPEC" == "true" \]\] && echo "--skip-spec"' "$BUILDCREW_ROOT/lib/workflow.sh"
     grep -q '\[\[ "\$FULL_PIPELINE" == "true" \]\] && echo "--full-pipeline"' "$BUILDCREW_ROOT/lib/workflow.sh"
     grep -q '\[\[ "\$VERBOSE" == "true" \]\] && echo "--verbose"' "$BUILDCREW_ROOT/lib/workflow.sh"
 }
 
 @test "flag forwarding: old colon-plus expansion pattern is removed" {
-    ! grep -q '${KEEP_LOGS:+--keep-logs}' "$BUILDCREW_ROOT/lib/workflow.sh"
     ! grep -q '${SKIP_SPEC:+--skip-spec}' "$BUILDCREW_ROOT/lib/workflow.sh"
     ! grep -q '${FULL_PIPELINE:+--full-pipeline}' "$BUILDCREW_ROOT/lib/workflow.sh"
     ! grep -q '${VERBOSE:+--verbose}' "$BUILDCREW_ROOT/lib/workflow.sh"
