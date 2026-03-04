@@ -1716,57 +1716,148 @@ EOF
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
-# --keep-logs flag: parse_args tests
+# --keep-logs deprecation tests
 # ─────────────────────────────────────────────────────────────────────────────
 
-@test "parse_args: --keep-logs sets KEEP_LOGS=true" {
-    parse_args --keep-logs
-    [ "$KEEP_LOGS" = "true" ]
+@test "parse_args: --keep-logs emits deprecation warning" {
+    run parse_args --keep-logs
+    [[ "$output" == *"deprecated"* ]]
 }
 
-@test "parse_args: no args leaves KEEP_LOGS=false" {
-    parse_args
-    [ "$KEEP_LOGS" = "false" ]
-}
-
-@test "parse_args: --help mentions --keep-logs" {
-    run parse_args --help
-    [[ "$output" == *"--keep-logs"* ]]
-}
-
-@test "parse_args: --keep-logs combined with --auto --single" {
-    parse_args --keep-logs --auto --single
-    [ "$KEEP_LOGS" = "true" ]
+@test "parse_args: --keep-logs combined with other flags still works" {
+    local stderr_file="$TEST_DIR/stderr.txt"
+    parse_args --keep-logs --auto --single 2>"$stderr_file"
+    [[ "$(cat "$stderr_file")" == *"deprecated"* ]]
+    # Verify --auto and --single still took effect
     [ "$AUTO_MODE" = "true" ]
     [ "$SINGLE_TASK" = "true" ]
 }
 
-# ─────────────────────────────────────────────────────────────────────────────
-# --keep-logs flag: load_buildcrew_config KEEP_LOGS tests
-# ─────────────────────────────────────────────────────────────────────────────
-
-@test "load_buildcrew_config: sets KEEP_LOGS=true from config" {
-    unset KEEP_LOGS
+@test "load_buildcrew_config: KEEP_LOGS in config emits deprecation warning" {
     mkdir -p .buildcrew
     echo "KEEP_LOGS=true" > .buildcrew/config
-    load_buildcrew_config
-    [ "$KEEP_LOGS" = "true" ]
-}
-
-@test "load_buildcrew_config: env var takes precedence over KEEP_LOGS in config" {
-    mkdir -p .buildcrew
-    echo "KEEP_LOGS=true" > .buildcrew/config
-    KEEP_LOGS=false
-    load_buildcrew_config
-    [ "$KEEP_LOGS" = "false" ]
-}
-
-@test "load_buildcrew_config: invalid KEEP_LOGS value ignored with warning" {
-    unset KEEP_LOGS
-    mkdir -p .buildcrew
-    echo "KEEP_LOGS=yes" > .buildcrew/config
     run load_buildcrew_config
-    [[ "$output" == *"Warning"*"KEEP_LOGS"* ]]
+    [[ "$output" == *"deprecated"* ]]
+}
+
+@test "cleanup_log: always reports log path" {
+    mkdir -p .buildcrew/logs
+    __LOG_FILE=".buildcrew/logs/test-cleanup.log"
+    touch "$__LOG_FILE"
+    run cleanup_log 0
+    [[ "$output" == *"Activity log saved"* ]]
+    [ -f "$__LOG_FILE" ]
+}
+
+@test "cleanup_log: log retained with zero failures" {
+    mkdir -p .buildcrew/logs
+    __LOG_FILE=".buildcrew/logs/test-retained.log"
+    touch "$__LOG_FILE"
+    cleanup_log 0
+    [ -f "$__LOG_FILE" ]
+}
+
+# HP-07: parse_args --help does not mention --keep-logs
+@test "parse_args: --help does not mention --keep-logs" {
+    run parse_args --help
+    [[ "$output" != *"keep-logs"* ]]
+}
+
+# ERR-01: KEEP_LOGS=false in config also emits deprecation warning
+@test "load_buildcrew_config: KEEP_LOGS=false in config emits deprecation warning" {
+    mkdir -p .buildcrew
+    echo "KEEP_LOGS=false" > .buildcrew/config
+    run load_buildcrew_config
+    [[ "$output" == *"deprecated"* ]]
+}
+
+# ERR-02: cleanup_log with empty log path returns 0 silently
+@test "cleanup_log: empty log path returns 0 with no output" {
+    __LOG_FILE=""
+    run cleanup_log 0
+    [ "$status" -eq 0 ]
+    [ -z "$output" ]
+}
+
+# EDGE-01: KEEP_LOGS with invalid value in config emits deprecation, not validation error
+@test "load_buildcrew_config: KEEP_LOGS=banana emits deprecation not validation error" {
+    mkdir -p .buildcrew
+    echo "KEEP_LOGS=banana" > .buildcrew/config
+    run load_buildcrew_config
+    [[ "$output" == *"deprecated"* ]]
+    [[ "$output" != *"invalid"* ]]
+}
+
+# EDGE-02: KEEP_LOGS variable is unset after sourcing workflow.sh
+@test "KEEP_LOGS variable is not defined after sourcing workflow.sh" {
+    [ -z "${KEEP_LOGS+x}" ]
+}
+
+# EDGE-03: cleanup_log tolerates unused argument from call site
+@test "cleanup_log: tolerates unused argument from call site" {
+    mkdir -p .buildcrew/logs
+    __LOG_FILE=".buildcrew/logs/test-dead-arg.log"
+    touch "$__LOG_FILE"
+    run cleanup_log 5
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Activity log saved"* ]]
+    [ -f "$__LOG_FILE" ]
+}
+
+# EDGE-04: workflow.sh only references KEEP_LOGS in deprecation handlers (4 matches)
+@test "workflow.sh only references KEEP_LOGS in deprecation handlers" {
+    local count
+    count=$(grep -ci 'keep.logs' "$BUILDCREW_ROOT/lib/workflow.sh")
+    [ "$count" -eq 4 ]
+}
+
+# ADV-01: --keep-logs passed multiple times emits two warnings
+@test "parse_args: --keep-logs passed twice emits two deprecation warnings" {
+    run parse_args --keep-logs --keep-logs
+    local count
+    count=$(echo "$output" | grep -c "deprecated")
+    [ "$count" -eq 2 ]
+}
+
+# ADV-02: README does not mention --keep-logs or KEEP_LOGS
+@test "README does not reference keep-logs or KEEP_LOGS" {
+    local count
+    count=$(grep -ci 'keep.logs' "$BUILDCREW_ROOT/README.md" || true)
+    [ "$count" -eq 0 ]
+}
+
+# ADV-03: bin/buildcrew does not reference KEEP_LOGS or --keep-logs
+@test "bin/buildcrew does not reference keep-logs or KEEP_LOGS" {
+    local count
+    count=$(grep -ci 'keep.logs' "$BUILDCREW_ROOT/bin/buildcrew" || true)
+    [ "$count" -eq 0 ]
+}
+
+# ADV-04: --keep-logs before --help still processes both flags
+@test "parse_args: --keep-logs before --help processes both flags" {
+    run parse_args --keep-logs --help
+    [[ "$output" == *"deprecated"* ]]
+    [[ "$output" == *"Options:"* ]]
+}
+
+# SMOKE-01: workflow.sh sources cleanly with no config
+@test "SMOKE-01: workflow.sh sources with no config and KEEP_LOGS is unset" {
+    # Standard setup already sources workflow.sh with no .buildcrew/config
+    [ -z "${KEEP_LOGS+x}" ]
+}
+
+# SMOKE-02: config with KEEP_LOGS=true present at source time emits deprecation
+@test "SMOKE-02: sourcing workflow.sh with KEEP_LOGS in config emits deprecation" {
+    mkdir -p .buildcrew
+    echo "KEEP_LOGS=true" > .buildcrew/config
+    local stderr_file="$TEST_DIR/smoke02-stderr.txt"
+    # Source workflow.sh directly, capturing stderr (not via source_lib which swallows stderr)
+    set +e
+    source "$BUILDCREW_ROOT/lib/workflow.sh" 2>"$stderr_file"
+    set -e
+    [[ "$(cat "$stderr_file")" == *"deprecated"* ]]
+    # KEEP_LOGS variable should not be defined
+    [ -z "${KEEP_LOGS+x}" ]
 }
 
 # -----------------------------------------------------------------------

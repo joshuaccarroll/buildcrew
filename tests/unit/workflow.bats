@@ -491,7 +491,7 @@ EOF
     [ "$status" -ne 0 ]
 }
 
-@test "EDGE-03: enter_discovery_mode preserves log file when KEEP_LOGS=true" {
+@test "EDGE-03: enter_discovery_mode always preserves log file" {
     mkdir -p .buildcrew
     mkdir -p "$TEST_DIR/bin"
     cat > "$TEST_DIR/bin/claude" << 'EOF'
@@ -500,12 +500,10 @@ exit 0
 EOF
     chmod +x "$TEST_DIR/bin/claude"
     export PATH="$TEST_DIR/bin:$PATH"
-    export KEEP_LOGS=true
     run enter_discovery_mode "test prompt"
-    # Log file should still exist (not removed by enter_discovery_mode when KEEP_LOGS=true)
+    # Log file should always exist (logs are always retained)
     log_count=$(ls .buildcrew/logs/buildcrew-*.log 2>/dev/null | wc -l)
     [ "$log_count" -gt 0 ]
-    unset KEEP_LOGS
 }
 
 # ─────────────────────────────────────────────────────────────────────────────

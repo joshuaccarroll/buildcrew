@@ -29,7 +29,6 @@ setup() {
     export VERBOSE=false
     export AUTO_MODE=true
     export UAT_MODE=true
-    export KEEP_LOGS=false
     export COMPLEXITY_AWARE=true
     export MAX_INVOCATIONS=15
     export MAX_PARALLEL=5

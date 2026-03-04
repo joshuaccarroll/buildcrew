@@ -360,6 +360,7 @@ COMMON_SH="$BUILDCREW_ROOT/lib/common.sh"
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
+<<<<<<< HEAD
 # Task: Increase default UAT_ARTIFACT_TIMEOUT from 1800s to 7200s
 # ─────────────────────────────────────────────────────────────────────────────
 UAT_SH="$BUILDCREW_ROOT/lib/uat.sh"
@@ -455,4 +456,53 @@ UAT_SH="$BUILDCREW_ROOT/lib/uat.sh"
     run grep 'local _batch_stopping' "$WORKFLOW_SH"
     [ "$status" -eq 0 ]
     [[ "$output" == *"local _batch_stopping"* ]]
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Task: Remove --keep-logs flag and KEEP_LOGS variable — always keep logs
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Happy path: user runs buildcrew with --keep-logs (deprecated flag) — gets warning, not error.
+@test "experience: --keep-logs flag emits deprecation warning without error" {
+    run parse_args --keep-logs
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"deprecated"* ]]
+    [[ "$output" == *"always retained"* ]]
+}
+
+# Happy path: cleanup_log always keeps the log and tells the user where it is.
+@test "experience: cleanup_log always preserves log and reports its path" {
+    mkdir -p .buildcrew/logs
+    __LOG_FILE=".buildcrew/logs/experience-test.log"
+    echo "test log content" > "$__LOG_FILE"
+    run cleanup_log 0
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Activity log saved"* ]]
+    [[ "$output" == *"$__LOG_FILE"* ]]
+    [ -f "$__LOG_FILE" ]
+}
+
+# Happy path: help text does not advertise the removed flag.
+@test "experience: --help output has no mention of --keep-logs" {
+    run parse_args --help
+    [[ "$output" != *"keep-logs"* ]]
+}
+
+# Error recovery: user has old .buildcrew/config with KEEP_LOGS=true — gets helpful warning.
+@test "experience: old config with KEEP_LOGS=true emits actionable deprecation message" {
+    mkdir -p .buildcrew
+    echo "KEEP_LOGS=true" > .buildcrew/config
+    run load_buildcrew_config
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"deprecated"* ]]
+    [[ "$output" == *"Remove it from your config"* ]]
+}
+
+# Adversarial: user passes --keep-logs alongside valid flags — other flags still take effect.
+@test "experience: --keep-logs does not interfere with other flags" {
+    local stderr_file="$TEST_DIR/experience-stderr.txt"
+    parse_args --keep-logs --auto --single 2>"$stderr_file"
+    [[ "$(cat "$stderr_file")" == *"deprecated"* ]]
+    [ "$AUTO_MODE" = "true" ]
+    [ "$SINGLE_TASK" = "true" ]
 }
