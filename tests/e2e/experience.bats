@@ -1198,3 +1198,93 @@ MOCKEOF
     [ "$status" -lt 128 ]
     export HOME="$ORIGINAL_HOME"
 }
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Task: Post-init context completeness summary
+# ─────────────────────────────────────────────────────────────────────────────
+
+# EXP-01: Happy path — new user runs init and sees actionable context guidance
+@test "experience: init --quick shows context summary with cp commands for missing files" {
+    export ORIGINAL_HOME="$HOME"
+    export HOME="$TEST_DIR/fake-home"
+    mkdir -p "$HOME"
+    mkdir -p "$TEST_DIR/bin"
+    cat > "$TEST_DIR/bin/claude" << 'MOCKEOF'
+#!/bin/bash
+exit 0
+MOCKEOF
+    chmod +x "$TEST_DIR/bin/claude"
+    export PATH="$TEST_DIR/bin:$PATH"
+
+    run "$BUILDCREW_ROOT/bin/buildcrew" init --quick
+    [ "$status" -eq 0 ]
+    # Summary header present
+    [[ "$output" == *"Context files:"* ]]
+    # All four files listed with cp commands (none pre-created)
+    [[ "$output" == *"cp .buildcrew/context/users.md.example .buildcrew/context/users.md"* ]]
+    [[ "$output" == *"cp .buildcrew/context/principles.md.example .buildcrew/context/principles.md"* ]]
+    [[ "$output" == *"cp .buildcrew/context/domain.md.example .buildcrew/context/domain.md"* ]]
+    [[ "$output" == *"cp .buildcrew/context/conventions.md.example .buildcrew/context/conventions.md"* ]]
+    export HOME="$ORIGINAL_HOME"
+}
+
+# EXP-02: Happy path — user creates context files, re-inits, sees ✓ with sizes
+@test "experience: init --quick shows ✓ for pre-existing context files with byte sizes" {
+    export ORIGINAL_HOME="$HOME"
+    export HOME="$TEST_DIR/fake-home"
+    mkdir -p "$HOME"
+    mkdir -p "$TEST_DIR/bin"
+    cat > "$TEST_DIR/bin/claude" << 'MOCKEOF'
+#!/bin/bash
+exit 0
+MOCKEOF
+    chmod +x "$TEST_DIR/bin/claude"
+    export PATH="$TEST_DIR/bin:$PATH"
+
+    # Pre-create two context files
+    mkdir -p .buildcrew/context
+    printf 'team members list' > .buildcrew/context/users.md
+    printf 'our domain rules' > .buildcrew/context/domain.md
+
+    run "$BUILDCREW_ROOT/bin/buildcrew" init --quick
+    [ "$status" -eq 0 ]
+    # Existing files show ✓ with byte count
+    [[ "$output" == *"✓"*"users.md"*"(17 bytes)"* ]]
+    [[ "$output" == *"✓"*"domain.md"*"(16 bytes)"* ]]
+    # Missing files show ✗ with cp command
+    [[ "$output" == *"✗"*"principles.md"* ]]
+    [[ "$output" == *"✗"*"conventions.md"* ]]
+    export HOME="$ORIGINAL_HOME"
+}
+
+# EXP-03: Adversarial — user deletes .example files mid-workflow, re-inits
+@test "experience: init after deleting .example files shows missing label not crash" {
+    export ORIGINAL_HOME="$HOME"
+    export HOME="$TEST_DIR/fake-home"
+    mkdir -p "$HOME"
+    mkdir -p "$TEST_DIR/bin"
+    cat > "$TEST_DIR/bin/claude" << 'MOCKEOF'
+#!/bin/bash
+exit 0
+MOCKEOF
+    chmod +x "$TEST_DIR/bin/claude"
+    export PATH="$TEST_DIR/bin:$PATH"
+
+    # First init to create .example files
+    run "$BUILDCREW_ROOT/bin/buildcrew" init --quick
+    [ "$status" -eq 0 ]
+    # Sabotage: delete all .example context files
+    rm -f .buildcrew/context/*.example
+    # Re-init — should not crash, should show "missing"
+    run "$BUILDCREW_ROOT/bin/buildcrew" init --quick
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Context files:"* ]]
+    # All four should show ✗ missing (no cp commands since .examples are gone)
+    local summary
+    summary=$(echo "$output" | sed -n '/Context files:/,/^$/p')
+    [[ "$summary" == *"✗"*"users.md"*"missing"* ]]
+    [[ "$summary" == *"✗"*"principles.md"*"missing"* ]]
+    [[ "$summary" == *"✗"*"domain.md"*"missing"* ]]
+    [[ "$summary" == *"✗"*"conventions.md"*"missing"* ]]
+    export HOME="$ORIGINAL_HOME"
+}

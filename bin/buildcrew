@@ -382,6 +382,18 @@ EOF
     fi
 
     # Create context directory and example files
+    local _ctx_files="users.md principles.md domain.md conventions.md"
+    # Snapshot pre-init state: on re-init, deleted .example files show "missing"
+    local _ctx_dir_existed=0
+    [ -d ".buildcrew/context" ] && _ctx_dir_existed=1
+    local _ctx_pre_init_examples=""
+    if [ "$_ctx_dir_existed" -eq 1 ]; then
+        for _ctx_name in $_ctx_files; do
+            if [ -f ".buildcrew/context/${_ctx_name}.example" ]; then
+                _ctx_pre_init_examples="${_ctx_pre_init_examples} ${_ctx_name}"
+            fi
+        done
+    fi
     mkdir -p .buildcrew/context
 
     if [ ! -f ".buildcrew/context/users.md.example" ]; then
@@ -861,7 +873,21 @@ EOF
     echo -e "${BOLD}Optional customization:${NC}"
     echo -e "  • Copy ${CYAN}.buildcrew/workflow.md.example${NC} to ${CYAN}workflow.md${NC} to customize phases"
     echo -e "  • Copy ${CYAN}.buildcrew/rules/project-rules.md.example${NC} to add project rules"
-    echo -e "  • Copy ${CYAN}.buildcrew/context/*.md.example${NC} to add project context"
+    echo ""
+    echo "Context files:"
+    for _ctx_name in $_ctx_files; do
+        if [ -f ".buildcrew/context/${_ctx_name}" ]; then
+            local _ctx_bytes
+            _ctx_bytes=$(wc -c < ".buildcrew/context/${_ctx_name}" | tr -d ' ')
+            echo "  ✓ ${_ctx_name} (${_ctx_bytes} bytes)"
+        elif [ -n "$_ctx_pre_init_examples" ] && [[ " $_ctx_pre_init_examples " != *" ${_ctx_name} "* ]]; then
+            echo "  ✗ ${_ctx_name} missing"
+        elif [ -f ".buildcrew/context/${_ctx_name}.example" ]; then
+            echo "  ✗ ${_ctx_name} cp .buildcrew/context/${_ctx_name}.example .buildcrew/context/${_ctx_name}"
+        else
+            echo "  ✗ ${_ctx_name} missing"
+        fi
+    done
     echo ""
     echo -e "${BOLD}Next steps:${NC}"
     echo -e "  1. Run ${CYAN}buildcrew run${NC} to start"
