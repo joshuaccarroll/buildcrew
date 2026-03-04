@@ -637,15 +637,20 @@ _batch_create_worktree() {
     fi
 
     # Clean up stale branch/worktree from previous run
+    git -C "$repo_dir" worktree prune 2>/dev/null || true
     if git -C "$repo_dir" rev-parse --verify "$branch_name" >/dev/null 2>&1; then
-        git -C "$repo_dir" branch -D "$branch_name" 2>/dev/null || true
+        if ! git -C "$repo_dir" branch -D "$branch_name" 2>/dev/null; then
+            print_warning "Could not delete stale branch '$branch_name' — may still be checked out by a worktree"
+        fi
     fi
     if [[ -d "$worktree_path" ]]; then
         git -C "$repo_dir" worktree remove --force "$worktree_path" 2>/dev/null || rm -rf "$worktree_path"
     fi
 
     # Create worktree with new branch
-    if ! git -C "$repo_dir" worktree add -b "$branch_name" "$worktree_path" "$base_branch" 2>/dev/null; then
+    local worktree_err
+    if ! worktree_err=$(git -C "$repo_dir" worktree add -b "$branch_name" "$worktree_path" "$base_branch" 2>&1); then
+        print_error "Failed to create worktree for '$slug': $worktree_err"
         return 1
     fi
 
@@ -2345,7 +2350,7 @@ _summarize_old_lessons() {
 # 2. The phase-specific skill directories exist (confirming the split files are available)
 is_phase_isolation_available() {
     local skill_file
-    skill_file=$(find .claude/skills/buildcrew -name "SKILL.md" 2>/dev/null | head -1)
+    skill_file=$(find -H .claude/skills/buildcrew -name "SKILL.md" 2>/dev/null | head -1)
 
     if [[ -n "$skill_file" ]] && grep -q 'phase-isolation' "$skill_file" \
         && [[ -d .claude/skills/buildcrew-research ]] \
