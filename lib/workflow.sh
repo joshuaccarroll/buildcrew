@@ -1449,6 +1449,81 @@ handle_plan_review() {
     done
 }
 
+# __is_interactive — checks if stdin is a terminal (extracted for testability)
+__is_interactive() { [[ -t 0 ]]; }
+
+# handle_spec_interview task
+# Presents needs_probing questions to user, re-invokes spec with answers.
+# Returns: 0 = interview complete or skipped, 1 = re-invocation failed
+handle_spec_interview() {
+    local task="$1"
+
+    # Extract questions BEFORE re-invocation (run_phase_group destroys PHASE_RESULT_FILE)
+    local questions=()
+    while IFS= read -r q; do
+        [[ -n "$q" ]] && questions+=("$q")
+    done < <(jq -r '.questions // [] | .[]' "$PHASE_RESULT_FILE" 2>/dev/null)
+
+    # Empty questions guard
+    if (( ${#questions[@]} == 0 )); then
+        print_debug "needs_probing verdict but no questions — treating as complete"
+        return 0
+    fi
+
+    # Auto mode guard
+    if [[ "$AUTO_MODE" == "true" ]]; then
+        print_info "Auto mode: skipping spec interview, proceeding with best-effort spec"
+        return 0
+    fi
+
+    # Non-interactive guard
+    if ! __is_interactive; then
+        print_warning "Non-interactive terminal — skipping spec interview"
+        return 0
+    fi
+
+    # Present interview
+    echo -e "\n${YELLOW}${BOLD}┌─────────────────────────────────────────────────────────────┐${NC}"
+    echo -e "${YELLOW}${BOLD}│   SPEC INTERVIEW                                            │${NC}"
+    echo -e "${YELLOW}│   The spec phase has questions before finalizing.            │${NC}"
+    echo -e "${YELLOW}${BOLD}└─────────────────────────────────────────────────────────────┘${NC}"
+    echo ""
+    local answers=()
+    local i
+    update_workflow_state "spec" "awaiting_input"
+    for (( i=0; i<${#questions[@]}; i++ )); do
+        echo -e "  ${CYAN}$((i+1)). ${questions[$i]}${NC}"
+        local ans=""
+        read -r -p "  > (Enter to skip) " ans
+        answers+=("$ans")
+        echo ""
+    done
+
+    # Build answer context
+    print_info "Re-running spec with your answers..."
+    local answer_context="[BUILDCREW_INTERVIEW_ANSWERS]"
+    for (( i=0; i<${#questions[@]}; i++ )); do
+        answer_context+=$'\n'"Q$((i+1)): ${questions[$i]}"
+        answer_context+=$'\n'"A$((i+1)): ${answers[$i]:-}"
+    done
+
+    # Re-invoke spec with answers (preserving replan context if set)
+    local spec_extra="${__replan_context:+Re-planning context: $__replan_context | }$answer_context"
+    run_phase_group "spec" "$task" "$spec_extra" || return 1
+
+    # Check second-pass verdict
+    local new_verdict
+    new_verdict=$(jq -r '.verdict // "complete"' "$PHASE_RESULT_FILE")
+    if [[ "$new_verdict" == "vague" ]]; then
+        print_warning "Second-pass spec flagged as too vague: $(jq -r '.details // "unknown"' "$PHASE_RESULT_FILE")"
+        return 1
+    elif [[ "$new_verdict" == "needs_probing" ]]; then
+        print_warning "Interview re-run produced needs_probing again — proceeding with best-effort spec"
+    fi
+
+    return 0
+}
+
 # Mandatory spec review — guides the human to evaluate the spec before proceeding.
 # Distinct from handle_human_review(): always fires (not gated on --review), and
 # provides spec-specific framing rather than a generic "approve/skip" prompt.
@@ -3216,6 +3291,8 @@ process_task_isolated() {
             clear_task_progress
             print_warning "Task flagged as too vague to spec. See .claude/spec.md for details."
             return 1
+        elif [[ "$spec_verdict" == "needs_probing" ]]; then
+            handle_spec_interview "$task" || { mark_task_blocked "$task" "$(jq -r '.details // "spec interview failed"' "$PHASE_RESULT_FILE" 2>/dev/null || echo "spec interview failed")"; clear_task_progress; return 1; }
         fi
 
         __spec_context="Specification available at .claude/spec.md — read it for acceptance criteria and scope boundaries."
