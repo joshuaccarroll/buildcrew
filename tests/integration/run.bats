@@ -221,6 +221,39 @@ EOF
     [[ "$output" == *"Task three"* ]]
 }
 
+@test "run: --plan --dry-run exits 0 with message" {
+    echo "- [ ] Test task" > BACKLOG.md
+    run "$BUILDCREW_HOME/lib/workflow.sh" --plan --dry-run
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"[DRY RUN]"* ]]
+    [[ "$output" == *"discovery mode"* ]]
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# --interactive flag compatibility tests
+# ─────────────────────────────────────────────────────────────────────────────
+
+@test "run: --interactive --batch exits with error" {
+    echo "- [ ] Test task" > BACKLOG.md
+    run "$BUILDCREW_HOME/lib/workflow.sh" --interactive --batch
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"--interactive cannot be combined with --batch"* ]]
+}
+
+@test "run: --interactive --uat exits with error" {
+    echo "- [ ] Test task" > BACKLOG.md
+    run "$BUILDCREW_HOME/lib/workflow.sh" --interactive --uat
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"--interactive cannot be combined with --uat"* ]]
+}
+
+@test "run: --uat --interactive exits with error (reversed order)" {
+    echo "- [ ] Test task" > BACKLOG.md
+    run "$BUILDCREW_HOME/lib/workflow.sh" --uat --interactive
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"--interactive cannot be combined with --uat"* ]]
+}
+
 @test "run: --batch --review prints warning and no error" {
     echo "- [ ] Test task" > BACKLOG.md
     git init && git config user.email "t@t.t" && git config user.name "T"

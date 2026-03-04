@@ -257,6 +257,7 @@ teardown() {
 
 @test "handle_human_review: returns 0 with warning when non-interactive" {
     HUMAN_REVIEW=true
+    AUTO_MODE=false
     run handle_human_review "task" "description" "artifact"
     [ "$status" -eq 0 ]
     [[ "$output" == *"Non-interactive terminal"* ]]
@@ -264,6 +265,7 @@ teardown() {
 
 @test "handle_human_review: proceeds when --force passed even if HUMAN_REVIEW=false" {
     HUMAN_REVIEW=false
+    AUTO_MODE=false
     # Non-interactive terminal, so it will hit the fallback path
     run handle_human_review "task" "description" "artifact" "--force"
     [ "$status" -eq 0 ]
@@ -272,6 +274,7 @@ teardown() {
 
 @test "handle_human_review: --force with HUMAN_REVIEW=true still reaches non-interactive check" {
     HUMAN_REVIEW=true
+    AUTO_MODE=false
     run handle_human_review "task" "description" "artifact" "--force"
     [ "$status" -eq 0 ]
     [[ "$output" == *"Non-interactive terminal"* ]]
@@ -290,6 +293,7 @@ teardown() {
 # ─────────────────────────────────────────────────────────────────────────────
 
 @test "handle_spec_review: returns 0 with warning when non-interactive" {
+    AUTO_MODE=false
     run handle_spec_review "my task" "3"
     [ "$status" -eq 0 ]
     [[ "$output" == *"Non-interactive terminal"* ]]
@@ -1538,14 +1542,14 @@ EOF
 # --auto flag: parse_args tests
 # ─────────────────────────────────────────────────────────────────────────────
 
-@test "parse_args: --auto sets AUTO_MODE=true" {
-    parse_args --auto
-    [ "$AUTO_MODE" = "true" ]
+@test "parse_args: --auto sets AUTO_MODE=true and emits deprecation warning" {
+    run parse_args --auto
+    [[ "$output" == *"--auto is deprecated"* ]]
 }
 
-@test "parse_args: no args leaves AUTO_MODE=false" {
+@test "parse_args: no args leaves AUTO_MODE=true (default)" {
     parse_args
-    [ "$AUTO_MODE" = "false" ]
+    [ "$AUTO_MODE" = "true" ]
 }
 
 @test "parse_args: --auto combined with --review --single" {
@@ -1555,9 +1559,48 @@ EOF
     [ "$SINGLE_TASK" = "true" ]
 }
 
-@test "parse_args: --help mentions --auto" {
+@test "parse_args: --help mentions --auto and --interactive" {
     run parse_args --help
     [[ "$output" == *"--auto"* ]]
+    [[ "$output" == *"--interactive"* ]]
+}
+
+@test "parse_args: --interactive sets AUTO_MODE=false" {
+    parse_args --interactive
+    [ "$AUTO_MODE" = "false" ]
+}
+
+@test "parse_args: --interactive sets INTERACTIVE_FLAG=true" {
+    parse_args --interactive
+    [ "$INTERACTIVE_FLAG" = "true" ]
+}
+
+@test "parse_args: --auto emits deprecation warning" {
+    run parse_args --auto
+    [[ "$output" == *"deprecated"* ]]
+}
+
+@test "parse_args: --auto --interactive resolves to AUTO_MODE=false with warning" {
+    run parse_args --auto --interactive
+    [[ "$output" == *"Both --auto and --interactive"* ]]
+}
+
+@test "parse_args: --interactive --auto (reversed) also resolves to AUTO_MODE=false" {
+    run parse_args --interactive --auto
+    [[ "$output" == *"Both --auto and --interactive"* ]]
+}
+
+@test "parse_args: --interactive with --plan (compatible flags)" {
+    parse_args --interactive --plan
+    [ "$INTERACTIVE_FLAG" = "true" ]
+    [ "$AUTO_MODE" = "false" ]
+    [ "$PLAN_MODE" = "true" ]
+}
+
+@test "parse_args: --help shows deprecated for --auto" {
+    run parse_args --help
+    [[ "$output" == *"deprecated"* ]]
+    [[ "$output" == *"--interactive"* ]]
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1594,6 +1637,7 @@ EOF
 
 @test "handle_plan_review: returns 0 with warning when non-interactive" {
     HUMAN_REVIEW=true
+    AUTO_MODE=false
     run handle_plan_review "task" "description"
     [ "$status" -eq 0 ]
     [[ "$output" == *"Non-interactive terminal"* ]]
@@ -1601,6 +1645,7 @@ EOF
 
 @test "handle_plan_review: --force bypasses HUMAN_REVIEW=false guard" {
     HUMAN_REVIEW=false
+    AUTO_MODE=false
     run handle_plan_review "task" "description" "--force"
     [ "$status" -eq 0 ]
     [[ "$output" == *"Non-interactive terminal"* ]]

@@ -142,7 +142,7 @@ fi
 # 3. Fall back to built-in default if nothing set it
 MAX_INVOCATIONS=${MAX_INVOCATIONS:-15}
 COMPLEXITY_AWARE=${COMPLEXITY_AWARE:-true}
-AUTO_MODE=${AUTO_MODE:-false}
+AUTO_MODE=${AUTO_MODE:-true}
 TDD_MODE=${TDD_MODE:-true}
 TDD_MODE_EXPLICIT=${TDD_MODE_EXPLICIT:-false}
 MAX_PARALLEL=${MAX_PARALLEL:-5}
@@ -192,6 +192,8 @@ BATCH_MODE=false
 BATCH_MAX_TURNS=200
 PLAN_MODE=false
 UAT_MODE=false
+INTERACTIVE_FLAG=""
+DEPRECATED_AUTO_USED=""
 
 if command -v python3 &>/dev/null; then
     __ACTIVITY_TRACKING=true
@@ -263,12 +265,19 @@ parse_args() {
                 shift
                 ;;
             --auto)
+                print_warning "--auto is deprecated (auto mode is now the default). Use --interactive to restore interactive pauses."
+                DEPRECATED_AUTO_USED=true
                 AUTO_MODE=true
+                shift
+                ;;
+            --interactive)
+                INTERACTIVE_FLAG=true
+                AUTO_MODE=false
                 shift
                 ;;
             --uat)
                 UAT_MODE=true
-                AUTO_MODE=true  # --uat implies --auto
+                AUTO_MODE=true  # --uat requires auto mode (enforced)
                 shift
                 ;;
             --tdd)
@@ -321,7 +330,8 @@ parse_args() {
                 echo "  --no-strict  Allow partial acceptance criteria pass — proceed with warnings"
                 echo "  --max-invocations N  Set maximum Claude invocations per run (default: 15)"
                 echo "  --full-pipeline  Force all phases regardless of complexity assessment"
-                echo "  --auto       Run fully unattended — auto-approve all interactive pauses"
+                echo "  --auto       (deprecated) Auto mode is now the default. Use --interactive to opt out"
+                echo "  --interactive Restore interactive pauses (spec review, plan review, human review)"
                 echo "  --uat        After build completes, enter watch mode for UAT verdicts (implies --auto)"
                 echo "  --tdd        (deprecated) TDD is now enabled by default; this flag is a no-op"
                 echo "  --no-tdd     Disable TDD mode (skip tdd-scaffold phase)"
@@ -342,6 +352,12 @@ parse_args() {
                 ;;
         esac
     done
+
+    # If both --auto and --interactive were specified, --interactive wins (--auto is deprecated)
+    if [[ "$INTERACTIVE_FLAG" == "true" && "$DEPRECATED_AUTO_USED" == "true" ]]; then
+        print_warning "Both --auto and --interactive specified; --auto is deprecated. Using --interactive."
+        AUTO_MODE=false
+    fi
 }
 
 # ─────────────────────────────────────────────────────────────────────────────────
@@ -739,6 +755,7 @@ _batch_launch_task() {
         cd "$worktree" || exit 1
         export BUILDCREW_BATCH_NONCE="${slug}-${idx}"
         export BUILDCREW_HOME
+        export AUTO_MODE=true  # Batch workers must run unattended
 
         # When target_dir is set, export absolute BACKLOG_FILE path back to parent
         if [[ -n "$target_dir" ]]; then
@@ -746,7 +763,7 @@ _batch_launch_task() {
         fi
 
         exec "$BUILDCREW_HOME/lib/workflow.sh" \
-            --single --task-exact "$task" --auto \
+            --single --task-exact "$task" \
             --max-invocations "$MAX_INVOCATIONS" \
             ${SKIP_SPEC:+--skip-spec} \
             ${FULL_PIPELINE:+--full-pipeline} \
@@ -977,7 +994,7 @@ _batch_post_completion() {
                         _batch_create_prs "$base_branch"
                     fi
                 else
-                    print_info "Push branches and create PRs manually, or re-run without --auto."
+                    print_info "Push branches and create PRs manually, or re-run with --interactive."
                 fi
             fi
         fi
@@ -1191,7 +1208,7 @@ enter_batch_mode() {
 
     # Force auto mode for background processes
     if [[ "$AUTO_MODE" != "true" ]]; then
-        print_warning "Batch mode implies --auto (background processes cannot be interactive)"
+        print_warning "Batch mode requires auto mode (background processes cannot be interactive) -- overriding config"
         AUTO_MODE=true
     fi
 
@@ -1989,7 +2006,7 @@ update_workflow_state() {
         echo "INVOCATION_COUNT=$__INVOCATION_COUNT"
         echo "MAX_INVOCATIONS=$MAX_INVOCATIONS"
         echo "TIMESTAMP=$(date +%s)"
-        echo "AUTO_MODE=${AUTO_MODE:-false}"
+        echo "AUTO_MODE=${AUTO_MODE:-true}"
     } > "$tmp"
     mv -f "$tmp" "$WORKFLOW_STATE_FILE"
 }
@@ -3928,6 +3945,11 @@ main() {
             exit 1
         fi
 
+        if [[ "$DRY_RUN" == "true" ]]; then
+            echo "[DRY RUN] Would enter discovery mode (interactive planning)"
+            exit 0
+        fi
+
         # Check prerequisites inline (same as batch mode pattern)
         if ! command -v claude &>/dev/null; then
             print_error "Claude Code CLI not found. Please install it first."
@@ -3944,6 +3966,11 @@ main() {
         # enter_discovery_mode calls exit 0, never returns
     fi
 
+    if [[ "$UAT_MODE" == "true" && "$INTERACTIVE_FLAG" == "true" ]]; then
+        print_error "--interactive cannot be combined with --uat (UAT requires unattended operation)"
+        exit 1
+    fi
+
     if [[ "$BATCH_MODE" == "true" ]]; then
         # Batch mode has its own prerequisite/validation path
 
@@ -3952,8 +3979,12 @@ main() {
             print_error "--batch cannot be combined with --single or --task"
             exit 1
         fi
+        if [[ "$INTERACTIVE_FLAG" == "true" ]]; then
+            print_error "--interactive cannot be combined with --batch (background processes cannot be interactive)"
+            exit 1
+        fi
         if [[ "$HUMAN_REVIEW" == "true" ]]; then
-            print_warning "--review has no effect with --batch (auto mode is implied)"
+            print_warning "--review has no effect with --batch (auto mode is required for background processes)"
         fi
         if [[ "$GIT_BRANCH" == "true" ]]; then
             print_warning "--branch has no effect with --batch (batch mode creates worktree branches automatically)"

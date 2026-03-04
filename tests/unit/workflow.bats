@@ -337,7 +337,7 @@ EOF
     grep -q "^TOTAL_TASKS=5$" .buildcrew/.workflow-state
     grep -q "^INVOCATION_COUNT=3$" .buildcrew/.workflow-state
     grep -q "^MAX_INVOCATIONS=15$" .buildcrew/.workflow-state
-    grep -q "^AUTO_MODE=false$" .buildcrew/.workflow-state
+    grep -q "^AUTO_MODE=true$" .buildcrew/.workflow-state
 }
 
 @test "update_workflow_state: persists AUTO_MODE=true when set" {

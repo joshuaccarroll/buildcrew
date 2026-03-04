@@ -170,7 +170,7 @@ Each task runs through **up to 10 distinct phases** (each a separate, isolated C
 | 9 | Verify (incl. Security Audit) + Commit | Final gate; Security blocks commit |
 
 **Key features:**
-- **Specification first** - PM writes testable acceptance criteria before any code is planned; after each spec, BuildCrew pauses for you to review and approve (or edit) the acceptance criteria before proceeding — pass `--auto` to skip this pause
+- **Specification first** - PM writes testable acceptance criteria before any code is planned; by default, BuildCrew auto-approves all interactive pauses — use `--interactive` to restore manual review of acceptance criteria before proceeding
 - **Adversarial reviews** - reviewers are asked to find flaws, not to approve quickly
 - **Consolidated human review** (`--review`) - single pre-build gate with inline plan display; opens your `$EDITOR` to review or edit the plan; has no effect for `trivial`-complexity tasks
 - **Complexity-aware phase skipping** - tag tasks in your `BACKLOG.md` with `{trivial}`, `{simple}`, or `{standard}` (e.g., `- [ ] Fix typo in footer {trivial}`). `{trivial}` skips most phases (only build and verify run); `{simple}` skips spec, review, codereview, and outcome — research, build, test, and verify still run; `{standard}` runs all phases. BuildCrew also auto-detects complexity from the task description when no tag is present. Use `--full-pipeline` to force all phases regardless
@@ -182,7 +182,7 @@ Each task runs through **up to 10 distinct phases** (each a separate, isolated C
 - **Blocking security** - no commit until vulnerabilities are fixed
 - **Feature branches** (`--branch`) - create a branch per task with automatic PR creation
 - **Activity logging** - full activity log always retained at `.buildcrew/logs/`
-- **Auto mode** (`--auto`) - fully unattended; auto-approves all interactive pauses
+- **Auto mode** (default) - fully unattended; auto-approves all interactive pauses. Use `--interactive` to restore manual review prompts
 - **Chunked phase execution** - large builds that hit max-turns are automatically split and retried
 - **Interactive permission recovery** - if a phase is blocked by missing permissions, BuildCrew prompts for recovery before continuing
 - **Status line integration** - wired in via `buildcrew init` for real-time progress in Claude Code
@@ -277,7 +277,7 @@ buildcrew run --strict       # (default) Require ALL acceptance criteria to pass
 buildcrew run --no-strict    # Allow partial acceptance criteria pass — proceed with warnings
 buildcrew run --resume       # Resume an interrupted task from where it left off
 buildcrew run --task N       # Target a specific task by name or number
-buildcrew run --auto         # Run fully unattended — auto-approve all interactive pauses
+buildcrew run --interactive   # Restore interactive review pauses (spec review, plan review)
 buildcrew run --full-pipeline  # Force all phases regardless of complexity assessment
 buildcrew run --batch        # Run pending tasks in parallel using git worktrees
 buildcrew run --max-parallel N   # Max concurrent tasks in batch mode (default: 5)
@@ -322,12 +322,13 @@ buildcrew uninstall          # Remove BuildCrew
 | `--strict` | (default) Require ALL acceptance criteria to pass during Outcome Verification before the commit is allowed. Has no effect whenever the outcome phase is skipped — e.g., for `{trivial}` or `{simple}` tasks. |
 | `--no-strict` | Allow partial acceptance criteria pass — unmet criteria trigger a warning but don't block the commit. |
 | `--full-pipeline` | Force all phases regardless of complexity assessment |
-| `--auto` | Run fully unattended — auto-approve all interactive pauses |
-| `--batch` | Run all pending BACKLOG.md tasks in parallel, each through the full phase pipeline in its own git worktree. Use `--resume` to pick up where an interrupted batch left off. Incompatible with `--single` and `--task`. |
+| `--auto` | (deprecated) Auto mode is now the default. Use `--interactive` to opt out. |
+| `--interactive` | Restore interactive review pauses (spec review, plan review, human review). Incompatible with `--batch` and `--uat`. |
+| `--batch` | Run all pending BACKLOG.md tasks in parallel, each through the full phase pipeline in its own git worktree. Use `--resume` to pick up where an interrupted batch left off. Incompatible with `--single`, `--task`, and `--interactive`. |
 | `--max-parallel N` | Max concurrent tasks in batch mode (default: 5). Also configurable via `MAX_PARALLEL` in `.buildcrew/config`. |
 | `--tdd` | (deprecated) TDD is now enabled by default; this flag is a no-op. Emits a deprecation warning to stderr. |
 | `--no-tdd` | Disable TDD mode: skip the `tdd-scaffold` phase between plan review and build. TDD is enabled by default for `standard` complexity tasks. Also configurable via `TDD_MODE=false` in `.buildcrew/config`. |
-| `--uat` | After a successful build, publish the artifact and enter watch mode for UAT verdicts. Implies `--auto`. Use with `buildcrew uat` in a separate terminal. |
+| `--uat` | After a successful build, publish the artifact and enter watch mode for UAT verdicts. Implies `--auto`. Incompatible with `--interactive`. Use with `buildcrew uat` in a separate terminal. |
 | `--max-invocations N` | Set max Claude invocations per run (default: 15) |
 | `--verbose` / `--debug` | Show orchestrator decisions, phase verdicts, and invocation counts |
 
@@ -343,7 +344,7 @@ Project-level configuration lives in `.buildcrew/config` (created from `.buildcr
 |-----|---------|-------------|
 | `MAX_INVOCATIONS` | `15` | Maximum Claude invocations per `buildcrew run`. Equivalent to `--max-invocations N`. |
 | `COMPLEXITY_AWARE` | `true` | Auto-detect task complexity and skip unnecessary phases. Set to `false` to always run all phases (equivalent to `--full-pipeline`). |
-| `AUTO_MODE` | `false` | Run fully unattended — auto-approve all interactive pauses. Equivalent to `--auto`. |
+| `AUTO_MODE` | `true` | Auto-approve all interactive pauses (default behavior). Set to `false` to restore interactive review pauses (equivalent to `--interactive`). |
 | `TDD_MODE` | `true` | Enable TDD mode: write failing tests before implementation. Set to `false` to disable (equivalent to `--no-tdd`). Only active for `standard` complexity tasks. |
 | `MAX_PARALLEL` | `5` | Max concurrent tasks in batch mode. Equivalent to `--max-parallel N`. |
 | `UAT_MAX_RETRIES` | `5` | Max build-fix-test iterations in UAT watch mode. |
@@ -356,7 +357,7 @@ Example `.buildcrew/config`:
 ```bash
 MAX_INVOCATIONS=20
 COMPLEXITY_AWARE=true
-AUTO_MODE=false
+AUTO_MODE=true
 ```
 
 ---
