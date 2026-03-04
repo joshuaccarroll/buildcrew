@@ -1065,9 +1065,27 @@ _batch_parse_task_list() {
 # Main dispatch loop — launches tasks up to MAX_PARALLEL, polls for completion.
 _batch_dispatch_loop() {
     local total="$1" base_branch="$2"
+    local _batch_stopping=false
 
     while (( _batch_completed + _batch_failed < total )); do
         _batch_poll_tasks || true
+
+        # Stop signal: drain running tasks, then exit
+        if [[ "$_batch_stopping" != "true" ]] && check_stop_signal; then
+            _batch_stopping=true
+            log_msg "Stop signal detected. Running: $_batch_running, completed: $_batch_completed, next_idx: $_batch_next_idx"
+            print_warning "Stop signal received. Draining $_batch_running running task(s) — no new launches."
+            clear_stop_signal
+        fi
+
+        if [[ "$_batch_stopping" == "true" ]]; then
+            if (( _batch_running == 0 )); then
+                break
+            fi
+            _batch_refresh_dashboard
+            sleep 3
+            continue
+        fi
 
         # Launch new tasks while slots are available
         while (( _batch_running < MAX_PARALLEL && _batch_next_idx < total )); do
@@ -1102,6 +1120,13 @@ _batch_dispatch_loop() {
         _batch_refresh_dashboard
         sleep 3
     done
+
+    if [[ "$_batch_stopping" == "true" ]]; then
+        local _batch_skipped=$(( total - _batch_completed - _batch_failed ))
+        if (( _batch_skipped > 0 )); then
+            print_info "$_batch_skipped task(s) were not started. Resume with: buildcrew run --batch --resume"
+        fi
+    fi
 
     _batch_post_completion "$base_branch"
 }
@@ -1160,6 +1185,7 @@ _batch_resume() {
     print_info "Tasks: $total  |  Already completed: $already_done  |  Max parallel: $MAX_PARALLEL"
     echo ""
 
+    clear_stop_signal
     _batch_dispatch_loop "$total" "$base_branch"
 }
 
@@ -1268,6 +1294,7 @@ enter_batch_mode() {
     print_info "Tasks: $total  |  Max parallel: $MAX_PARALLEL  |  Base: $base_branch"
     echo ""
 
+    clear_stop_signal
     _batch_dispatch_loop "$total" "$base_branch"
 }
 
