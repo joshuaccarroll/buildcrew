@@ -925,6 +925,7 @@ EOF
     mkdir -p .buildcrew .claude
     echo "- [ ] test task" > BACKLOG.md
     SKIP_SPEC=true
+    TDD_MODE=false
     STRICT_MODE=false
     HUMAN_REVIEW=false
     # Pre-mark research and review as completed so they're skipped via phase_completed
@@ -1246,6 +1247,7 @@ EOF
     mkdir -p .buildcrew
     echo "- [ ] test task" > BACKLOG.md
     SKIP_SPEC=true
+    TDD_MODE=false
     STRICT_MODE=false
     HUMAN_REVIEW=false
     __RESUME_PHASES=""
@@ -1273,6 +1275,7 @@ EOF
     mkdir -p .buildcrew
     echo "- [ ] test task" > BACKLOG.md
     SKIP_SPEC=true
+    TDD_MODE=false
     STRICT_MODE=false
     HUMAN_REVIEW=false
     __RESUME_PHASES="research"
@@ -1995,6 +1998,7 @@ EOF
     mkdir -p .buildcrew .claude
     echo "- [ ] test task" > BACKLOG.md
     SKIP_SPEC=true
+    TDD_MODE=false
     STRICT_MODE=false
     HUMAN_REVIEW=false
     # Use RESUME_MODE=true so process_task_isolated skips artifact cleanup,
@@ -2074,6 +2078,7 @@ EOF
     mkdir -p .buildcrew .claude
     echo "- [ ] test task" > BACKLOG.md
     SKIP_SPEC=true
+    TDD_MODE=false
     STRICT_MODE=false
     HUMAN_REVIEW=false
     RESUME_MODE=true
@@ -2124,6 +2129,7 @@ EOF
     mkdir -p .buildcrew .claude
     echo "- [ ] test task" > BACKLOG.md
     SKIP_SPEC=true
+    TDD_MODE=false
     STRICT_MODE=false
     HUMAN_REVIEW=false
     __RESUME_PHASES="research review"

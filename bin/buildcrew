@@ -74,7 +74,8 @@ print_help() {
     echo "    --max-invocations N  Max Claude invocations per run (default: 15, with 'run')"
     echo "    --full-pipeline  Force all phases regardless of complexity assessment (with 'run')"
     echo "    --auto        Run fully unattended — auto-approve all interactive pauses (with 'run')"
-    echo "    --tdd         Enable TDD mode (write failing tests before build, standard complexity only)"
+    echo "    --tdd         (deprecated) TDD is enabled by default; this flag is a no-op"
+    echo "    --no-tdd      Disable TDD mode (skip tdd-scaffold phase for standard tasks)"
     echo "    --uat         After build completes, enter watch mode for UAT verdicts (with 'run')"
     echo "    --batch       Run pending tasks in parallel using git worktrees (with 'run')"
     echo "    --max-parallel N  Max concurrent tasks in batch mode (default: 5, with 'run --batch')"
@@ -302,6 +303,10 @@ EOF
 
 # Run fully unattended — auto-approve all interactive pauses (default: false)
 # AUTO_MODE=false
+
+# Enable TDD mode: write failing tests before implementation (default: true)
+# Set to false to disable TDD scaffold phase for standard-complexity tasks
+# TDD_MODE=true
 EOF
         echo -e "  ${GREEN}✓${NC} Created .buildcrew/config.example"
     else

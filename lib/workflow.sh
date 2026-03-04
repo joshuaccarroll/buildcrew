@@ -94,6 +94,7 @@ load_buildcrew_config() {
                     if [[ -z "${TDD_MODE+x}" ]]; then
                         if [[ "$value" == "true" || "$value" == "false" ]]; then
                             TDD_MODE="$value"
+                            TDD_MODE_EXPLICIT=true
                         else
                             echo "Warning: invalid TDD_MODE in .buildcrew/config: $value (ignored, must be true or false)" >&2
                         fi
@@ -134,11 +135,16 @@ MAX_TURNS=100
 PAUSE_BETWEEN_TASKS=5
 # 1. Load project config (only sets vars not already in environment)
 load_buildcrew_config
-# 2. Fall back to built-in default if nothing set it
+# 2. Track if TDD_MODE was set via environment variable (not by config loader)
+if [[ -n "${TDD_MODE+x}" ]] && [[ "${TDD_MODE_EXPLICIT:-}" != "true" ]]; then
+    TDD_MODE_EXPLICIT=true
+fi
+# 3. Fall back to built-in default if nothing set it
 MAX_INVOCATIONS=${MAX_INVOCATIONS:-15}
 COMPLEXITY_AWARE=${COMPLEXITY_AWARE:-true}
 AUTO_MODE=${AUTO_MODE:-false}
-TDD_MODE=${TDD_MODE:-false}
+TDD_MODE=${TDD_MODE:-true}
+TDD_MODE_EXPLICIT=${TDD_MODE_EXPLICIT:-false}
 MAX_PARALLEL=${MAX_PARALLEL:-5}
 TARGET_DIR=${TARGET_DIR:-}
 __INVOCATION_COUNT=0
@@ -267,6 +273,13 @@ parse_args() {
                 ;;
             --tdd)
                 TDD_MODE=true
+                TDD_MODE_EXPLICIT=true
+                TDD_MODE_FLAG_USED=true
+                shift
+                ;;
+            --no-tdd)
+                TDD_MODE=false
+                TDD_MODE_EXPLICIT=true
                 shift
                 ;;
             --batch)
@@ -310,7 +323,8 @@ parse_args() {
                 echo "  --full-pipeline  Force all phases regardless of complexity assessment"
                 echo "  --auto       Run fully unattended — auto-approve all interactive pauses"
                 echo "  --uat        After build completes, enter watch mode for UAT verdicts (implies --auto)"
-                echo "  --tdd        Enable test-driven development: write failing tests before implementation"
+                echo "  --tdd        (deprecated) TDD is now enabled by default; this flag is a no-op"
+                echo "  --no-tdd     Disable TDD mode (skip tdd-scaffold phase)"
                 echo "  --batch      Run pending tasks in parallel using git worktrees"
                 echo "  --max-parallel N  Max concurrent tasks in batch mode (default: 5)"
                 echo "  --verbose    Show orchestrator decisions, phase verdicts, and invocation counts"
@@ -4297,9 +4311,18 @@ main() {
 
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
     parse_args "$@"
+    if [[ "${TDD_MODE_FLAG_USED:-}" == "true" ]]; then
+        echo "WARNING: --tdd is deprecated; TDD is now enabled by default. Use --no-tdd to disable." >&2
+    fi
     if [[ "$TDD_MODE" == "true" && "$SKIP_SPEC" == "true" ]]; then
-        echo "Error: --tdd requires spec phase (incompatible with --skip-spec)" >&2
-        exit 1
+        if [[ "$TDD_MODE_EXPLICIT" == "true" ]]; then
+            echo "Error: TDD mode requires spec phase (incompatible with --skip-spec; use --no-tdd to disable TDD)" >&2
+            exit 1
+        else
+            # TDD is only from hardcoded default — auto-disable for --skip-spec compatibility
+            echo "Note: TDD mode auto-disabled (incompatible with --skip-spec)" >&2
+            TDD_MODE=false
+        fi
     fi
     if [[ "$STRICT_EXPLICIT" == "true" ]] && [[ "$STRICT_MODE" == "true" ]] && [[ "$SKIP_SPEC" == "true" ]]; then
         print_warning "--strict has no effect with --skip-spec (outcome phase requires a spec)"
