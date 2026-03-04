@@ -4098,7 +4098,7 @@ main() {
             # Auto-fallback: non-git dirs without [dir:] prefixes can't use worktrees
             if [[ -z "$TARGET_DIR" ]]; then
                 local _has_dir_prefix=false
-                if [[ -f "$BACKLOG_FILE" ]] && grep -q '^\- \[ \] \[dir:' "$BACKLOG_FILE" 2>/dev/null; then
+                if [[ -f "$BACKLOG_FILE" ]] && grep -q '^\- \[ \] .*\[dir:' "$BACKLOG_FILE" 2>/dev/null; then
                     _has_dir_prefix=true
                 fi
                 if [[ "$_has_dir_prefix" != "true" ]]; then
