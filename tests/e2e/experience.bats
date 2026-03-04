@@ -927,3 +927,79 @@ EOF
     [ -n "$needs_probing_line" ]
     [ "$vague_line" -lt "$needs_probing_line" ]
 }
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Task: Require execution proof in verify phase
+# ─────────────────────────────────────────────────────────────────────────────
+VERIFY_SKILL="$BUILDCREW_ROOT/skills/buildcrew-verify/SKILL.md"
+
+# Happy path: user triggers the verify phase — the SKILL.md now instructs the agent
+# to gather evidence before evaluating checklist items.
+@test "experience: verify SKILL.md has Gather Evidence section between Discovering and Checklist" {
+    local discover_line gather_line checklist_line
+    discover_line=$(grep -n '^### Discovering What Changed' "$VERIFY_SKILL" | head -1 | cut -d: -f1)
+    gather_line=$(grep -n '^### Gather Evidence' "$VERIFY_SKILL" | head -1 | cut -d: -f1)
+    checklist_line=$(grep -n '^### Verify Checklist' "$VERIFY_SKILL" | head -1 | cut -d: -f1)
+    [ -n "$discover_line" ]
+    [ -n "$gather_line" ]
+    [ -n "$checklist_line" ]
+    [ "$gather_line" -gt "$discover_line" ]
+    [ "$gather_line" -lt "$checklist_line" ]
+}
+
+# Happy path: verify agent knows to use fresh evidence, not stale test-report.
+@test "experience: verify checklist item references verify-evidence.md instead of test-report.md" {
+    grep -q 'All tests pass — use results from Gather Evidence step above' "$VERIFY_SKILL"
+    grep -q '\.claude/verify-evidence\.md' "$VERIFY_SKILL"
+    ! grep -q 'All tests pass (zero failures)' "$VERIFY_SKILL"
+}
+
+# Happy path: verify report template includes Evidence section with pass/fail summary.
+@test "experience: verify report template has Evidence subsection with Source, Test Result, Changed Files" {
+    grep -Fq '**Source**: `.claude/verify-evidence.md`' "$VERIFY_SKILL"
+    grep -Fq '**Test Result**: [PASS | FAIL | NO RUNNER]' "$VERIFY_SKILL"
+    grep -Fq '**Changed Files**' "$VERIFY_SKILL"
+}
+
+# Happy path: verify agent detects test runner automatically from project root.
+@test "experience: Gather Evidence has 5-entry test runner detection list with first-match semantics" {
+    local section
+    local gather_start gather_end
+    gather_start=$(grep -n '^### Gather Evidence' "$VERIFY_SKILL" | head -1 | cut -d: -f1)
+    gather_end=$(grep -n '^### Verify Checklist' "$VERIFY_SKILL" | head -1 | cut -d: -f1)
+    section=$(sed -n "${gather_start},${gather_end}p" "$VERIFY_SKILL")
+    # All 5 detection pairs present
+    echo "$section" | grep -q 'test -x test.sh'
+    echo "$section" | grep -q '\./test\.sh'
+    echo "$section" | grep -q 'make test'
+    echo "$section" | grep -q 'npm test'
+    echo "$section" | grep -q 'pytest'
+    echo "$section" | grep -q 'cargo test'
+    # First-match semantics documented
+    echo "$section" | grep -iq 'first match'
+}
+
+# Error recovery: no test runner detected — verify agent should NOT auto-fail,
+# preserving human judgment for projects without automated tests.
+@test "experience: no test runner fallback does not auto-fail the Test Suite check" {
+    local section
+    local gather_start gather_end
+    gather_start=$(grep -n '^### Gather Evidence' "$VERIFY_SKILL" | head -1 | cut -d: -f1)
+    gather_end=$(grep -n '^### Verify Checklist' "$VERIFY_SKILL" | head -1 | cut -d: -f1)
+    section=$(sed -n "${gather_start},${gather_end}p" "$VERIFY_SKILL")
+    echo "$section" | grep -q 'No test runner detected'
+    echo "$section" | grep -iq 'not.*auto.*fail\|do not.*fail\|NOT.*fail'
+}
+
+# Adversarial: accidental double-insertion of Gather Evidence section would confuse
+# the verify agent with duplicate instructions.
+@test "experience: exactly one Gather Evidence section exists (no duplicates)" {
+    local count
+    count=$(grep -c '^### Gather Evidence' "$VERIFY_SKILL")
+    [ "$count" -eq 1 ]
+}
+
+# Adversarial: jq dependency would break on systems without it installed.
+@test "experience: verify SKILL.md introduces no jq dependency" {
+    ! grep -q 'jq' "$VERIFY_SKILL"
+}

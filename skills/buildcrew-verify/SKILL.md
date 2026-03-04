@@ -26,12 +26,52 @@ The task was provided in the prompt. All prior artifacts are available in `.clau
 
 Run `git diff --name-only HEAD` to discover changed files for audit.
 
+### Gather Evidence
+
+Before evaluating any checklist items, gather fresh execution evidence. Run all commands from the project root directory.
+
+**Step 1 — Capture changed files**: Run `git diff --stat HEAD` and save the output. If the output is empty (clean working tree), note `No changes detected`.
+
+**Step 2 — Detect and run tests**: Evaluate the following test runner detection list in order. Use the first match; skip remaining entries.
+
+1. `test -x test.sh` → Run: `./test.sh`
+2. `test -f Makefile && grep -q '^test[: \t]' Makefile` → Run: `make test`
+3. `test -f package.json && grep -q '"test"' package.json` → Run: `npm test`
+4. `test -f pyproject.toml && command -v pytest >/dev/null` → Run: `pytest`
+5. `test -f Cargo.toml && command -v cargo >/dev/null` → Run: `cargo test`
+
+Execute the matched test command with stderr redirected into stdout and capture the exit code. Use this shell pattern:
+
+```sh
+output=$(<command> 2>&1); rc=$?
+```
+
+Exit code 0 means tests passed; non-zero means tests failed and the Test Suite check must be marked as failed.
+
+If no test runner is detected, write `No test runner detected` as the test output. Do NOT auto-fail the Test Suite check on that basis alone — use your own judgment to evaluate whether tests pass.
+
+**Step 3 — Write evidence file**: Write all captured output to `.claude/verify-evidence.md` (overwriting any previous content) with exactly two H2 sections:
+
+```markdown
+## Test Output
+
+<captured test stdout+stderr, or "No test runner detected">
+
+## Changed Files
+
+<git diff --stat HEAD output, or "No changes detected">
+```
+
+If the test runner produced empty stdout+stderr, write `(no output)` under `## Test Output`.
+
+**Output truncation**: If test output exceeds 500 lines, keep the first 50 lines and last 200 lines, replacing the omitted middle with a single marker line: `... (N lines truncated) ...` where N is the number of omitted lines.
+
 ### Verify Checklist
 
 All items must be checked and pass:
 
 #### 1. Test Suite Verification
-- [ ] All tests pass (zero failures)
+- [ ] All tests pass — use results from Gather Evidence step above (`.claude/verify-evidence.md`), not `.claude/test-report.md`
 - [ ] Coverage meets project threshold (if configured)
 - [ ] No skipped tests without justification
 
@@ -115,6 +155,11 @@ Write verification status to `.claude/verify-report.md`:
 ### Architecture
 - **Status**: [VALID | INVALID]
 - **Notes**: [Any architectural concerns]
+
+### Evidence
+- **Source**: `.claude/verify-evidence.md`
+- **Test Result**: [PASS | FAIL | NO RUNNER]
+- **Changed Files**: [N files changed — from last line of git diff --stat, or "No changes detected"]
 
 ---
 
