@@ -76,10 +76,10 @@ EOF
 @test "load_uat_config: uses defaults when no config file" {
     # Ensure defaults are set
     UAT_POLL_INTERVAL=5
-    UAT_ARTIFACT_TIMEOUT=1800
+    UAT_ARTIFACT_TIMEOUT=7200
     load_uat_config
     [ "$UAT_POLL_INTERVAL" = "5" ]
-    [ "$UAT_ARTIFACT_TIMEOUT" = "1800" ]
+    [ "$UAT_ARTIFACT_TIMEOUT" = "7200" ]
 }
 
 @test "load_uat_config: ignores invalid values" {
@@ -90,11 +90,11 @@ UAT_ARTIFACT_TIMEOUT=-5
 UAT_MAX_RETRIES=0
 EOF
     UAT_POLL_INTERVAL=5
-    UAT_ARTIFACT_TIMEOUT=1800
+    UAT_ARTIFACT_TIMEOUT=7200
     UAT_MAX_RETRIES=5
     load_uat_config
     [ "$UAT_POLL_INTERVAL" = "5" ]
-    [ "$UAT_ARTIFACT_TIMEOUT" = "1800" ]
+    [ "$UAT_ARTIFACT_TIMEOUT" = "7200" ]
     [ "$UAT_MAX_RETRIES" = "5" ]
 }
 
@@ -936,7 +936,7 @@ MOCK_EOF
 @test "UAT config defaults are set correctly" {
     # Reset to defaults by re-sourcing (source guard prevents, so check current)
     [ -n "$UAT_POLL_INTERVAL" ]
-    [ -n "$UAT_ARTIFACT_TIMEOUT" ]
+    [ "$UAT_ARTIFACT_TIMEOUT" = "7200" ]
     [ -n "$UAT_EXECUTE_TIMEOUT" ]
     [ -n "$UAT_HEALTH_CHECK_TIMEOUT" ]
     [ -n "$UAT_MAX_RETRIES" ]
