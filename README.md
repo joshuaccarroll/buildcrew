@@ -279,8 +279,8 @@ buildcrew run --resume       # Resume an interrupted task from where it left off
 buildcrew run --task N       # Target a specific task by name or number
 buildcrew run --interactive   # Restore interactive review pauses (spec review, plan review)
 buildcrew run --full-pipeline  # Force all phases regardless of complexity assessment
-buildcrew run --batch        # Run pending tasks in parallel using git worktrees
-buildcrew run --max-parallel N   # Max concurrent tasks in batch mode (default: 5)
+buildcrew run --sequential   # Run tasks one at a time (opt out of parallel mode)
+buildcrew run --max-parallel N   # Max concurrent tasks in parallel mode (default: 5)
 buildcrew run --no-tdd       # Disable TDD mode (TDD is enabled by default for standard complexity tasks)
 buildcrew run --uat          # After build, enter watch mode for UAT verdicts (implies --auto)
 buildcrew run --max-invocations N  # Set max Claude invocations per run (default: 15)
@@ -323,9 +323,10 @@ buildcrew uninstall          # Remove BuildCrew
 | `--no-strict` | Allow partial acceptance criteria pass — unmet criteria trigger a warning but don't block the commit. |
 | `--full-pipeline` | Force all phases regardless of complexity assessment |
 | `--auto` | (deprecated) Auto mode is now the default. Use `--interactive` to opt out. |
-| `--interactive` | Restore interactive review pauses (spec review, plan review, human review). Incompatible with `--batch` and `--uat`. |
-| `--batch` | Run all pending BACKLOG.md tasks in parallel, each through the full phase pipeline in its own git worktree. Use `--resume` to pick up where an interrupted batch left off. Incompatible with `--single`, `--task`, and `--interactive`. |
-| `--max-parallel N` | Max concurrent tasks in batch mode (default: 5). Also configurable via `MAX_PARALLEL` in `.buildcrew/config`. |
+| `--interactive` | Restore interactive review pauses (spec review, plan review, human review). Incompatible with `--uat`. |
+| `--sequential` | Run tasks one at a time instead of the default parallel batch mode. Required for `--review` and `--branch` workflows. Automatically forced by `--single`, `--task`, `--review`, and `--uat`. |
+| `--batch` | (deprecated) Batch mode is now the default. Use `--sequential` to opt out. |
+| `--max-parallel N` | Max concurrent tasks in parallel mode (default: 5). Also configurable via `MAX_PARALLEL` in `.buildcrew/config`. |
 | `--tdd` | (deprecated) TDD is now enabled by default; this flag is a no-op. Emits a deprecation warning to stderr. |
 | `--no-tdd` | Disable TDD mode: skip the `tdd-scaffold` phase between plan review and build. TDD is enabled by default for `standard` complexity tasks. Also configurable via `TDD_MODE=false` in `.buildcrew/config`. |
 | `--uat` | After a successful build, publish the artifact and enter watch mode for UAT verdicts. Implies `--auto`. Incompatible with `--interactive`. Use with `buildcrew uat` in a separate terminal. |
@@ -346,7 +347,7 @@ Project-level configuration lives in `.buildcrew/config` (created from `.buildcr
 | `COMPLEXITY_AWARE` | `true` | Auto-detect task complexity and skip unnecessary phases. Set to `false` to always run all phases (equivalent to `--full-pipeline`). |
 | `AUTO_MODE` | `true` | Auto-approve all interactive pauses (default behavior). Set to `false` to restore interactive review pauses (equivalent to `--interactive`). |
 | `TDD_MODE` | `true` | Enable TDD mode: write failing tests before implementation. Set to `false` to disable (equivalent to `--no-tdd`). Only active for `standard` complexity tasks. |
-| `MAX_PARALLEL` | `5` | Max concurrent tasks in batch mode. Equivalent to `--max-parallel N`. |
+| `MAX_PARALLEL` | `5` | Max concurrent tasks in parallel mode. Equivalent to `--max-parallel N`. |
 | `UAT_MAX_RETRIES` | `5` | Max build-fix-test iterations in UAT watch mode. |
 | `UAT_ARTIFACT_TYPE` | (auto-detected) | Override artifact type detection (`cli`, `api`, `library`, `tui`). |
 | `UAT_RUN_COMMAND` | (auto-detected) | Override how to run/start the artifact. |
