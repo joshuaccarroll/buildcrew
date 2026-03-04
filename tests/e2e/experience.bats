@@ -1003,3 +1003,198 @@ VERIFY_SKILL="$BUILDCREW_ROOT/skills/buildcrew-verify/SKILL.md"
 @test "experience: verify SKILL.md introduces no jq dependency" {
     ! grep -q 'jq' "$VERIFY_SKILL"
 }
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Task: Ctrl+C Process Group Propagation in Batch Cleanup
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Happy path: batch cleanup terminates multiple worker processes.
+@test "experience: batch cleanup kills all tracked worker processes" {
+    source_lib "common.sh"
+
+    # Spawn multiple workers
+    sleep 300 &
+    local pid1=$!
+    sleep 300 &
+    local pid2=$!
+    sleep 300 &
+    local pid3=$!
+
+    _batch_pids=()
+    _batch_pids[0]=$pid1
+    _batch_pids[1]=$pid2
+    _batch_pids[2]=$pid3
+
+    BATCH_MANIFEST="$TEST_DIR/batch-manifest.json"
+    LOCKFILE="$TEST_DIR/lockfile"
+    touch "$LOCKFILE"
+    _batch_mark_task() { :; }
+    _batch_stop_heartbeat() { :; }
+    clear_workflow_state() { :; }
+    print_warning() { :; }
+    print_info() { :; }
+    sleep() { :; }
+
+    _batch_parallel_cleanup || true
+
+    # All workers must be dead
+    ! kill -0 "$pid1" 2>/dev/null
+    ! kill -0 "$pid2" 2>/dev/null
+    ! kill -0 "$pid3" 2>/dev/null
+}
+
+# Adversarial: SIGTERM-resistant worker is force-killed and cleanup exits 130.
+@test "experience: batch cleanup force-kills SIGTERM-resistant worker and exits 130" {
+    source_lib "common.sh"
+
+    bash -c 'trap "" TERM; sleep 300' &
+    local stubborn=$!
+
+    _batch_pids=()
+    _batch_pids[0]=$stubborn
+
+    BATCH_MANIFEST="$TEST_DIR/batch-manifest.json"
+    LOCKFILE="$TEST_DIR/lockfile"
+    touch "$LOCKFILE"
+    _batch_mark_task() { :; }
+    _batch_stop_heartbeat() { :; }
+    clear_workflow_state() { :; }
+    print_warning() { :; }
+    print_info() { :; }
+    sleep() { command sleep 0.1; }
+
+    _batch_parallel_cleanup || true
+
+    # Even SIGTERM-ignoring process must be dead
+    ! kill -0 "$stubborn" 2>/dev/null
+}
+
+# Adversarial: cleanup with empty pids and missing lockfile does not crash.
+@test "experience: batch cleanup with no workers and missing lockfile exits cleanly" {
+    source_lib "common.sh"
+
+    _batch_pids=()
+
+    BATCH_MANIFEST="$TEST_DIR/batch-manifest.json"
+    LOCKFILE="$TEST_DIR/nonexistent-lockfile"
+    _batch_mark_task() { :; }
+    _batch_stop_heartbeat() { :; }
+    clear_workflow_state() { :; }
+    print_warning() { :; }
+    print_info() { :; }
+    sleep() { :; }
+
+    run bash -c "
+        source '$BUILDCREW_ROOT/lib/common.sh' 2>/dev/null
+        source '$BUILDCREW_ROOT/lib/workflow.sh' 2>/dev/null
+        _batch_mark_task() { :; }
+        _batch_stop_heartbeat() { :; }
+        clear_workflow_state() { :; }
+        print_warning() { :; }
+        print_info() { :; }
+        sleep() { :; }
+        BATCH_MANIFEST='$TEST_DIR/batch-manifest.json'
+        LOCKFILE='$TEST_DIR/nonexistent-lockfile'
+        _batch_pids=()
+        _batch_parallel_cleanup
+    "
+    # Should exit 130 (interrupt code), not crash
+    [ "$status" -eq 130 ]
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Task: Interactive context-file prompts for buildcrew init
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Happy path: user runs `buildcrew init --quick` in a fresh project directory.
+# The scaffold should create all expected context .example files and exit cleanly.
+@test "experience: buildcrew init --quick creates full scaffold with all .example context files" {
+    export ORIGINAL_HOME="$HOME"
+    export HOME="$TEST_DIR/fake-home"
+    mkdir -p "$HOME"
+    # Mock claude binary for playground plugin installation
+    mkdir -p "$TEST_DIR/bin"
+    cat > "$TEST_DIR/bin/claude" << 'MOCKEOF'
+#!/bin/bash
+exit 0
+MOCKEOF
+    chmod +x "$TEST_DIR/bin/claude"
+    export PATH="$TEST_DIR/bin:$PATH"
+
+    run "$BUILDCREW_ROOT/bin/buildcrew" init --quick
+    [ "$status" -eq 0 ]
+    [ -f ".buildcrew/context/users.md.example" ]
+    [ -f ".buildcrew/context/principles.md.example" ]
+    [ -f ".buildcrew/context/domain.md.example" ]
+    [ -f ".buildcrew/context/conventions.md.example" ]
+    # No non-example context files should exist
+    [ ! -f ".buildcrew/context/users.md" ]
+    [ ! -f ".buildcrew/context/conventions.md" ]
+    export HOME="$ORIGINAL_HOME"
+}
+
+# Happy path: user runs `buildcrew init --quick` twice — idempotent, no crash.
+@test "experience: buildcrew init --quick is idempotent on second run" {
+    export ORIGINAL_HOME="$HOME"
+    export HOME="$TEST_DIR/fake-home"
+    mkdir -p "$HOME"
+    mkdir -p "$TEST_DIR/bin"
+    cat > "$TEST_DIR/bin/claude" << 'MOCKEOF'
+#!/bin/bash
+exit 0
+MOCKEOF
+    chmod +x "$TEST_DIR/bin/claude"
+    export PATH="$TEST_DIR/bin:$PATH"
+
+    run "$BUILDCREW_ROOT/bin/buildcrew" init --quick
+    [ "$status" -eq 0 ]
+    run "$BUILDCREW_ROOT/bin/buildcrew" init --quick
+    [ "$status" -eq 0 ]
+    [ -f ".buildcrew/context/conventions.md.example" ]
+    export HOME="$ORIGINAL_HOME"
+}
+
+# Error recovery: user passes a bad flag, gets a clear error, then succeeds with --quick.
+@test "experience: bad flag gives clear error, then --quick succeeds" {
+    export ORIGINAL_HOME="$HOME"
+    export HOME="$TEST_DIR/fake-home"
+    mkdir -p "$HOME"
+    mkdir -p "$TEST_DIR/bin"
+    cat > "$TEST_DIR/bin/claude" << 'MOCKEOF'
+#!/bin/bash
+exit 0
+MOCKEOF
+    chmod +x "$TEST_DIR/bin/claude"
+    export PATH="$TEST_DIR/bin:$PATH"
+
+    # Bad flag first
+    run "$BUILDCREW_ROOT/bin/buildcrew" init --nonsense
+    [ "$status" -ne 0 ]
+    # Recover with --quick
+    run "$BUILDCREW_ROOT/bin/buildcrew" init --quick
+    [ "$status" -eq 0 ]
+    [ -f ".buildcrew/context/conventions.md.example" ]
+    export HOME="$ORIGINAL_HOME"
+}
+
+# Adversarial: user passes absurdly long flag — should get an error, not a crash.
+@test "experience: absurdly long flag produces error without crash" {
+    export ORIGINAL_HOME="$HOME"
+    export HOME="$TEST_DIR/fake-home"
+    mkdir -p "$HOME"
+    mkdir -p "$TEST_DIR/bin"
+    cat > "$TEST_DIR/bin/claude" << 'MOCKEOF'
+#!/bin/bash
+exit 0
+MOCKEOF
+    chmod +x "$TEST_DIR/bin/claude"
+    export PATH="$TEST_DIR/bin:$PATH"
+
+    local long_flag
+    long_flag="--$(printf 'x%.0s' $(seq 1 500))"
+    run "$BUILDCREW_ROOT/bin/buildcrew" init "$long_flag"
+    [ "$status" -ne 0 ]
+    # Must not be a signal-based crash
+    [ "$status" -lt 128 ]
+    export HOME="$ORIGINAL_HOME"
+}

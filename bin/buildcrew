@@ -43,7 +43,7 @@ print_help() {
     echo "    buildcrew <command> [options]"
     echo ""
     echo -e "${BOLD}COMMANDS:${NC}"
-    echo "    init             Initialize BuildCrew in current project"
+    echo "    init [--quick]   Initialize BuildCrew in current project"
     echo "    run              Execute workflow on BACKLOG.md (execution mode)"
     echo "    plan             Launch Product Manager to plan a new project or add scope"
     echo "    status           Show backlog stats and last workflow result"
@@ -125,6 +125,14 @@ _ensure_skill_symlinks() {
 }
 
 cmd_init() {
+    local quick=0
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --quick) quick=1; shift ;;
+            *) echo "Unknown option: $1" >&2; return 1 ;;
+        esac
+    done
+
     echo -e "${BOLD}Initializing BuildCrew in current project...${NC}"
     echo ""
 
@@ -460,6 +468,43 @@ EOF
         echo -e "  ${YELLOW}○${NC} Domain context example exists"
     fi
 
+    if [ ! -f ".buildcrew/context/conventions.md.example" ]; then
+        cat > .buildcrew/context/conventions.md.example << 'EOF'
+# Conventions
+
+Copy this file to `conventions.md` to tell BuildCrew about your coding conventions.
+This helps personas follow your team's established patterns and style.
+
+---
+
+## Coding Style
+
+- [e.g., Use functional style — prefer pure functions and immutable data]
+- [e.g., Max function length: 20 lines]
+
+## Naming Patterns
+
+- [e.g., React components: PascalCase (UserProfile.tsx)]
+- [e.g., Utilities: camelCase (formatDate.ts)]
+- [e.g., Constants: SCREAMING_SNAKE_CASE]
+
+## Formatting Rules
+
+- [e.g., Use Prettier with project config]
+- [e.g., 2-space indentation, no tabs]
+- [e.g., Max line length: 100 characters]
+
+## Tooling Preferences
+
+- [e.g., Package manager: pnpm]
+- [e.g., Linter: ESLint with strict config]
+- [e.g., Test framework: Vitest]
+EOF
+        echo -e "  ${GREEN}✓${NC} Created .buildcrew/context/conventions.md.example"
+    else
+        echo -e "  ${YELLOW}○${NC} Conventions context example exists"
+    fi
+
     # Create BACKLOG.md template if not present
     if [ ! -f "BACKLOG.md" ]; then
         cat > BACKLOG.md << 'EOF'
@@ -773,6 +818,36 @@ EOF
         fi
     fi
 
+    # Interactive context prompts (TTY only, not --quick)
+    if [[ -t 0 ]] && [[ $quick -eq 0 ]]; then
+        _read_context_topic() {
+            local topic="$1" prompt_text="$2"
+            if [ -f ".buildcrew/context/${topic}.md" ]; then
+                echo -e "  ${YELLOW}○${NC} ${topic}.md exists — skipping"
+                return
+            fi
+            echo -e "  ${prompt_text}"
+            echo -e "  ${DIM}(enter text line by line; blank line to finish, or just Enter to skip)${NC}"
+            local content="" line line_count=0
+            while IFS= read -r line; do
+                [ -z "$line" ] && break
+                content+="${content:+$'\n'}$line"
+                ((line_count++))
+            done
+            if [[ "$content" =~ [^[:space:]] ]]; then
+                printf '%s' "$content" > ".buildcrew/context/${topic}.md"
+                echo -e "  ${GREEN}✓${NC} Created ${topic}.md (${line_count} lines)"
+            fi
+        }
+
+        echo ""
+        echo -e "${BOLD}Project context:${NC}"
+        _read_context_topic "users" "Who are the primary users of this project?"
+        _read_context_topic "domain" "What are the key domain terms and business rules?"
+        _read_context_topic "principles" "What core principles guide this project?"
+        _read_context_topic "conventions" "What coding conventions does this project follow?"
+    fi
+
     echo ""
     echo -e "${GREEN}${BOLD}BuildCrew initialized!${NC}"
     echo ""
@@ -786,6 +861,7 @@ EOF
     echo -e "${BOLD}Optional customization:${NC}"
     echo -e "  • Copy ${CYAN}.buildcrew/workflow.md.example${NC} to ${CYAN}workflow.md${NC} to customize phases"
     echo -e "  • Copy ${CYAN}.buildcrew/rules/project-rules.md.example${NC} to add project rules"
+    echo -e "  • Copy ${CYAN}.buildcrew/context/*.md.example${NC} to add project context"
     echo ""
     echo -e "${BOLD}Next steps:${NC}"
     echo -e "  1. Run ${CYAN}buildcrew run${NC} to start"

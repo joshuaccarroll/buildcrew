@@ -880,31 +880,38 @@ _batch_stop_heartbeat() {
 
 # Trap handler for Ctrl-C during batch execution.
 _batch_parallel_cleanup() {
+    trap '' INT TERM
     echo ""
     print_warning "Batch interrupted. Terminating running tasks..."
 
-    # Kill all running child processes
+    # Kill entire process group (reaches all workers + grandchildren).
+    # Safe: trap '' INT TERM above makes orchestrator ignore this self-signal.
+    kill -- -$$ 2>/dev/null || true
+
+    # Mark still-live tracked tasks as interrupted in manifest
     local i
     for i in "${!_batch_pids[@]}"; do
         local pid="${_batch_pids[$i]:-}"
         if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then
-            kill -TERM "$pid" 2>/dev/null || true
             local manifest_idx=$((i + 1))
             _batch_mark_task "$manifest_idx" "interrupted" "130"
         fi
     done
 
-    # Wait briefly for graceful shutdown
+    # Grace period for graceful shutdown
     sleep 2
 
-    # Force-kill any remaining
+    # Force-kill any remaining tracked processes (per-PID, not process-group —
+    # SIGKILL cannot be trapped, so process-group SIGKILL would kill the orchestrator)
     for i in "${!_batch_pids[@]}"; do
         local pid="${_batch_pids[$i]:-}"
+        [[ "$pid" == "$$" ]] && continue
         if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then
             kill -KILL "$pid" 2>/dev/null || true
         fi
     done
 
+    # Reap all children
     wait 2>/dev/null || true
 
     _batch_stop_heartbeat
@@ -914,6 +921,7 @@ _batch_parallel_cleanup() {
 
     print_info "Batch state saved to $BATCH_MANIFEST"
     print_info "Resume with: buildcrew run --batch --resume"
+    return 130 2>/dev/null || exit 130
 }
 
 # Push branches and create PRs for completed tasks.
