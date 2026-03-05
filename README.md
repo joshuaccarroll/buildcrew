@@ -4,7 +4,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-BuildCrew is an autonomous development pipeline (dark factory) that uses a true "Ralph Wiggum Loop," smart subagent parallelization, and expert AI personas (Product Manager, Feature Engineer, Principal Engineer, QA Engineer, Security Engineer) that review each other's work to produce high-quality, working code autonomously.
+BuildCrew is an autonomous development pipeline (dark factory) that uses a true [Ralph Loop](https://ghuntley.com/ralph/), smart subagent parallelization, and expert AI personas (Product Manager, Feature Engineer, Principal Engineer, QA Engineer, Security Engineer) that review each other's work to produce high-quality, working code autonomously.
 
 ---
 
@@ -43,24 +43,26 @@ BuildCrew has two modes:
 
 ## The Pipeline
 
-Each task runs through up to 8 phases (each a separate Claude invocation). Total invocations are bounded by `MAX_INVOCATIONS` (default: 15).
+Each task runs through the following phases (each a separate Claude invocation). Total invocations are bounded by `MAX_INVOCATIONS` (default: 15).
 
 | # | Phase | Persona | What happens |
 |---|-------|---------|--------------|
 | 1 | Spec | PM | Converts backlog item to testable acceptance criteria |
 | 2 | Research + Plan | Research Agent | Explores codebase, creates implementation plan |
 | 3 | Plan Review | Principal Engineer | 3-pass adversarial review with cross-reference lint |
-| 3.5 | TDD Scaffold | QA Engineer | Writes failing tests before implementation (standard complexity only) |
-| 4 | Build | Feature Engineer | Implements the plan; TDD test files are locked read-only |
-| 5 | Simplify | Principal Engineer | Non-blocking targeted simplifications |
-| 6 | Code Review | Principal Engineer | Adversarial review + elegance check; may request rebuild |
-| 7 | Verify + Commit | Security Engineer | Security audit + AC cross-reference; blocks commit on vulnerabilities |
+| 4 | TDD Scaffold | QA Engineer | Writes failing tests before implementation (standard complexity) |
+| 5 | Build | Feature Engineer | Implements the plan; TDD test files are locked read-only |
+| 6 | Simplify | Principal Engineer | Non-blocking targeted simplifications |
+| 7 | Code Review | Principal Engineer | Adversarial review + elegance check; may request rebuild |
+| 8 | Verify + Commit | Security Engineer | Security audit, acceptance criteria verification, commit |
+| 9 | Inline UAT | QA Engineer | Blind scenario-based acceptance testing against README (opt out: `--no-uat`) |
 
 **Key behaviors:**
 - **Adversarial reviews** — reviewers are asked to find flaws, not approve quickly
 - **Complexity-aware skipping** — tag tasks `{trivial}`, `{simple}`, or `{standard}` to control which phases run. Auto-detected when no tag is present. Use `--full-pipeline` to force all phases.
 - **Circuit breaker** — two consecutive failures at any phase trigger a full re-plan from scratch (one re-plan attempt per task)
-- **TDD** — failing tests are written before implementation for standard-complexity tasks and validated to actually fail; tamper detection via SHA-256 checksums
+- **TDD by default** — for standard-complexity tasks, failing tests are written before implementation and validated to actually fail; tamper detection via SHA-256 checksums
+- **Inline UAT** — after verify, the project is tested against its own README by a blind agent that never sees source code. On failure, triggers a rebuild loop and retries. Opt out with `--no-uat`.
 - **Build retry feedback** — on rebuild, code review findings are injected into the build context so the agent knows what to fix
 - **Lessons system** — failures are automatically recorded in `.buildcrew/lessons.md` and injected into future runs
 - **Chunked execution** — large builds that hit max-turns are automatically split and retried
@@ -75,7 +77,7 @@ Each task runs through up to 8 phases (each a separate Claude invocation). Total
 | **UX Designer** | Design specs, HTML mockups, accessibility review | Discovery mode, `/buildcrew ux-designer:<task>` |
 | **Feature Engineer** | Pragmatic implementation following codebase patterns | Build phase, `/buildcrew feature-engineer:<task>` |
 | **Principal Engineer** | Plan review, code review, blocks over-engineering | Review phases, `/buildcrew principal-engineer:<task>` |
-| **QA Engineer** | Tests that fail meaningfully, AC cross-reference in verify | Verify phase, `/buildcrew qa-engineer:<task>` |
+| **QA Engineer** | TDD scaffolding, acceptance criteria verification | TDD Scaffold + Verify phases, `/buildcrew qa-engineer:<task>` |
 | **Security Engineer** | OWASP audits, secrets detection, blocks vulnerabilities | Verify phase, `/buildcrew security-engineer:<task>` |
 
 ---
@@ -104,8 +106,6 @@ buildcrew reset              # Clear blocked tasks and clean up artifacts
 | `--resume` | Resume an interrupted task from where it left off |
 | `--task N` | Target a specific task by name or number |
 | `--skip-spec` | Skip spec phase (task already has acceptance criteria) |
-| `--strict` | (default) Require ALL acceptance criteria to pass before commit |
-| `--no-strict` | Allow partial pass — warnings but no block |
 | `--full-pipeline` | Force all phases regardless of complexity |
 | `--interactive` | Restore interactive review pauses (spec, plan) |
 | `--sequential` | Run tasks one at a time (default is parallel). Auto-forced by `--single`, `--task`, `--review` |
@@ -143,10 +143,8 @@ Project-level config lives in `.buildcrew/config` (created by `buildcrew init`):
 | `COMPLEXITY_AWARE` | `true` | Auto-detect task complexity and skip phases. `false` = all phases |
 | `AUTO_MODE` | `true` | Auto-approve interactive pauses. `false` = prompt for review |
 | `MAX_PARALLEL` | `5` | Max concurrent tasks in parallel mode |
-| `UAT_MAX_RETRIES` | `5` | Max build-fix-test iterations in UAT watch mode |
-| `UAT_ARTIFACT_TYPE` | (auto) | Override artifact type: `cli`, `api`, `library`, `tui` |
-| `UAT_RUN_COMMAND` | (auto) | Override how to run/start the artifact |
-| `BUILD_UAT_WATCH_TIMEOUT` | `600` | Seconds to wait for UAT verdict |
+
+UAT-specific config keys (`UAT_MAX_RETRIES`, `UAT_ARTIFACT_TYPE`, `UAT_RUN_COMMAND`, `BUILD_UAT_WATCH_TIMEOUT`) are documented in the [UAT section](#uat-configuration) below.
 
 ---
 
@@ -159,14 +157,11 @@ cp .buildcrew/workflow.md.example .buildcrew/workflow.md
 ```
 
 ```markdown
-# Minimal workflow - just build, test, commit
+# Minimal workflow — just build and commit
 ## Phases
 
 ### BUILD
 agent: feature-engineer
-
-### TEST
-agent: qa-engineer
 
 ### VERIFY + COMMIT
 agent: none
@@ -208,16 +203,7 @@ When present, these are injected into every phase's prompt automatically.
 
 ## Lessons System
 
-BuildCrew learns from failures. After any failed iteration, it records a structured lesson in `.buildcrew/lessons.md` — what went wrong, what fixed it, and a rule to prevent it next time. Lessons are injected into every phase's context automatically.
-
-```bash
-buildcrew lessons              # List all recorded lessons
-buildcrew lessons promote 3    # Graduate lesson 3 to permanent project rules
-buildcrew lessons prune        # Interactively review and delete stale lessons
-buildcrew lessons lint         # Flag vague rules (e.g., "Always...", "Never...")
-```
-
-Capped at 25 entries. When exceeded, the oldest 10 are condensed into a "Patterns" summary. Duplicate rules are automatically skipped.
+BuildCrew learns from failures. After any failed iteration, it records a structured lesson in `.buildcrew/lessons.md` — what went wrong, what fixed it, and a rule to prevent it next time. Lessons are injected into every phase's context automatically. Capped at 25 entries; when exceeded, the oldest 10 are condensed into a "Patterns" summary.
 
 ---
 
@@ -225,41 +211,29 @@ Capped at 25 entries. When exceeded, the oldest 10 are condensed into a "Pattern
 
 Standalone skills that work inside or outside the BuildCrew pipeline. Invoke them directly in Claude Code.
 
-| Skill | Description |
-|-------|-------------|
-| `/simplify-all [paths]` | Review and clean up an entire codebase (or targeted paths) for reuse, quality, and efficiency. Spawns 3 parallel analysts (Reuse, Quality, Efficiency) and auto-fixes HIGH-severity findings. |
+- **`/simplify-all [paths]`** — Review and clean up an entire codebase (or targeted paths) for reuse, quality, and efficiency. Spawns 3 parallel analysts and auto-fixes HIGH-severity findings.
 
 ---
 
-## Blind UAT (User Acceptance Testing)
+## UAT (User Acceptance Testing)
 
-A blind UAT system tests your project against its README — the test agent never sees source code, the build agent never sees tests.
+After verify, a blind UAT agent tests your project against its README — it never sees source code. The build agent never sees the tests. On failure, the build agent fixes and republishes; retries up to 5 times.
 
-1. The **build side** publishes a runnable artifact
-2. The **UAT side** reads only the README, generates Given/When/Then scenarios, and executes them
-3. Failures are sent back as structured verdicts; the build agent fixes and republishes
-4. Retries up to 5 times (configurable via `UAT_MAX_RETRIES`)
-
-**Inline UAT (automatic):** UAT runs automatically after the verify phase for all non-trivial tasks. No extra flags needed — just `buildcrew run`. Use `--no-uat` to opt out.
+UAT runs automatically for non-trivial tasks. Use `--no-uat` to opt out, or run standalone:
 
 ```bash
-# Standard run — UAT happens automatically after verify
-buildcrew run
-
-# Skip UAT
-buildcrew run --no-uat
-
-# Regression test against an existing artifact
-buildcrew uat --regress /path/to/artifact
+buildcrew uat --regress /path/to/artifact   # Regression test an existing artifact
+buildcrew uat --preview                      # List scenarios without running agents
 ```
 
-| Flag | Description |
-|------|-------------|
-| `--regress <path>` | Run UAT standalone against an existing artifact |
-| `--preview` | List existing scenarios without running agents |
-| `--auto` | Log disputes without pausing |
+### UAT Configuration
 
-For projects that don't auto-detect correctly, set `UAT_ARTIFACT_TYPE` and `UAT_RUN_COMMAND` in `.buildcrew/config`.
+| Key | Default | Description |
+|-----|---------|-------------|
+| `UAT_MAX_RETRIES` | `5` | Max build-fix-test iterations |
+| `UAT_ARTIFACT_TYPE` | (auto) | Override artifact type: `cli`, `api`, `library`, `tui` |
+| `UAT_RUN_COMMAND` | (auto) | Override how to run/start the artifact |
+| `BUILD_UAT_WATCH_TIMEOUT` | `600` | Seconds to wait for UAT verdict |
 
 ---
 
@@ -302,7 +276,7 @@ Shows current phase, agent activity, and workflow state in real time. Requires P
 
 ## Acknowledgments
 
-Inspired by [The Ralph Loop](https://ghuntley.com/ralph/) by Geoffrey Huntley.
+Inspired by [The Ralph Loop](https://ghuntley.com/ralph/) by Geoffrey Huntley. 🫡
 
 ## License
 
