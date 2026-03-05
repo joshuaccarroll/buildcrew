@@ -6,15 +6,13 @@
 #
 # Manages the UAT (User Acceptance Testing) phase pipeline. Handles:
 #   - UAT directory initialization
-#   - Phase sequencing (stories, scenarios, harness, wait, setup, execute, verdict)
-#   - Artifact polling and environment setup
 #   - Server lifecycle management (start, health-check, stop)
-#   - Retry loop for failing/errored scenarios
-#   - Restart recovery (resume from last checkpoint)
+#   - Individual phase functions (stories, scenarios, harness, setup, execute, verdict)
+#   - Regress mode (single-pass execution via uat_run_regress)
 #
 # Actors:
-#   - UAT orchestrator (this file): directory init, polling, server lifecycle,
-#     file monitoring, retry loop, verdict writing
+#   - UAT orchestrator: directory init, server lifecycle, file monitoring, verdict writing
+#   - Inline UAT (workflow.sh): phase sequencing, retry loop, restart recovery
 #   - UAT Claude agent: invoked per phase via `claude -p` for stories, scenarios,
 #     harness, and execute phases
 #
@@ -34,9 +32,8 @@ __BUILDCREW_UAT_LOADED=1
 __UAT_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$__UAT_LIB_DIR/common.sh"
 source "$__UAT_LIB_DIR/uat_signal.sh"
-# Note: Do NOT source artifact.sh — that is build-side only.
-# We use read_manifest from artifact.sh only via its globals, which we replicate
-# with a local manifest reader in uat_phase_wait_artifact.
+# Note: artifact.sh is sourced by the caller (workflow.sh), not by uat.sh.
+# In inline mode, workflow.sh handles artifact publishing directly.
 
 # ─────────────────────────────────────────────────────────────────────────────────
 # UAT Configuration defaults
@@ -134,51 +131,6 @@ _uat_sha256_hash() {
         return 1
     fi
     printf '%s' "$hash"
-}
-
-# ─────────────────────────────────────────────────────────────────────────────────
-# _uat_read_manifest — read and validate manifest.json (UAT-side copy to avoid
-# sourcing artifact.sh)
-# ─────────────────────────────────────────────────────────────────────────────────
-
-_uat_read_manifest() {
-    local manifest_path="$1"
-
-    # Reset globals
-    __UAT_ARTIFACT_TYPE=""
-    __UAT_ARTIFACT_PATH=""
-    __UAT_RUN_COMMAND=""
-    __UAT_INSTALL_COMMAND=""
-    __UAT_HEALTH_CHECK=""
-    __UAT_STOP_COMMAND=""
-    __UAT_BUILD_ITERATION=""
-    __UAT_README_HASH=""
-
-    if [[ ! -f "$manifest_path" ]]; then
-        return 1
-    fi
-
-    if ! jq -e . "$manifest_path" >/dev/null 2>&1; then
-        print_warning "Invalid JSON in manifest: $manifest_path"
-        return 1
-    fi
-
-    __UAT_ARTIFACT_TYPE=$(jq -r '.artifact_type // ""' "$manifest_path")
-    __UAT_ARTIFACT_PATH=$(jq -r '.artifact_path // ""' "$manifest_path")
-    __UAT_RUN_COMMAND=$(jq -r '.run_command // ""' "$manifest_path")
-    __UAT_INSTALL_COMMAND=$(jq -r '.install_command // ""' "$manifest_path")
-    __UAT_HEALTH_CHECK=$(jq -r '.health_check // ""' "$manifest_path")
-    __UAT_STOP_COMMAND=$(jq -r '.stop_command // ""' "$manifest_path")
-    __UAT_BUILD_ITERATION=$(jq -r '.build_iteration // 0' "$manifest_path")
-    __UAT_README_HASH=$(jq -r '.readme_hash // ""' "$manifest_path")
-
-    # Validate required fields
-    if [[ -z "$__UAT_ARTIFACT_TYPE" ]] || [[ -z "$__UAT_ARTIFACT_PATH" ]]; then
-        print_warning "Manifest missing required fields: $manifest_path"
-        return 1
-    fi
-
-    return 0
 }
 
 # ─────────────────────────────────────────────────────────────────────────────────
@@ -443,7 +395,7 @@ ISOLATION_EOF
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # _uat_regress_set_artifact — Set artifact globals from a local directory
-# (used by --regress mode instead of uat_phase_wait_artifact)
+# (used by regress mode to set artifact globals from a local directory)
 # ═══════════════════════════════════════════════════════════════════════════════
 #
 # Args:
@@ -463,7 +415,7 @@ _uat_regress_set_artifact() {
         return 1
     fi
 
-    # Reset globals (same pattern as _uat_read_manifest)
+    # Reset globals
     __UAT_ARTIFACT_TYPE=""
     __UAT_ARTIFACT_PATH=""
     __UAT_RUN_COMMAND=""
@@ -521,17 +473,31 @@ _uat_regress_set_artifact() {
 }
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# 2. uat_run_phases — Main orchestrator loop
+# 2. uat_run_regress — Single-pass regression test against an existing artifact
 # ═══════════════════════════════════════════════════════════════════════════════
+#
+# Args:
+#   readme_path  — path to the project's README.md
+#   project_name — project identifier (used for signal directory)
+#   regress_path — absolute path to the artifact directory to test
+#
+# Returns:
+#   0 = all scenarios passed
+#   1 = failures/errors or fatal error
+#   2 = only disputed scenarios (no failures/errors)
 
-uat_run_phases() {
+uat_run_regress() {
     local readme_path="$1"
     local project_name="$2"
-    local auto_mode="${3:-false}"
-    local regress_path="${4:-}"
+    local regress_path="$3"
 
     if [[ -z "$readme_path" || -z "$project_name" ]]; then
-        print_error "uat_run_phases: readme_path and project_name are required"
+        print_error "uat_run_regress: readme_path and project_name are required"
+        return 1
+    fi
+
+    if [[ -z "$regress_path" ]]; then
+        print_error "uat_run_regress: regress_path is required"
         return 1
     fi
 
@@ -558,7 +524,7 @@ uat_run_phases() {
 
     local current_hash
     current_hash=$(_uat_sha256_hash "$readme_path") || {
-        print_error "uat_run_phases: failed to compute README hash"
+        print_error "uat_run_regress: failed to compute README hash"
         return 1
     }
 
@@ -595,167 +561,76 @@ uat_run_phases() {
         _uat_list_scenarios
     fi
 
-    # ── Retry loop: Phase 4 → Phase 6 ────────────────────────────────────────
+    # ── Single-pass execution ─────────────────────────────────────────────────
 
-    local retry_count=0
-    local failing_scenarios=""
+    _uat_regress_set_artifact "$regress_path" "$readme_path" || return 1
+
+    local build_iteration="$__UAT_BUILD_ITERATION"
     local signal_dir="${HOME}/.buildcrew/uat-signals/${project_name}"
 
-    while true; do
-        # Phase 4: Wait for artifact (or set from regress path)
-        if [[ -n "$regress_path" ]]; then
-            _uat_regress_set_artifact "$regress_path" "$readme_path" || return 1
-        else
-            uat_phase_wait_artifact "$project_name" || return 1
-        fi
-
-        local build_iteration="$__UAT_BUILD_ITERATION"
-
-        # Check for README changes (skip in regress mode — single-pass)
-        if [[ -z "$regress_path" ]]; then
-            if [[ -n "$__UAT_README_HASH" ]] && [[ -f .buildcrew/last_readme_hash ]]; then
-                local stored_hash
-                stored_hash=$(cat .buildcrew/last_readme_hash 2>/dev/null)
-                if [[ "$stored_hash" != "$__UAT_README_HASH" ]]; then
-                    print_info "README changed — re-running Phases 1-3"
-                    cp "$readme_path" README.md
-                    echo "$__UAT_README_HASH" > .buildcrew/last_readme_hash
-                    # Clear stale scenarios and harness
-                    rm -rf scenarios/* harness/*
-                    mkdir -p scenarios harness
-                    failing_scenarios=""
-                    uat_phase_stories || return 1
-                    uat_phase_scenarios || return 1
-                    _uat_list_scenarios
-                    uat_phase_harness || return 1
-                fi
-            fi
-        fi
-
-        # Phase 4.5: Set up artifact environment
-        local artifact_context=""
-        uat_phase_setup_env \
-            "$__UAT_ARTIFACT_TYPE" \
-            "$__UAT_ARTIFACT_PATH" \
-            "$__UAT_RUN_COMMAND" \
-            "$__UAT_INSTALL_COMMAND" \
-            "$__UAT_HEALTH_CHECK" || {
-            local setup_rc=$?
-            # Install failure → write error verdict and loop back (or exit in regress mode)
-            if [[ $setup_rc -eq 2 ]]; then
-                if [[ -n "$regress_path" ]]; then
-                    print_error "Artifact setup failed in regress mode"
-                    return 1
-                fi
-                local error_json
-                error_json=$(jq -n '[{"scenario":"artifact_setup","status":"error","summary":"Artifact install or setup failed","expected":"Artifact installs successfully","actual":"Install command exited non-zero"}]')
-                write_verdict "$signal_dir" "$error_json" "$build_iteration"
-                write_last_tested_iteration ".buildcrew" "$build_iteration"
-                print_warning "Artifact setup failed — waiting for new artifact"
-                continue
-            fi
-            return 1
-        }
-        artifact_context="$__UAT_ARTIFACT_CONTEXT"
-
-        # Clean up partial results from a previous crash at this iteration
-        local results_dir="results/iteration-${build_iteration}"
-        if [[ -d "$results_dir" ]] && [[ ! -f "${results_dir}/scenario-results.json" ]]; then
-            print_info "Clearing partial results directory: $results_dir"
-            rm -rf "$results_dir"
-        fi
-        mkdir -p "$results_dir"
-
-        # Phase 5: Execute scenarios
-        uat_phase_execute "$build_iteration" "$artifact_context" "$failing_scenarios" || {
-            # Execution failed entirely
-            if [[ -n "$regress_path" ]]; then
-                uat_stop_server
-                print_error "Phase 5 execution failed in regress mode"
-                return 1
-            fi
-            # Write error verdict
-            local error_json
-            error_json=$(jq -n '[{"scenario":"harness_execution","status":"error","summary":"Phase 5 execution failed","expected":"Test harness runs successfully","actual":"Claude agent crashed or timed out"}]')
-            write_verdict "$signal_dir" "$error_json" "$build_iteration"
-            write_last_tested_iteration ".buildcrew" "$build_iteration"
-            # Stop server if running
+    # Phase 4.5: Set up artifact environment
+    uat_phase_setup_env \
+        "$__UAT_ARTIFACT_TYPE" \
+        "$__UAT_ARTIFACT_PATH" \
+        "$__UAT_RUN_COMMAND" \
+        "$__UAT_INSTALL_COMMAND" \
+        "$__UAT_HEALTH_CHECK" || {
+        local setup_rc=$?
+        if [[ $setup_rc -eq 2 ]]; then
             uat_stop_server
-            retry_count=$((retry_count + 1))
-            if [[ $retry_count -ge $UAT_MAX_RETRIES ]]; then
-                print_error "UAT max retries ($UAT_MAX_RETRIES) exhausted"
-                _uat_print_report "$signal_dir" "$run_start_time"
-                return 1
-            fi
-            continue
-        }
+            print_error "Artifact setup failed in regress mode"
+            return 1
+        fi
+        return 1
+    }
+    local artifact_context="$__UAT_ARTIFACT_CONTEXT"
 
-        # Stop server after Phase 5 (for api type)
+    # Clean up partial results from a previous crash at this iteration
+    local results_dir="results/iteration-${build_iteration}"
+    if [[ -d "$results_dir" ]] && [[ ! -f "${results_dir}/scenario-results.json" ]]; then
+        print_info "Clearing partial results directory: $results_dir"
+        rm -rf "$results_dir"
+    fi
+    mkdir -p "$results_dir"
+
+    # Phase 5: Execute scenarios
+    uat_phase_execute "$build_iteration" "$artifact_context" "" || {
         uat_stop_server
+        print_error "Phase 5 execution failed in regress mode"
+        return 1
+    }
 
-        # Phase 6: Write verdict
-        uat_phase_verdict "$signal_dir" "$build_iteration" || {
-            # Phase 6 failed (e.g., no valid scenario results)
-            if [[ -n "$regress_path" ]]; then
-                print_error "Phase 6 verdict failed in regress mode"
-                _uat_print_report "$signal_dir" "$run_start_time"
-                return 1
-            fi
-            retry_count=$((retry_count + 1))
-            if [[ $retry_count -ge $UAT_MAX_RETRIES ]]; then
-                print_error "UAT max retries ($UAT_MAX_RETRIES) exhausted"
-                return 1
-            fi
-            continue
-        }
+    # Stop server after execution (for api type)
+    uat_stop_server
 
-        # Read the verdict we just wrote to determine next action
-        read_verdict "$signal_dir" || {
-            print_error "Failed to read verdict after writing"
-            return 1
-        }
+    # Phase 6: Write verdict
+    uat_phase_verdict "$signal_dir" "$build_iteration" || {
+        _uat_print_report "$signal_dir" "$run_start_time"
+        return 1
+    }
 
-        if [[ "$__VERDICT_STATUS" == "pass" ]]; then
-            print_success "All scenarios passed!"
-            _uat_print_report "$signal_dir" "$run_start_time"
-            return 0
-        fi
+    # Read the verdict to determine return code
+    read_verdict "$signal_dir" || {
+        print_error "Failed to read verdict after writing"
+        return 1
+    }
 
-        # Check for only disputes remaining (no failures or errors)
-        if [[ "$__VERDICT_FAILED" -eq 0 ]] && [[ "$__VERDICT_ERRORED" -eq 0 ]] && [[ "$__VERDICT_DISPUTED" -gt 0 ]]; then
-            # Only disputed scenarios remain
-            if [[ "$auto_mode" == "true" ]]; then
-                print_info "Only disputed scenarios remain (auto mode) — exiting with code 2"
-                _uat_print_report "$signal_dir" "$run_start_time"
-                return 2
-            else
-                print_warning "Only disputed scenarios remain. Check disputes.md for details."
-                _uat_print_report "$signal_dir" "$run_start_time"
-                return 2
-            fi
-        fi
+    if [[ "$__VERDICT_STATUS" == "pass" ]]; then
+        print_success "All scenarios passed!"
+        _uat_print_report "$signal_dir" "$run_start_time"
+        return 0
+    fi
 
-        # In regress mode, exit after single pass — no retry loop
-        if [[ -n "$regress_path" ]]; then
-            print_error "Regress mode: ${__VERDICT_FAILED} failures, ${__VERDICT_ERRORED} errors"
-            _uat_print_report "$signal_dir" "$run_start_time"
-            return 1
-        fi
+    # Check for only disputes remaining (no failures or errors)
+    if [[ "$__VERDICT_FAILED" -eq 0 ]] && [[ "$__VERDICT_ERRORED" -eq 0 ]] && [[ "$__VERDICT_DISPUTED" -gt 0 ]]; then
+        _uat_print_report "$signal_dir" "$run_start_time"
+        return 2
+    fi
 
-        # Failures or errors exist — extract failing scenario names for retry
-        failing_scenarios=$(echo "$__VERDICT_SCENARIOS_JSON" | jq -r '.[] | select(.status == "fail" or .status == "error") | .scenario' 2>/dev/null | tr '\n' '|')
-        failing_scenarios="${failing_scenarios%|}"  # Strip trailing delimiter
-
-        retry_count=$((retry_count + 1))
-        if [[ $retry_count -ge $UAT_MAX_RETRIES ]]; then
-            print_error "UAT max retries ($UAT_MAX_RETRIES) exhausted — $__VERDICT_FAILED failures, $__VERDICT_ERRORED errors remain"
-            _uat_print_report "$signal_dir" "$run_start_time"
-            return 1
-        fi
-
-        print_info "Retry $retry_count/$UAT_MAX_RETRIES — waiting for new artifact (${__VERDICT_FAILED} failures, ${__VERDICT_ERRORED} errors)"
-        _uat_print_retry_context "$__VERDICT_SCENARIOS_JSON"
-    done
+    # Failures or errors
+    print_error "Regress mode: ${__VERDICT_FAILED} failures, ${__VERDICT_ERRORED} errors"
+    _uat_print_report "$signal_dir" "$run_start_time"
+    return 1
 }
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -927,54 +802,7 @@ _uat_run_agent_phase() {
 }
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# 6. uat_phase_wait_artifact — Phase 4: Wait for Artifact (Orchestrator only)
-# ═══════════════════════════════════════════════════════════════════════════════
-
-uat_phase_wait_artifact() {
-    local project_name="$1"
-
-    if [[ -z "$project_name" ]]; then
-        print_error "uat_phase_wait_artifact: project_name is required"
-        return 1
-    fi
-
-    print_header "UAT Phase 4: Wait for Artifact"
-
-    local artifact_dir="${UAT_ARTIFACT_DIR:-${HOME}/.buildcrew/artifacts}/${project_name}"
-    local manifest_path="${artifact_dir}/manifest.json"
-
-    # Read last tested iteration
-    local last_tested
-    last_tested=$(read_last_tested_iteration ".buildcrew")
-
-    local elapsed=0
-
-    print_info "Polling for artifact manifest: $manifest_path (timeout: ${UAT_ARTIFACT_TIMEOUT}s)"
-
-    while true; do
-        if [[ $elapsed -ge $UAT_ARTIFACT_TIMEOUT ]]; then
-            print_error "Artifact not published within timeout. Is \`buildcrew run --uat\` running?"
-            return 1
-        fi
-
-        if [[ -f "$manifest_path" ]]; then
-            # Read and validate manifest
-            if _uat_read_manifest "$manifest_path"; then
-                # Check if this is a new iteration
-                if [[ "$__UAT_BUILD_ITERATION" -gt "$last_tested" ]]; then
-                    print_success "Artifact found: type=$__UAT_ARTIFACT_TYPE iteration=$__UAT_BUILD_ITERATION"
-                    return 0
-                fi
-            fi
-        fi
-
-        sleep "$UAT_POLL_INTERVAL"
-        elapsed=$((elapsed + UAT_POLL_INTERVAL))
-    done
-}
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# 7. uat_phase_setup_env — Phase 4.5: Set Up Artifact Environment
+# 6. uat_phase_setup_env — Phase 4.5: Set Up Artifact Environment
 # ═══════════════════════════════════════════════════════════════════════════════
 #
 # Returns:

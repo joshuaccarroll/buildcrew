@@ -56,7 +56,7 @@ print_help() {
     echo "    lessons lint     Check lessons for vague or weak rules"
     echo "    plugins          Show recommended plugins for your project"
     echo "    update           Check for and install updates"
-    echo "    uat              Run blind UAT against a project's README"
+    echo "    uat              Run UAT regression tests against an artifact"
     echo "    dash             Manage the buildcrew-dash terminal dashboard"
     echo "    version          Show version information"
     echo "    uninstall        Remove BuildCrew from system"
@@ -76,7 +76,8 @@ print_help() {
     echo "    --full-pipeline  Force all phases regardless of complexity assessment (with 'run')"
     echo "    --auto        (deprecated) Auto mode is now the default. Use --interactive to opt out (with 'run')"
     echo "    --interactive Restore interactive review pauses (with 'run')"
-    echo "    --uat         After build completes, enter watch mode for UAT verdicts (with 'run')"
+    echo "    --tdd         (deprecated) TDD is enabled by default; this flag is a no-op"
+    echo "    --no-tdd      Disable TDD mode (skip tdd-scaffold phase for standard tasks)"
     echo "    --sequential  Run tasks one at a time (opt out of parallel batch mode, with 'run')"
     echo "    --batch       (deprecated) Batch mode is now the default (with 'run')"
     echo "    --max-parallel N  Max concurrent tasks in parallel mode (default: 5, with 'run')"
@@ -2050,9 +2051,6 @@ _dash_uninstall() { _dash_download_and_run "uninstall.sh"; }
 cmd_uat() {
     local readme_path=""
     local project_name=""
-    local artifact_dir=""
-    local signal_dir=""
-    local uat_auto=false
     local regress_path=""
     local uat_preview=false
 
@@ -2075,22 +2073,6 @@ cmd_uat() {
                 project_name="$2"
                 shift 2
                 ;;
-            --artifact-dir)
-                if [[ -z "${2:-}" ]]; then
-                    echo -e "${RED}Error:${NC} --artifact-dir requires a path argument"
-                    exit 1
-                fi
-                artifact_dir="$2"
-                shift 2
-                ;;
-            --signal-dir)
-                if [[ -z "${2:-}" ]]; then
-                    echo -e "${RED}Error:${NC} --signal-dir requires a path argument"
-                    exit 1
-                fi
-                signal_dir="$2"
-                shift 2
-                ;;
             --regress)
                 if [[ -z "${2:-}" ]]; then
                     echo -e "${RED}Error:${NC} --regress requires a path argument"
@@ -2099,34 +2081,30 @@ cmd_uat() {
                 regress_path="$2"
                 shift 2
                 ;;
-            --auto)
-                uat_auto=true
-                shift
-                ;;
             --preview)
                 uat_preview=true
                 shift
                 ;;
             --help|-h)
-                echo -e "${BOLD}buildcrew uat${NC} — Blind scenario-based acceptance testing"
+                echo -e "${BOLD}buildcrew uat${NC} — Run UAT regression tests against an artifact"
                 echo ""
                 echo -e "${BOLD}USAGE:${NC}"
-                echo "    buildcrew uat --readme <path> [options]"
+                echo "    buildcrew uat --regress <path> --readme <path> [options]"
                 echo ""
                 echo -e "${BOLD}OPTIONS:${NC}"
-                echo "    --readme <path>        Path to the project's README.md (required)"
+                echo "    --regress <path>       Path to the artifact directory to test (required)"
+                echo "    --readme <path>        Path to the project's README.md (required with --regress)"
                 echo "    --project <name>       Project identifier (default: derived from README parent dir)"
-                echo "    --artifact-dir <path>  Where to find the built artifact"
-                echo "    --signal-dir <path>    Where to write signal/verdict files"
-                echo "    --regress <path>       Run UAT standalone against an existing artifact directory (implies --auto)"
-                echo "    --auto                 Auto mode: log disputes without pausing"
                 echo "    --preview              List existing scenarios without running agents (read-only)"
                 echo "    --help, -h             Show this help message"
                 echo ""
                 echo -e "${BOLD}EXAMPLES:${NC}"
-                echo "    buildcrew uat --readme ../my-project/README.md"
-                echo "    buildcrew uat --readme ../my-project/README.md --regress /path/to/artifact"
+                echo "    buildcrew uat --regress /path/to/artifact --readme ../my-project/README.md"
                 echo "    buildcrew uat --preview"
+                echo ""
+                echo -e "${BOLD}NOTE:${NC}"
+                echo "    UAT is now automatic during 'buildcrew run'."
+                echo "    Use this command for regression testing against an existing artifact."
                 exit 0
                 ;;
             *)
@@ -2149,16 +2127,23 @@ cmd_uat() {
         source "$BUILDCREW_HOME/lib/uat.sh"
         print_header "UAT Preview"
         if [[ ! -d "scenarios" ]]; then
-            print_info "No scenarios found. Run 'buildcrew uat --readme <path>' first."
+            print_info "No scenarios found. Run 'buildcrew uat --regress <path> --readme <path>' first."
         else
             _uat_list_scenarios
         fi
         exit 0
     fi
 
-    # Validate --readme is provided and readable
+    # Require --regress for non-preview mode
+    if [[ -z "$regress_path" ]]; then
+        echo -e "${RED}Error:${NC} UAT is now automatic during 'buildcrew run'. Use 'buildcrew uat --regress <path>' for regression testing."
+        echo "Run 'buildcrew uat --help' for usage."
+        exit 1
+    fi
+
+    # Validate --readme is provided and readable (required with --regress)
     if [[ -z "$readme_path" ]]; then
-        echo -e "${RED}Error:${NC} --readme is required"
+        echo -e "${RED}Error:${NC} --readme is required with --regress"
         echo "Run 'buildcrew uat --help' for usage."
         exit 1
     fi
@@ -2185,26 +2170,17 @@ cmd_uat() {
         exit 1
     fi
 
-    # Validate --regress
-    if [[ -n "$regress_path" ]]; then
-        # Conflicts with --artifact-dir
-        if [[ -n "$artifact_dir" ]]; then
-            echo -e "${RED}Error:${NC} --regress and --artifact-dir cannot be used together"
-            exit 1
-        fi
-        # Resolve to absolute path
-        if command -v realpath >/dev/null 2>&1; then
-            regress_path="$(realpath "$regress_path" 2>/dev/null)" || true
-        else
-            regress_path="$(cd "$(dirname "$regress_path")" 2>/dev/null && pwd)/$(basename "$regress_path")"
-        fi
-        # Must be a directory
-        if [[ ! -d "$regress_path" ]]; then
-            echo -e "${RED}Error:${NC} --regress path is not a directory: $regress_path"
-            exit 1
-        fi
-        # --regress implies --auto
-        uat_auto=true
+    # Validate --regress path
+    # Resolve to absolute path
+    if command -v realpath >/dev/null 2>&1; then
+        regress_path="$(realpath "$regress_path" 2>/dev/null)" || true
+    else
+        regress_path="$(cd "$(dirname "$regress_path")" 2>/dev/null && pwd)/$(basename "$regress_path")"
+    fi
+    # Must be a directory
+    if [[ ! -d "$regress_path" ]]; then
+        echo -e "${RED}Error:${NC} --regress path is not a directory: $regress_path"
+        exit 1
     fi
 
     # Source UAT libraries
@@ -2214,13 +2190,10 @@ cmd_uat() {
     # Export variables for uat.sh
     export UAT_README_PATH="$readme_path"
     export UAT_PROJECT_NAME="$project_name"
-    export UAT_AUTO_MODE="$uat_auto"
-    [[ -n "$artifact_dir" ]] && export UAT_ARTIFACT_DIR_OVERRIDE="$artifact_dir"
-    [[ -n "$signal_dir" ]] && export UAT_SIGNAL_DIR_OVERRIDE="$signal_dir"
 
-    # Initialize and run UAT phases
+    # Initialize and run regress mode
     uat_init "$readme_path" "$project_name"
-    uat_run_phases "$readme_path" "$project_name" "$uat_auto" "$regress_path"
+    uat_run_regress "$readme_path" "$project_name" "$regress_path"
 }
 
 cmd_dash() {
