@@ -2558,6 +2558,21 @@ EOF
     print_info "Lesson recorded in $LESSONS_FILE"
 }
 
+# Check whether new lessons were recorded during a task and print a nudge.
+# Usage: _check_lessons_nudge <lessons_before_count>
+_check_lessons_nudge() {
+    local lessons_before="${1:-0}"
+    local lessons_after=0
+    if [[ -f "$LESSONS_FILE" ]]; then
+        lessons_after=$(grep -c '^## Lesson' "$LESSONS_FILE" 2>/dev/null) || lessons_after=0
+    fi
+    local new_lessons=$(( lessons_after - lessons_before ))
+    if (( new_lessons > 0 )); then
+        print_info "$new_lessons new lesson(s) recorded from this task. Run 'buildcrew lessons' to review."
+        print_info "Tip: 'buildcrew lessons promote <N>' graduates a lesson to permanent project rules."
+    fi
+}
+
 # Summarize oldest LESSONS_SUMMARIZE_COUNT entries into a Patterns section.
 _summarize_old_lessons() {
     local tmp_file
@@ -3442,6 +3457,12 @@ process_task_isolated() {
     local __lesson_instruction
     __lesson_instruction="$(_lesson_writing_instruction)"
 
+    # Snapshot lesson count before task starts (for post-task nudge)
+    local __lessons_before=0
+    if [[ -f "$LESSONS_FILE" ]]; then
+        __lessons_before=$(grep -c '^## Lesson' "$LESSONS_FILE" 2>/dev/null) || __lessons_before=0
+    fi
+
     # Resume or fresh start
     if [[ "$RESUME_MODE" == "true" ]] && load_task_progress; then
         if [[ "$__RESUME_TASK" == "$task" ]] || [[ -z "$task" ]]; then
@@ -4006,6 +4027,7 @@ process_task_isolated() {
     clear_task_progress
     rm -f "$CURRENT_TASK_FILE"
     mark_task_complete "$task"
+    _check_lessons_nudge "$__lessons_before"
     local summary
     summary=$(jq -r '.summary // "Completed"' "$STATUS_FILE" 2>/dev/null || echo "Completed")
     print_success "Completed: $task"

@@ -1,0 +1,18 @@
+{
+  "test_files": ["tests/tdd/lessons_nudge.bats"],
+  "stub_files": ["lib/workflow.sh"],
+  "test_dir": "tests/tdd",
+  "test_count": 9,
+  "all_failing": true,
+  "framework": "bats",
+  "run_command": "bats tests/tdd/lessons_nudge.bats",
+  "ac_coverage": {
+    "AC-01": ["AC-01: _check_lessons_nudge is a callable function", "AC-01: nudge appears when lessons_after > lessons_before"],
+    "AC-02": ["AC-02: nudge shows exact count of 1 new lesson", "AC-02: nudge shows exact count of 3 new lessons"],
+    "AC-03": ["AC-03: no nudge when lessons count unchanged", "AC-03: no nudge when no lessons file exists", "AC-03: no nudge when lessons_after < lessons_before (summarization)"],
+    "AC-05": ["AC-05: nudge includes buildcrew lessons review tip", "AC-05: nudge includes promote tip with correct syntax"]
+  },
+  "checksums": {
+    "tests/tdd/lessons_nudge.bats": "6ee1ebaa1b3b5a33ae7499179625dbed3022c899176003da0677dcfbf74c849e"
+  }
+}
