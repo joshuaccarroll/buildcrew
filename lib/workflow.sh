@@ -3289,13 +3289,22 @@ run_inline_uat() {
     mkdir -p "$uat_dir"
     cd "$uat_dir" || { print_error "Failed to cd to UAT directory"; cd "$project_dir"; return 1; }
 
-    # Set up cleanup trap
+    # Save existing trap and set up cleanup trap
+    local __saved_trap
+    __saved_trap=$(trap -p INT TERM)
     local __inline_uat_cleaned=false
     _inline_uat_cleanup() {
         [[ "$__inline_uat_cleaned" == "true" ]] && return
         __inline_uat_cleaned=true
         uat_stop_server 2>/dev/null || true
+        rm -rf "$uat_dir" 2>/dev/null || true
         cd "$project_dir" 2>/dev/null || true
+        # Restore caller's trap
+        if [[ -n "$__saved_trap" ]]; then
+            eval "$__saved_trap"
+        else
+            trap - INT TERM
+        fi
     }
     trap '_inline_uat_cleanup; exit 130' INT TERM
 
@@ -3306,9 +3315,6 @@ run_inline_uat() {
         _inline_uat_cleanup
         return 1
     }
-
-    # 5. Load UAT config
-    load_uat_config
 
     local run_start_time
     run_start_time=$(date +%s)
@@ -3326,6 +3332,21 @@ run_inline_uat() {
     local max_retries="${UAT_MAX_RETRIES:-3}"
     local failing_scenarios=""
     local build_iteration="$__UAT_BUILD_ITERATION"
+
+    # Helper: rebuild → republish → re-bridge → regen harness
+    # Must be called while cwd is $project_dir
+    _uat_republish_and_regen() {
+        local __regen_task="$1"
+        local __regen_complexity="$2"
+        local __regen_context="$3"
+        _uat_rebuild_pipeline "$__regen_task" "$__regen_complexity" "$__regen_context" || return 1
+        publish_artifact "$project_name" || return 1
+        read_manifest "$manifest_path" || return 1
+        _bridge_manifest_to_uat
+        build_iteration="$__UAT_BUILD_ITERATION"
+        cd "$uat_dir" || return 1
+        uat_phase_harness || return 1
+    }
 
     while true; do
         cd "$uat_dir" || { print_error "Failed to cd to UAT dir"; cd "$project_dir"; return 1; }
@@ -3354,14 +3375,9 @@ run_inline_uat() {
                 fi
                 print_warning "Artifact setup failed — rebuilding (retry $retry_count/$max_retries)"
                 cd "$project_dir" || { _inline_uat_cleanup; return 1; }
-                local uat_rebuild_context="UAT failure context: Artifact setup/install failed. Check .buildcrew/uat-context.md for details. Do NOT access the UAT directory or scenarios."
-                _uat_rebuild_pipeline "$task" "$task_complexity" "$uat_rebuild_context" || { _inline_uat_cleanup; return 1; }
-                publish_artifact "$project_name" || { _inline_uat_cleanup; return 1; }
-                read_manifest "$manifest_path" || { _inline_uat_cleanup; return 1; }
-                _bridge_manifest_to_uat
-                build_iteration="$__UAT_BUILD_ITERATION"
-                cd "$uat_dir" || { _inline_uat_cleanup; return 1; }
-                uat_phase_harness || { _inline_uat_cleanup; return 1; }
+                _uat_republish_and_regen "$task" "$task_complexity" \
+                    "UAT failure context: Artifact setup/install failed. Check .buildcrew/uat-context.md for details. Do NOT access the UAT directory or scenarios." \
+                    || { _inline_uat_cleanup; return 1; }
                 continue
             fi
             # Fatal setup error
@@ -3384,6 +3400,7 @@ run_inline_uat() {
             write_verdict "$signal_dir" "$error_json" "$build_iteration"
             write_last_tested_iteration ".buildcrew" "$build_iteration"
             uat_stop_server
+            failing_scenarios=""
             retry_count=$((retry_count + 1))
             if [[ $retry_count -ge $max_retries ]]; then
                 print_error "UAT max retries ($max_retries) exhausted"
@@ -3407,7 +3424,6 @@ run_inline_uat() {
             fi
             continue
         }
-        write_last_tested_iteration ".buildcrew" "$build_iteration"
 
         # Read verdict
         read_verdict "$signal_dir" || {
@@ -3447,25 +3463,17 @@ run_inline_uat() {
         print_warning "Inline UAT: ${__VERDICT_FAILED} failures, ${__VERDICT_ERRORED} errors (retry $retry_count/$max_retries)"
         _uat_print_retry_context "$__VERDICT_SCENARIOS_JSON"
 
-        # Write context for rebuild
-        write_uat_context "$signal_dir/verdict.json" "$retry_count" "$max_retries" || true
-
-        # cd back to project for rebuild
+        # cd back to project for rebuild (must happen before write_uat_context
+        # which writes .buildcrew/uat-context.md via relative path)
         cd "$project_dir" || { _inline_uat_cleanup; return 1; }
 
-        # Rebuild pipeline: build → simplify → codereview → test → verify
-        local uat_rebuild_context="UAT failure context is in .buildcrew/uat-context.md — read it and fix the issues. Do NOT access the UAT directory or scenarios."
-        _uat_rebuild_pipeline "$task" "$task_complexity" "$uat_rebuild_context" || { _inline_uat_cleanup; return 1; }
+        # Write context for rebuild (cwd must be project_dir)
+        write_uat_context "$signal_dir/verdict.json" "$retry_count" "$max_retries" || true
 
-        # Republish artifact and re-bridge globals
-        publish_artifact "$project_name" || { _inline_uat_cleanup; return 1; }
-        read_manifest "$manifest_path" || { _inline_uat_cleanup; return 1; }
-        _bridge_manifest_to_uat
-        build_iteration="$__UAT_BUILD_ITERATION"
-
-        # Regen harness for rebuilt artifact
-        cd "$uat_dir" || { _inline_uat_cleanup; return 1; }
-        uat_phase_harness || { _inline_uat_cleanup; return 1; }
+        # Republish, re-bridge, regen harness
+        _uat_republish_and_regen "$task" "$task_complexity" \
+            "UAT failure context is in .buildcrew/uat-context.md — read it and fix the issues. Do NOT access the UAT directory or scenarios." \
+            || { _inline_uat_cleanup; return 1; }
     done
 }
 
@@ -4123,7 +4131,7 @@ process_task_isolated() {
             run_inline_uat "$project_name" "$task_for_uat" "$task_complexity" || uat_result=$?
             if [[ $uat_result -eq 2 ]]; then
                 print_warning "UAT completed with disputed scenarios (exit 2)"
-                exit 2
+                return 2
             elif [[ $uat_result -ne 0 ]]; then
                 print_error "Inline UAT failed"
                 return 1
@@ -4529,13 +4537,13 @@ main() {
             ((task_num++))
             __WF_TASK_NUM="$task_num"
             local task_result=0
-            if process_task_isolated "$task" "$task_num" "$total_tasks" "$task_complexity" "$plan_ref"; then
-                task_result=0
-            else
-                task_result=1
-            fi
+            process_task_isolated "$task" "$task_num" "$total_tasks" "$task_complexity" "$plan_ref" || task_result=$?
 
             if [[ $task_result -eq 0 ]]; then
+                ((completed++))
+            elif [[ $task_result -eq 2 ]]; then
+                # UAT disputed — task completed but with disputed scenarios
+                print_warning "Task completed with disputed UAT scenarios: $task"
                 ((completed++))
             else
                 ((failed++))
@@ -4543,12 +4551,12 @@ main() {
 
             # Branch cleanup: PR, return to base, sync backlog
             if [[ "$GIT_BRANCH" == "true" ]]; then
-                if [[ $task_result -eq 0 ]]; then
+                if [[ $task_result -eq 0 || $task_result -eq 2 ]]; then
                     create_task_pr "$task" || true
                 fi
                 return_to_original_branch
                 # Sync task status to base branch
-                if [[ $task_result -eq 0 ]]; then
+                if [[ $task_result -eq 0 || $task_result -eq 2 ]]; then
                     mark_task_complete "$task"
                 else
                     mark_task_blocked "$task" "See feature branch for details"
