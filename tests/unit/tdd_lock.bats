@@ -16,24 +16,12 @@ teardown() {
 # __lock_tdd_files
 # ─────────────────────────────────────────────────────────────────────────────
 
-@test "__lock_tdd_files: no-op when TDD_MODE=false" {
-    TDD_MODE=false
-    mkdir -p .claude tests/tdd
-    echo "test" > tests/tdd/test_ac01.test.ts
-    echo '{"test_files": ["tests/tdd/test_ac01.test.ts"]}' > .claude/tdd-manifest.json
-    __lock_tdd_files
-    # File should still be writable
-    [ -w "tests/tdd/test_ac01.test.ts" ]
-}
-
 @test "__lock_tdd_files: no-op when manifest missing" {
-    TDD_MODE=true
     __lock_tdd_files
     # Should not error
 }
 
 @test "__lock_tdd_files: makes test files read-only" {
-    TDD_MODE=true
     mkdir -p .claude tests/tdd
     echo "test" > tests/tdd/test_ac01.test.ts
     echo "test2" > tests/tdd/test_ac02.test.ts
@@ -50,7 +38,6 @@ EOF
 # ─────────────────────────────────────────────────────────────────────────────
 
 @test "__unlock_tdd_files: restores write permission" {
-    TDD_MODE=true
     mkdir -p .claude tests/tdd
     echo "test" > tests/tdd/test_ac01.test.ts
     echo '{"test_files": ["tests/tdd/test_ac01.test.ts"]}' > .claude/tdd-manifest.json
@@ -60,25 +47,11 @@ EOF
     [ -w "tests/tdd/test_ac01.test.ts" ]
 }
 
-@test "__unlock_tdd_files: no-op when TDD_MODE=false" {
-    TDD_MODE=false
-    mkdir -p .claude tests/tdd
-    echo "test" > tests/tdd/test_ac01.test.ts
-    echo '{"test_files": ["tests/tdd/test_ac01.test.ts"]}' > .claude/tdd-manifest.json
-    chmod a-w tests/tdd/test_ac01.test.ts
-    __unlock_tdd_files
-    # Should still be read-only
-    [ ! -w "tests/tdd/test_ac01.test.ts" ]
-    # Clean up for teardown
-    chmod u+w tests/tdd/test_ac01.test.ts
-}
-
 # ─────────────────────────────────────────────────────────────────────────────
 # __with_tdd_lock
 # ─────────────────────────────────────────────────────────────────────────────
 
 @test "__with_tdd_lock: locks before command and unlocks after" {
-    TDD_MODE=true
     mkdir -p .claude tests/tdd
     echo "test" > tests/tdd/test_ac01.test.ts
     echo '{"test_files": ["tests/tdd/test_ac01.test.ts"]}' > .claude/tdd-manifest.json
@@ -94,7 +67,6 @@ EOF
 }
 
 @test "__with_tdd_lock: unlocks even when command fails" {
-    TDD_MODE=true
     mkdir -p .claude tests/tdd
     echo "test" > tests/tdd/test_ac01.test.ts
     echo '{"test_files": ["tests/tdd/test_ac01.test.ts"]}' > .claude/tdd-manifest.json
@@ -108,7 +80,6 @@ EOF
 }
 
 @test "__with_tdd_lock: propagates exit code" {
-    TDD_MODE=true
     mkdir -p .claude tests/tdd
     echo "test" > tests/tdd/test_ac01.test.ts
     echo '{"test_files": ["tests/tdd/test_ac01.test.ts"]}' > .claude/tdd-manifest.json
@@ -120,7 +91,6 @@ EOF
 }
 
 @test "__lock_tdd_files: handles missing test files gracefully" {
-    TDD_MODE=true
     mkdir -p .claude
     echo '{"test_files": ["nonexistent/file.ts"]}' > .claude/tdd-manifest.json
     # Should not error

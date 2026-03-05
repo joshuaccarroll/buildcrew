@@ -62,7 +62,7 @@ Each task runs through up to 10 phases (each a separate Claude invocation). Tota
 - **Adversarial reviews** — reviewers are asked to find flaws, not approve quickly
 - **Complexity-aware skipping** — tag tasks `{trivial}`, `{simple}`, or `{standard}` to control which phases run. Auto-detected when no tag is present. Use `--full-pipeline` to force all phases.
 - **Circuit breaker** — two consecutive failures at any phase trigger a full re-plan from scratch (one re-plan attempt per task)
-- **TDD by default** — failing tests are written before implementation and validated to actually fail; tamper detection via SHA-256 checksums. Disable with `--no-tdd`
+- **TDD** — failing tests are written before implementation for standard-complexity tasks and validated to actually fail; tamper detection via SHA-256 checksums
 - **Build retry feedback** — on rebuild, code review findings are injected into the build context so the agent knows what to fix
 - **Lessons system** — failures are automatically recorded in `.buildcrew/lessons.md` and injected into future runs
 - **Chunked execution** — large builds that hit max-turns are automatically split and retried
@@ -112,7 +112,6 @@ buildcrew reset              # Clear blocked tasks and clean up artifacts
 | `--interactive` | Restore interactive review pauses (spec, plan). Incompatible with `--uat` |
 | `--sequential` | Run tasks one at a time (default is parallel). Auto-forced by `--single`, `--task`, `--review`, `--uat` |
 | `--max-parallel N` | Max concurrent tasks in parallel mode (default: 5) |
-| `--no-tdd` | Disable TDD mode. Also configurable via `TDD_MODE=false` in `.buildcrew/config` |
 | `--uat` | After build, enter watch mode for UAT verdicts. Implies auto mode |
 | `--max-invocations N` | Max Claude invocations per run (default: 15) |
 | `--verbose` / `--debug` | Show orchestrator decisions, phase verdicts, invocation counts |
@@ -145,7 +144,6 @@ Project-level config lives in `.buildcrew/config` (created by `buildcrew init`):
 | `MAX_INVOCATIONS` | `15` | Max Claude invocations per run |
 | `COMPLEXITY_AWARE` | `true` | Auto-detect task complexity and skip phases. `false` = all phases |
 | `AUTO_MODE` | `true` | Auto-approve interactive pauses. `false` = prompt for review |
-| `TDD_MODE` | `true` | Write failing tests before build (standard complexity only) |
 | `MAX_PARALLEL` | `5` | Max concurrent tasks in parallel mode |
 | `UAT_MAX_RETRIES` | `5` | Max build-fix-test iterations in UAT watch mode |
 | `UAT_ARTIFACT_TYPE` | (auto) | Override artifact type: `cli`, `api`, `library`, `tui` |

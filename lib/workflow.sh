@@ -90,16 +90,6 @@ load_buildcrew_config() {
                         fi
                     fi
                     ;;
-                TDD_MODE)
-                    if [[ -z "${TDD_MODE+x}" ]]; then
-                        if [[ "$value" == "true" || "$value" == "false" ]]; then
-                            TDD_MODE="$value"
-                            TDD_MODE_EXPLICIT=true
-                        else
-                            echo "Warning: invalid TDD_MODE in .buildcrew/config: $value (ignored, must be true or false)" >&2
-                        fi
-                    fi
-                    ;;
                 KEEP_LOGS)
                     echo "Warning: KEEP_LOGS in .buildcrew/config is deprecated (logs are now always retained). Remove it from your config." >&2
                     ;;
@@ -135,16 +125,10 @@ MAX_TURNS=100
 PAUSE_BETWEEN_TASKS=5
 # 1. Load project config (only sets vars not already in environment)
 load_buildcrew_config
-# 2. Track if TDD_MODE was set via environment variable (not by config loader)
-if [[ -n "${TDD_MODE+x}" ]] && [[ "${TDD_MODE_EXPLICIT:-}" != "true" ]]; then
-    TDD_MODE_EXPLICIT=true
-fi
-# 3. Fall back to built-in default if nothing set it
+# 2. Fall back to built-in default if nothing set it
 MAX_INVOCATIONS=${MAX_INVOCATIONS:-15}
 COMPLEXITY_AWARE=${COMPLEXITY_AWARE:-true}
 AUTO_MODE=${AUTO_MODE:-true}
-TDD_MODE=${TDD_MODE:-true}
-TDD_MODE_EXPLICIT=${TDD_MODE_EXPLICIT:-false}
 MAX_PARALLEL=${MAX_PARALLEL:-5}
 TARGET_DIR=${TARGET_DIR:-}
 _BATCH_BUILD_ONLY=${_BATCH_BUILD_ONLY:-false}
@@ -284,17 +268,6 @@ parse_args() {
                 AUTO_MODE=true  # --uat requires auto mode (enforced)
                 shift
                 ;;
-            --tdd)
-                TDD_MODE=true
-                TDD_MODE_EXPLICIT=true
-                TDD_MODE_FLAG_USED=true
-                shift
-                ;;
-            --no-tdd)
-                TDD_MODE=false
-                TDD_MODE_EXPLICIT=true
-                shift
-                ;;
             --batch)
                 print_warning "--batch is deprecated (batch mode is now the default). Use --sequential to opt out."
                 shift
@@ -341,8 +314,6 @@ parse_args() {
                 echo "  --auto       (deprecated) Auto mode is now the default. Use --interactive to opt out"
                 echo "  --interactive Restore interactive pauses (spec review, plan review, human review)"
                 echo "  --uat        After build completes, enter watch mode for UAT verdicts (implies --auto)"
-                echo "  --tdd        (deprecated) TDD is now enabled by default; this flag is a no-op"
-                echo "  --no-tdd     Disable TDD mode (skip tdd-scaffold phase)"
                 echo "  --sequential Run tasks one at a time (opt out of parallel batch mode)"
                 echo "  --batch      (deprecated) Batch mode is now the default"
                 echo "  --max-parallel N  Max concurrent tasks in parallel mode (default: 5)"
@@ -378,7 +349,7 @@ parse_args() {
 # Echoes: augmented prompt (or original if TDD inactive/inapplicable)
 __inject_tdd_prompt() {
     local phase="$1" prompt="$2"
-    if [[ "$TDD_MODE" != "true" ]] || [[ ! -f ".claude/tdd-manifest.json" ]]; then
+    if [[ ! -f ".claude/tdd-manifest.json" ]]; then
         printf '%s' "$prompt"; return
     fi
     local tdd_test_count
@@ -403,7 +374,6 @@ __inject_tdd_prompt() {
 # the canonical gate, but chmod provides a first line of defence.
 # Args: none (reads .claude/tdd-manifest.json)
 __lock_tdd_files() {
-    [[ "$TDD_MODE" == "true" ]] || return 0
     [[ -f ".claude/tdd-manifest.json" ]] || return 0
     local _f
     for _f in $(jq -r '.test_files[]? // empty' ".claude/tdd-manifest.json" 2>/dev/null); do
@@ -414,7 +384,6 @@ __lock_tdd_files() {
 # Restore write permissions on TDD test files after the build phase.
 # Must be called even if the build fails (use __with_tdd_lock for safety).
 __unlock_tdd_files() {
-    [[ "$TDD_MODE" == "true" ]] || return 0
     [[ -f ".claude/tdd-manifest.json" ]] || return 0
     local _f
     for _f in $(jq -r '.test_files[]? // empty' ".claude/tdd-manifest.json" 2>/dev/null); do
@@ -449,7 +418,6 @@ __run_with_timeout() {
 # If tests pass (exit 0) the scaffold is invalid — tests should fail before build.
 # Returns 0 if validation passes (tests failed as expected), 1 otherwise.
 __validate_tdd_scaffold() {
-    [[ "$TDD_MODE" == "true" ]] || return 0
     [[ -f ".claude/tdd-manifest.json" ]] || return 0
     local test_cmd
     test_cmd=$(jq -r '.test_command // ""' ".claude/tdd-manifest.json" 2>/dev/null)
@@ -474,7 +442,6 @@ __validate_tdd_scaffold() {
 # Clean up TDD scaffold artifacts before re-planning.
 # Safe: only removes files in the dedicated tests/tdd/ directory and stubs.
 __cleanup_tdd_artifacts() {
-    [[ "$TDD_MODE" == "true" ]] || return 0
     [[ -f ".claude/tdd-manifest.json" ]] || return 0
     # Remove the dedicated TDD test directory (safe — only contains scaffold-created files)
     local tdd_dir
@@ -3166,7 +3133,7 @@ run_chunked_test() {
     if [[ -n "$spec_context" ]]; then
         chunk1_context="$chunk1_context | $spec_context"
     fi
-    if [[ "$TDD_MODE" == "true" && -f ".claude/tdd-manifest.json" ]]; then
+    if [[ -f ".claude/tdd-manifest.json" ]]; then
         chunk1_context="$chunk1_context TDD tests already exist in tests/tdd/ — do NOT rewrite them. Only write ADDITIONAL test files for adversarial/edge cases."
     fi
 
@@ -3699,9 +3666,7 @@ process_task_isolated() {
         if [[ -n "$__replan_context" ]]; then
             research_extra="${research_extra:+$research_extra | }REPLAN: $__replan_context"
         fi
-        if [[ "$TDD_MODE" == "true" ]]; then
-            research_extra="${research_extra:+$research_extra | }TDD MODE: Tests will be written BEFORE implementation. Your plan MUST include a section documenting public interface contracts (function signatures, CLI commands, API endpoints) with enough detail that tests can be written against them before any code exists. Mark any areas that cannot be tested before implementation (visual, perf) as TDD-exempt."
-        fi
+        research_extra="${research_extra:+$research_extra | }TDD MODE: Tests will be written BEFORE implementation. Your plan MUST include a section documenting public interface contracts (function signatures, CLI commands, API endpoints) with enough detail that tests can be written against them before any code exists. Mark any areas that cannot be tested before implementation (visual, perf) as TDD-exempt."
         run_phase_group "research" "$task" "$research_extra" || { mark_task_blocked "$task" "research phase failed to produce a valid result"; clear_task_progress; return 1; }
         __completed_phases="${__completed_phases:+$__completed_phases }research"
         save_task_progress "$task" "$__completed_phases" "$__INVOCATION_COUNT"
@@ -3835,8 +3800,8 @@ process_task_isolated() {
         save_task_progress "$task" "$__completed_phases" "$__INVOCATION_COUNT"
     fi
 
-    # --- tdd-scaffold (optional: --tdd + standard complexity) ---
-    if [[ "$TDD_MODE" == "true" && "$task_complexity" == "standard" ]]; then
+    # --- tdd-scaffold (standard complexity) ---
+    if [[ "$task_complexity" == "standard" ]]; then
         if phase_completed "tdd-scaffold"; then
             print_info "Skipping phase: tdd-scaffold (completed in previous run)"
             update_workflow_state "tdd-scaffold" "skipped"
@@ -3864,7 +3829,7 @@ process_task_isolated() {
             __completed_phases="${__completed_phases:+$__completed_phases }tdd-scaffold"
             save_task_progress "$task" "$__completed_phases" "$__INVOCATION_COUNT"
         fi
-    elif [[ "$TDD_MODE" == "true" ]]; then
+    else
         print_info "Skipping phase: tdd-scaffold (complexity: $task_complexity)"
         update_workflow_state "tdd-scaffold" "skipped"
     fi
@@ -4429,17 +4394,13 @@ main() {
     fi
 
     if [[ "$COMPLEXITY_AWARE" == "true" ]] && [[ "$FULL_PIPELINE" != "true" ]]; then
-        if [[ "$TDD_MODE" == "true" ]]; then
-            print_info "Mode: Phase-isolated (complexity-aware: 2-9 invocations per task, TDD enabled)"
-        else
-            print_info "Mode: Phase-isolated (complexity-aware: 2-8 invocations per task)"
-        fi
+        print_info "Mode: Phase-isolated (complexity-aware: 2-9 invocations per task, TDD enabled)"
     else
         local _phase_count=6
         [[ "$SKIP_SPEC" != "true" ]] && [[ -d ".claude/skills/buildcrew-spec" ]] && _phase_count=$((_phase_count + 1))
         [[ -d ".claude/skills/buildcrew-outcome" ]] && _phase_count=$((_phase_count + 1))
         [[ -d ".claude/skills/buildcrew-simplify" ]] && _phase_count=$((_phase_count + 1))
-        [[ "$TDD_MODE" == "true" ]] && [[ -d ".claude/skills/buildcrew-tdd-scaffold" ]] && _phase_count=$((_phase_count + 1))
+        [[ -d ".claude/skills/buildcrew-tdd-scaffold" ]] && _phase_count=$((_phase_count + 1))
         print_info "Mode: Phase-isolated ($_phase_count invocations per task)"
     fi
     print_debug "Flags: skip_spec=$SKIP_SPEC strict=$STRICT_MODE review=$HUMAN_REVIEW branch=$GIT_BRANCH resume=$RESUME_MODE full_pipeline=$FULL_PIPELINE complexity_aware=$COMPLEXITY_AWARE auto=$AUTO_MODE"
@@ -4694,19 +4655,6 @@ main() {
 
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
     parse_args "$@"
-    if [[ "${TDD_MODE_FLAG_USED:-}" == "true" ]]; then
-        echo "WARNING: --tdd is deprecated; TDD is now enabled by default. Use --no-tdd to disable." >&2
-    fi
-    if [[ "$TDD_MODE" == "true" && "$SKIP_SPEC" == "true" ]]; then
-        if [[ "$TDD_MODE_EXPLICIT" == "true" ]]; then
-            echo "Error: TDD mode requires spec phase (incompatible with --skip-spec; use --no-tdd to disable TDD)" >&2
-            exit 1
-        else
-            # TDD is only from hardcoded default — auto-disable for --skip-spec compatibility
-            echo "Note: TDD mode auto-disabled (incompatible with --skip-spec)" >&2
-            TDD_MODE=false
-        fi
-    fi
     if [[ "$STRICT_EXPLICIT" == "true" ]] && [[ "$STRICT_MODE" == "true" ]] && [[ "$SKIP_SPEC" == "true" ]]; then
         print_warning "--strict has no effect with --skip-spec (outcome phase requires a spec)"
     fi

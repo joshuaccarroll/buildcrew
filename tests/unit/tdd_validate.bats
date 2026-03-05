@@ -31,20 +31,12 @@ teardown() {
 # __validate_tdd_scaffold
 # ─────────────────────────────────────────────────────────────────────────────
 
-@test "__validate_tdd_scaffold: no-op when TDD_MODE=false" {
-    TDD_MODE=false
-    run __validate_tdd_scaffold
-    [ "$status" -eq 0 ]
-}
-
 @test "__validate_tdd_scaffold: no-op when manifest missing" {
-    TDD_MODE=true
     run __validate_tdd_scaffold
     [ "$status" -eq 0 ]
 }
 
 @test "__validate_tdd_scaffold: no-op when test_command empty" {
-    TDD_MODE=true
     mkdir -p .claude
     echo '{"test_command": ""}' > .claude/tdd-manifest.json
     run __validate_tdd_scaffold
@@ -52,7 +44,6 @@ teardown() {
 }
 
 @test "__validate_tdd_scaffold: passes when tests fail (expected)" {
-    TDD_MODE=true
     mkdir -p .claude
     echo '{"test_command": "exit 1"}' > .claude/tdd-manifest.json
     run __validate_tdd_scaffold
@@ -61,7 +52,6 @@ teardown() {
 }
 
 @test "__validate_tdd_scaffold: fails when tests pass (unexpected)" {
-    TDD_MODE=true
     mkdir -p .claude
     echo '{"test_command": "exit 0"}' > .claude/tdd-manifest.json
     run __validate_tdd_scaffold
@@ -70,7 +60,6 @@ teardown() {
 }
 
 @test "__validate_tdd_scaffold: no-op when test_command key missing" {
-    TDD_MODE=true
     mkdir -p .claude
     echo '{"test_files": ["a.ts"]}' > .claude/tdd-manifest.json
     run __validate_tdd_scaffold

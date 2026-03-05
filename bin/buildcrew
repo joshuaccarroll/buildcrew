@@ -76,8 +76,6 @@ print_help() {
     echo "    --full-pipeline  Force all phases regardless of complexity assessment (with 'run')"
     echo "    --auto        (deprecated) Auto mode is now the default. Use --interactive to opt out (with 'run')"
     echo "    --interactive Restore interactive review pauses (with 'run')"
-    echo "    --tdd         (deprecated) TDD is enabled by default; this flag is a no-op"
-    echo "    --no-tdd      Disable TDD mode (skip tdd-scaffold phase for standard tasks)"
     echo "    --uat         After build completes, enter watch mode for UAT verdicts (with 'run')"
     echo "    --sequential  Run tasks one at a time (opt out of parallel batch mode, with 'run')"
     echo "    --batch       (deprecated) Batch mode is now the default (with 'run')"
@@ -315,9 +313,6 @@ EOF
 # Auto mode is enabled by default. Set to false to restore interactive review pauses.
 # AUTO_MODE=true
 
-# Enable TDD mode: write failing tests before implementation (default: true)
-# Set to false to disable TDD scaffold phase for standard-complexity tasks
-# TDD_MODE=true
 EOF
         echo -e "  ${GREEN}✓${NC} Created .buildcrew/config.example"
     else

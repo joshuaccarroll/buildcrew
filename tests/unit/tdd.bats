@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# Unit tests for TDD mode (--tdd flag, tdd-scaffold phase)
+# Unit tests for TDD mode (tdd-scaffold phase)
 
 load '../setup.bash'
 
@@ -22,117 +22,19 @@ teardown() {
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
-# parse_args: --tdd flag
+# parse_args: --tdd and --no-tdd are unknown options
 # ─────────────────────────────────────────────────────────────────────────────
 
-@test "parse_args: --tdd sets TDD_MODE=true" {
-    TDD_MODE=false
-    parse_args --tdd
-    [ "$TDD_MODE" = "true" ]
+@test "parse_args: --tdd is rejected as unknown option" {
+    run parse_args --tdd
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"Unknown option: --tdd"* ]]
 }
 
-@test "parse_args: TDD_MODE defaults to true" {
-    [ "$TDD_MODE" = "true" ]
-}
-
-@test "parse_args: --no-tdd sets TDD_MODE=false" {
-    parse_args --no-tdd
-    [ "$TDD_MODE" = "false" ]
-}
-
-@test "parse_args: --tdd sets TDD_MODE_FLAG_USED=true" {
-    TDD_MODE=false
-    parse_args --tdd
-    [ "$TDD_MODE_FLAG_USED" = "true" ]
-}
-
-@test "parse_args: --tdd --no-tdd last flag wins" {
-    parse_args --tdd --no-tdd
-    [ "$TDD_MODE" = "false" ]
-}
-
-@test "parse_args: --no-tdd sets TDD_MODE_EXPLICIT=true" {
-    parse_args --no-tdd
-    [ "$TDD_MODE_EXPLICIT" = "true" ]
-}
-
-@test "parse_args: --tdd sets TDD_MODE_EXPLICIT=true" {
-    TDD_MODE=false
-    parse_args --tdd
-    [ "$TDD_MODE_EXPLICIT" = "true" ]
-}
-
-@test "parse_args: TDD_MODE_EXPLICIT defaults to false" {
-    [ "$TDD_MODE_EXPLICIT" = "false" ]
-}
-
-@test "parse_args: --no-tdd does not set TDD_MODE_FLAG_USED" {
-    parse_args --no-tdd
-    [ "${TDD_MODE_FLAG_USED:-}" != "true" ]
-}
-
-# ─────────────────────────────────────────────────────────────────────────────
-# load_buildcrew_config: TDD_MODE
-# ─────────────────────────────────────────────────────────────────────────────
-
-@test "load_buildcrew_config: loads TDD_MODE=true from config" {
-    mkdir -p .buildcrew
-    echo "TDD_MODE=true" > .buildcrew/config
-    unset TDD_MODE
-    load_buildcrew_config
-    [ "$TDD_MODE" = "true" ]
-}
-
-@test "load_buildcrew_config: loads TDD_MODE=false from config" {
-    mkdir -p .buildcrew
-    echo "TDD_MODE=false" > .buildcrew/config
-    unset TDD_MODE
-    load_buildcrew_config
-    [ "$TDD_MODE" = "false" ]
-}
-
-@test "load_buildcrew_config: rejects invalid TDD_MODE value" {
-    mkdir -p .buildcrew
-    echo "TDD_MODE=maybe" > .buildcrew/config
-    unset TDD_MODE
-    run load_buildcrew_config
-    [ "$status" -eq 0 ]
-    [[ "$output" == *"invalid TDD_MODE"* ]]
-}
-
-@test "load_buildcrew_config: env var TDD_MODE takes precedence over config" {
-    mkdir -p .buildcrew
-    echo "TDD_MODE=false" > .buildcrew/config
-    TDD_MODE=true
-    load_buildcrew_config
-    [ "$TDD_MODE" = "true" ]
-}
-
-@test "load_buildcrew_config: config sets TDD_MODE_EXPLICIT=true" {
-    mkdir -p .buildcrew
-    echo "TDD_MODE=true" > .buildcrew/config
-    unset TDD_MODE
-    TDD_MODE_EXPLICIT=false
-    load_buildcrew_config
-    [ "$TDD_MODE_EXPLICIT" = "true" ]
-}
-
-@test "load_buildcrew_config: config TDD_MODE=false sets TDD_MODE_EXPLICIT=true" {
-    mkdir -p .buildcrew
-    echo "TDD_MODE=false" > .buildcrew/config
-    unset TDD_MODE
-    TDD_MODE_EXPLICIT=false
-    load_buildcrew_config
-    [ "$TDD_MODE" = "false" ]
-    [ "$TDD_MODE_EXPLICIT" = "true" ]
-}
-
-@test "env var TDD_MODE sets TDD_MODE_EXPLICIT=true" {
-    # Re-source with TDD_MODE set as env var to trigger module-level detection
-    TDD_MODE_EXPLICIT=false
-    TDD_MODE=true
-    source_lib "workflow.sh"
-    [ "$TDD_MODE_EXPLICIT" = "true" ]
+@test "parse_args: --no-tdd is rejected as unknown option" {
+    run parse_args --no-tdd
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"Unknown option: --no-tdd"* ]]
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -155,15 +57,7 @@ teardown() {
 # __inject_tdd_prompt tests
 # ─────────────────────────────────────────────────────────────────────────────
 
-@test "__inject_tdd_prompt: returns prompt unchanged when TDD_MODE=false" {
-    TDD_MODE=false
-    local result
-    result=$(__inject_tdd_prompt "build" "original prompt")
-    [ "$result" = "original prompt" ]
-}
-
 @test "__inject_tdd_prompt: returns prompt unchanged when manifest missing" {
-    TDD_MODE=true
     # No .claude/tdd-manifest.json exists
     local result
     result=$(__inject_tdd_prompt "build" "original prompt")
@@ -171,7 +65,6 @@ teardown() {
 }
 
 @test "__inject_tdd_prompt: returns prompt unchanged for non-build/test/codereview phases" {
-    TDD_MODE=true
     mkdir -p .claude
     echo '{"test_count": 5}' > .claude/tdd-manifest.json
     local result
@@ -180,7 +73,6 @@ teardown() {
 }
 
 @test "__inject_tdd_prompt: appends TDD context for build phase" {
-    TDD_MODE=true
     mkdir -p .claude
     echo '{"test_count": 5}' > .claude/tdd-manifest.json
     local result
@@ -191,7 +83,6 @@ teardown() {
 }
 
 @test "__inject_tdd_prompt: appends TDD context for test phase" {
-    TDD_MODE=true
     mkdir -p .claude
     echo '{"test_count": 3}' > .claude/tdd-manifest.json
     local result
@@ -202,7 +93,6 @@ teardown() {
 }
 
 @test "__inject_tdd_prompt: appends TDD context for codereview phase" {
-    TDD_MODE=true
     mkdir -p .claude
     echo '{"test_count": 4}' > .claude/tdd-manifest.json
     local result
@@ -213,7 +103,6 @@ teardown() {
 }
 
 @test "__inject_tdd_prompt: returns prompt unchanged when test_count is 0" {
-    TDD_MODE=true
     mkdir -p .claude
     echo '{"test_count": 0}' > .claude/tdd-manifest.json
     local result
@@ -225,27 +114,13 @@ teardown() {
 # __cleanup_tdd_artifacts tests
 # ─────────────────────────────────────────────────────────────────────────────
 
-@test "__cleanup_tdd_artifacts: no-op when TDD_MODE=false" {
-    TDD_MODE=false
-    mkdir -p .claude
-    echo '{"test_dir": "tests/tdd"}' > .claude/tdd-manifest.json
-    mkdir -p tests/tdd
-    echo "test content" > tests/tdd/test_ac01.test.ts
-    __cleanup_tdd_artifacts
-    # Manifest and test files should still exist
-    [ -f ".claude/tdd-manifest.json" ]
-    [ -f "tests/tdd/test_ac01.test.ts" ]
-}
-
 @test "__cleanup_tdd_artifacts: no-op when manifest missing" {
-    TDD_MODE=true
     # No manifest file
     __cleanup_tdd_artifacts
     # Should exit cleanly with no error
 }
 
 @test "__cleanup_tdd_artifacts: removes test dir and manifest" {
-    TDD_MODE=true
     mkdir -p .claude tests/tdd
     echo "test content" > tests/tdd/test_ac01.test.ts
     echo "test content 2" > tests/tdd/test_ac02.test.ts
@@ -258,7 +133,6 @@ EOF
 }
 
 @test "__cleanup_tdd_artifacts: removes stub files" {
-    TDD_MODE=true
     mkdir -p .claude src
     echo "stub" > src/feature.ts
     cat > .claude/tdd-manifest.json << 'EOF'
@@ -270,7 +144,6 @@ EOF
 }
 
 @test "__cleanup_tdd_artifacts: handles missing test_dir gracefully" {
-    TDD_MODE=true
     mkdir -p .claude
     cat > .claude/tdd-manifest.json << 'EOF'
 {"test_dir": "tests/tdd", "test_files": [], "stub_files": []}

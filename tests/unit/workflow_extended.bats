@@ -929,11 +929,10 @@ EOF
     mkdir -p .buildcrew .claude
     echo "- [ ] test task" > BACKLOG.md
     SKIP_SPEC=true
-    TDD_MODE=false
     STRICT_MODE=false
     HUMAN_REVIEW=false
-    # Pre-mark research and review as completed so they're skipped via phase_completed
-    __RESUME_PHASES="research review"
+    # Pre-mark research, review, and tdd-scaffold as completed so they're skipped via phase_completed
+    __RESUME_PHASES="research review tdd-scaffold"
 
     # Temp file persists across the subshell created by bats `run`
     local blocked_file
@@ -1251,7 +1250,6 @@ EOF
     mkdir -p .buildcrew
     echo "- [ ] test task" > BACKLOG.md
     SKIP_SPEC=true
-    TDD_MODE=false
     STRICT_MODE=false
     HUMAN_REVIEW=false
     __RESUME_PHASES=""
@@ -1279,7 +1277,6 @@ EOF
     mkdir -p .buildcrew
     echo "- [ ] test task" > BACKLOG.md
     SKIP_SPEC=true
-    TDD_MODE=false
     STRICT_MODE=false
     HUMAN_REVIEW=false
     __RESUME_PHASES="research"
@@ -2043,7 +2040,6 @@ EOF
     mkdir -p .buildcrew .claude
     echo "- [ ] test task" > BACKLOG.md
     SKIP_SPEC=true
-    TDD_MODE=false
     STRICT_MODE=false
     HUMAN_REVIEW=false
     # Use RESUME_MODE=true so process_task_isolated skips artifact cleanup,
@@ -2076,7 +2072,7 @@ EOF
     mark_task_blocked()      { echo "$*" > "$blocked_file"; }
     load_task_progress() {
         __RESUME_TASK="test task"
-        __RESUME_PHASES="research review"
+        __RESUME_PHASES="research review tdd-scaffold"
         __RESUME_INVOCATIONS=0
         return 0
     }
@@ -2123,7 +2119,6 @@ EOF
     mkdir -p .buildcrew .claude
     echo "- [ ] test task" > BACKLOG.md
     SKIP_SPEC=true
-    TDD_MODE=false
     STRICT_MODE=false
     HUMAN_REVIEW=false
     RESUME_MODE=true
@@ -2148,7 +2143,7 @@ EOF
     mark_task_blocked()      { echo "$*" > "$blocked_file"; }
     load_task_progress() {
         __RESUME_TASK="test task"
-        __RESUME_PHASES="research review"
+        __RESUME_PHASES="research review tdd-scaffold"
         __RESUME_INVOCATIONS=0
         return 0
     }
@@ -2174,10 +2169,9 @@ EOF
     mkdir -p .buildcrew .claude
     echo "- [ ] test task" > BACKLOG.md
     SKIP_SPEC=true
-    TDD_MODE=false
     STRICT_MODE=false
     HUMAN_REVIEW=false
-    __RESUME_PHASES="research review"
+    __RESUME_PHASES="research review tdd-scaffold"
 
     cat > .claude/current-plan.md <<'EOF'
 # Plan

@@ -93,7 +93,7 @@ When context is compacted, always preserve:
 1. **spec** — Refine task into acceptance criteria (skipped with `--skip-spec`)
 2. **research** — Explore codebase, write implementation plan
 3. **review** — 3-pass adversarial plan review
-3.5. **tdd-scaffold** (optional, `--tdd`, standard complexity) — Write failing tests from spec+plan before implementation
+3.5. **tdd-scaffold** (standard complexity) — Write failing tests from spec+plan before implementation
 4. **build** — Implement per plan
 5. **simplify** — Non-blocking review: apply targeted simplifications before formal review
 6. **codereview** — Adversarial code review + elegance check; may request rebuild
@@ -108,6 +108,6 @@ BuildCrew has two runtime modes:
 - **Discovery mode** — Interactive Product Manager flow for project definition and backlog creation. Triggered when `buildcrew run` finds an empty backlog or all tasks complete. Launches the `/build` command (builder skill).
 - **Execution mode** — Autonomous pipeline that processes pending BACKLOG.md tasks through the phase sequence above.
 
-- **TDD mode** — Enabled with `--tdd` flag or `TDD_MODE=true` in `.buildcrew/config`. Inserts a tdd-scaffold phase between plan-review and build. Only active for `standard` complexity tasks. Tests are written before implementation and verified to fail, then the build phase must make them pass.
+- **TDD** — Always active for `standard` complexity tasks. Inserts a tdd-scaffold phase between plan-review and build. Tests are written before implementation and verified to fail, then the build phase must make them pass. Trivial/simple tasks skip tdd-scaffold.
 
 Note: "Chunked Build Mode" is a separate concept (sub-mode within the build phase for large builds). It is unrelated to the modes above.
