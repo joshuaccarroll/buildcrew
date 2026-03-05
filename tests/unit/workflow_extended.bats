@@ -36,9 +36,9 @@ teardown() {
     [ "$output" = "60" ]
 }
 
-@test "get_phase_max_turns: verify returns 50" {
+@test "get_phase_max_turns: verify returns 70" {
     run get_phase_max_turns "verify"
-    [ "$output" = "50" ]
+    [ "$output" = "70" ]
 }
 
 @test "get_phase_max_turns: simplify returns 30" {
@@ -741,9 +741,9 @@ teardown() {
     [ "$output" = "50" ]
 }
 
-@test "get_phase_max_turns: outcome returns 40" {
+@test "get_phase_max_turns: outcome falls through to default (30)" {
     run get_phase_max_turns "outcome"
-    [ "$output" = "40" ]
+    [ "$output" = "30" ]
 }
 
 @test "get_phase_max_turns: codereview returns 40" {

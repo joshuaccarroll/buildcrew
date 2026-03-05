@@ -220,7 +220,11 @@ For significant new functionality, write tests following the test plan.
 
 ### Step 5: Run Tests
 
-Run the full test suite using the detected framework.
+Run only new/changed test files to keep this phase focused:
+```sh
+git diff --name-only HEAD | grep -E 'test|spec|bats'
+```
+The full test suite runs in the verify phase. Focus execution on tests related to the current change.
 
 ### Step 6: Handle Failures
 

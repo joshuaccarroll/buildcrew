@@ -30,7 +30,11 @@ If `.claude/plan-review-prev.md` exists, this is a **revision cycle** — the pl
 
 ---
 
-### Pass 1: Technical Review (Principal Engineer Sub-Agent)
+### Passes 1 & 2: Parallel Review
+
+In a **single response**, spawn BOTH Task sub-agents simultaneously:
+
+### Sub-Agent 1 — Technical Review (Principal Engineer)
 
 Spawn a Task sub-agent **(general-purpose type)** with this exact prompt:
 
@@ -102,13 +106,9 @@ or
 VERDICT: NEEDS_REVISION
 ```
 
-After the sub-agent completes, verify that `.claude/review-pass1-pe.md` exists and contains a `VERDICT:` line. If the file is missing or contains no VERDICT line, log a warning ("Pass 1 sub-agent failed to produce review") and treat this pass as NEEDS_REVISION with details "Sub-agent failed to produce review".
+### Sub-Agent 2 — User Impact Review (Product Manager)
 
----
-
-### Pass 2: User Impact Review (Product Manager Sub-Agent)
-
-Spawn a Task sub-agent **(general-purpose type)** with this exact prompt:
+Also in the **same response**, spawn a Task sub-agent **(general-purpose type)** with this exact prompt:
 
 ```
 You are a product manager reviewing an implementation plan for user impact. Your job is to find where this plan fails the user. Assume the user will be confused or underserved. Where?
@@ -184,7 +184,7 @@ or
 VERDICT: NEEDS_REVISION
 ```
 
-After the sub-agent completes, verify that `.claude/review-pass2-pm.md` exists and contains a `VERDICT:` line. If the file is missing or contains no VERDICT line, log a warning ("Pass 2 sub-agent failed to produce review") and treat this pass as NEEDS_REVISION with details "Sub-agent failed to produce review".
+After **BOTH** sub-agents complete, verify that both `.claude/review-pass1-pe.md` and `.claude/review-pass2-pm.md` exist and contain `VERDICT:` lines. If either file is missing or contains no VERDICT line, log a warning and treat that pass as NEEDS_REVISION with details "Sub-agent failed to produce review".
 
 If both sub-agents failed to produce their review files, write `.claude/phase-result.json`:
 

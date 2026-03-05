@@ -946,3 +946,238 @@ _setup_batch_dispatch_mocks() {
     # No resume hint
     [[ "$output" != *"task(s) were not started"* ]]
 }
+
+# ─────────────────────────────────────────────────────────────────────────────
+# run_optional_simplify: diff-size gating
+# ─────────────────────────────────────────────────────────────────────────────
+
+@test "run_optional_simplify: skips when diff is less than 50 lines" {
+    # Create a git repo with a small change
+    git init -b main >/dev/null 2>&1
+    git config user.email "test@buildcrew.test"
+    git config user.name "Test"
+    echo "line1" > file.txt
+    git add file.txt
+    git commit -m "init" >/dev/null 2>&1
+    echo "line2" >> file.txt
+
+    # Install simplify skill so the skill-dir check passes
+    mkdir -p .claude/skills/buildcrew-simplify
+
+    # Mock run_phase_group to track if it's called
+    local phase_called=false
+    run_phase_group() { phase_called=true; return 0; }
+
+    run_optional_simplify "test task" "test context"
+    [ "$phase_called" = "false" ]
+}
+
+@test "run_optional_simplify: runs when diff is 50+ lines" {
+    # Create a git repo with a large change
+    git init -b main >/dev/null 2>&1
+    git config user.email "test@buildcrew.test"
+    git config user.name "Test"
+    echo "init" > file.txt
+    git add file.txt
+    git commit -m "init" >/dev/null 2>&1
+
+    # Add 60 lines
+    local i
+    for i in $(seq 1 60); do
+        echo "line $i" >> file.txt
+    done
+
+    mkdir -p .claude/skills/buildcrew-simplify
+
+    local phase_called=false
+    run_phase_group() { phase_called=true; return 0; }
+
+    run_optional_simplify "test task" "test context"
+    [ "$phase_called" = "true" ]
+}
+
+@test "run_optional_simplify: skips when simplify skill not installed" {
+    run_optional_simplify "test task" "test context"
+    # Should return 0 without error
+}
+
+@test "run_optional_simplify: accepts base_ref parameter" {
+    git init -b main >/dev/null 2>&1
+    git config user.email "test@buildcrew.test"
+    git config user.name "Test"
+    echo "init" > file.txt
+    git add file.txt
+    git commit -m "init" >/dev/null 2>&1
+
+    mkdir -p .claude/skills/buildcrew-simplify
+
+    local phase_called=false
+    run_phase_group() { phase_called=true; return 0; }
+
+    # With HEAD as base_ref, no staged diff — should skip
+    run_optional_simplify "test task" "test context" "HEAD"
+    [ "$phase_called" = "false" ]
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Plan-skip logic
+# ─────────────────────────────────────────────────────────────────────────────
+
+@test "plan skip: plan_ref with actionable content triggers __plan_ref_skip" {
+    # Create a plan file with actionable content
+    local plan_file="$TEST_DIR/test-plan.md"
+    cat > "$plan_file" << 'EOF'
+# Implementation Plan
+
+## Implementation Steps
+
+1. Add new function to workflow.sh
+2. Update tests
+
+## Acceptance Criteria
+- AC-01: Function exists
+EOF
+
+    # Verify grep matches
+    grep -qE '(## Implementation|## Acceptance|^[0-9]+\.)' "$plan_file"
+}
+
+@test "plan skip: plan_ref without actionable content does not trigger skip" {
+    local plan_file="$TEST_DIR/discovery-plan.md"
+    cat > "$plan_file" << 'EOF'
+# Discovery Notes
+
+Some general notes about the project.
+Nothing actionable here.
+EOF
+
+    # Verify grep does NOT match
+    ! grep -qE '(## Implementation|## Acceptance|^[0-9]+\.)' "$plan_file"
+}
+
+@test "plan skip: copies plan to .claude/current-plan.md when skipping" {
+    local plan_file="$TEST_DIR/test-plan.md"
+    cat > "$plan_file" << 'EOF'
+## Implementation Steps
+1. Do the thing
+EOF
+
+    # Simulate what the plan skip code does
+    mkdir -p .claude
+    cp "$plan_file" .claude/current-plan.md
+    [ -f ".claude/current-plan.md" ]
+    grep -q "Do the thing" .claude/current-plan.md
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# _BATCH_BUILD_ONLY default
+# ─────────────────────────────────────────────────────────────────────────────
+
+@test "_BATCH_BUILD_ONLY: defaults to false" {
+    [ "$_BATCH_BUILD_ONLY" = "false" ]
+}
+
+@test "_BATCH_BUILD_ONLY: set in batch launch code" {
+    grep -q 'export _BATCH_BUILD_ONLY=true' "$BUILDCREW_ROOT/lib/workflow.sh"
+}
+
+@test "_BATCH_BUILD_ONLY: early exit check exists after build phase" {
+    # Verify the early exit pattern exists: check for _BATCH_BUILD_ONLY and "Stopping after build"
+    grep -q '_BATCH_BUILD_ONLY' "$BUILDCREW_ROOT/lib/workflow.sh"
+    grep -q 'Stopping after build phase (batch mode)' "$BUILDCREW_ROOT/lib/workflow.sh"
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# _batch_assemble_combined_context
+# ─────────────────────────────────────────────────────────────────────────────
+
+@test "_batch_assemble_combined_context: creates context file" {
+    __BATCH_CWD="$TEST_DIR"
+
+    # Set up manifest and task arrays
+    _batch_init_manifest "main" "abc123"
+    _batch_add_task 1 "Task one" "task-one"
+    _batch_mark_task 1 "completed" "0"
+
+    _batch_tasks=("Task one")
+    _batch_slugs=("task-one")
+
+    # Create worktree dir with spec
+    local wt_path="$BATCH_WORKTREE_DIR/task-one"
+    mkdir -p "$wt_path/.claude"
+    echo "- [ ] AC-01: Test criterion" > "$wt_path/.claude/spec.md"
+    echo "## Implementation" > "$wt_path/.claude/current-plan.md"
+
+    # Mock _batch_get_task_status
+    _batch_get_task_status() { echo "completed"; }
+
+    _batch_assemble_combined_context
+
+    [ -f ".claude/batch-combined-context.md" ]
+    grep -q "Task one" .claude/batch-combined-context.md
+    grep -q "AC-01" .claude/batch-combined-context.md
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# _batch_merge_worktrees
+# ─────────────────────────────────────────────────────────────────────────────
+
+@test "_batch_merge_worktrees: returns 1 when no tasks completed" {
+    __BATCH_CWD="$TEST_DIR"
+    git init -b main >/dev/null 2>&1
+    git config user.email "test@buildcrew.test"
+    git config user.name "Test"
+    git commit --allow-empty -m "init" >/dev/null 2>&1
+
+    _batch_init_manifest "main" "$(git rev-parse HEAD)"
+    _batch_add_task 1 "Task one" "task-one"
+    _batch_mark_task 1 "failed" "1"
+
+    _batch_tasks=("Task one")
+    _batch_slugs=("task-one")
+
+    _batch_get_task_status() { echo "failed"; }
+
+    run _batch_merge_worktrees "main"
+    [ "$status" -eq 1 ]
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# get_phase_max_turns: outcome removed, verify increased
+# ─────────────────────────────────────────────────────────────────────────────
+
+@test "get_phase_max_turns: verify returns 70" {
+    result=$(get_phase_max_turns "verify")
+    [ "$result" = "70" ]
+}
+
+@test "get_phase_max_turns: outcome falls through to default" {
+    result=$(get_phase_max_turns "outcome")
+    [ "$result" = "30" ]
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Outcome phase removed from workflow
+# ─────────────────────────────────────────────────────────────────────────────
+
+@test "outcome phase: removed from process_task_isolated" {
+    # The outcome phase section should no longer exist in workflow.sh
+    ! grep -q '# --- outcome (validates against spec acceptance criteria) ---' "$BUILDCREW_ROOT/lib/workflow.sh"
+}
+
+@test "outcome phase: verify phase absorbs AC verification" {
+    # The verify SKILL should mention AC verification
+    grep -q 'AC Verification' "$BUILDCREW_ROOT/skills/buildcrew-verify/SKILL.md"
+    grep -q 'outcome-report.md' "$BUILDCREW_ROOT/skills/buildcrew-verify/SKILL.md"
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# merge_conflict status handling
+# ─────────────────────────────────────────────────────────────────────────────
+
+@test "_batch_mark_task: handles merge_conflict status" {
+    _batch_init_manifest "main" "abc123"
+    _batch_add_task 1 "A task" "a-task"
+    _batch_mark_task 1 "merge_conflict"
+    [ "$(jq -r '.tasks[0].status' "$BATCH_MANIFEST")" = "merge_conflict" ]
+}

@@ -147,6 +147,7 @@ TDD_MODE=${TDD_MODE:-true}
 TDD_MODE_EXPLICIT=${TDD_MODE_EXPLICIT:-false}
 MAX_PARALLEL=${MAX_PARALLEL:-5}
 TARGET_DIR=${TARGET_DIR:-}
+_BATCH_BUILD_ONLY=${_BATCH_BUILD_ONLY:-false}
 __INVOCATION_COUNT=0
 __RESUME_PHASES=""
 __DISCOVERY_HEARTBEAT_PID=""
@@ -163,8 +164,7 @@ get_phase_max_turns() {
         simplify)   echo 30 ;;
         codereview) echo 40 ;;
         test)       echo 60 ;;
-        outcome)    echo 40 ;;
-        verify)     echo 50 ;;
+        verify)     echo 70 ;;
         *)          echo 30 ;;
     esac
 }
@@ -420,9 +420,19 @@ __cleanup_tdd_artifacts() {
 
 # Run the simplify phase if the skill is installed. Always non-blocking (|| true).
 # Must only be called from within complexity-gated else branches (i.e. not for trivial/simple tasks).
+# Optional base_ref parameter (default HEAD) for computing diff size in batch mode.
 run_optional_simplify() {
-    local task="$1" context="$2"
+    local task="$1" context="$2" base_ref="${3:-HEAD}"
     [[ -d ".claude/skills/buildcrew-simplify" ]] || return 0
+
+    local diff_lines=0
+    diff_lines=$(git diff --numstat "$base_ref" 2>/dev/null \
+        | awk '{s+=$1+$2}END{print s+0}') || diff_lines=0
+    if (( diff_lines < 50 )); then
+        print_info "Skipping phase: simplify ($diff_lines lines changed, threshold: 50)"
+        return 0
+    fi
+
     run_phase_group "simplify" "$task" "$context" || true
 }
 
@@ -771,6 +781,7 @@ _batch_launch_task() {
         export BUILDCREW_BATCH_NONCE="${slug}-${idx}"
         export BUILDCREW_HOME
         export AUTO_MODE=true  # Batch workers must run unattended
+        export _BATCH_BUILD_ONLY=true  # Workers stop after build phase
 
         # When target_dir is set, export absolute BACKLOG_FILE path back to parent
         if [[ -n "$target_dir" ]]; then
@@ -959,6 +970,140 @@ _batch_create_prs() {
     done
 }
 
+# Merge completed worktree branches onto a new merge branch (smallest diff first).
+# Prints the merge branch name to stdout on success, returns 1 if all merges fail.
+_batch_merge_worktrees() {
+    local base_branch="$1"
+    local merge_branch="buildcrew/batch-merged-$(date +%Y%m%d-%H%M%S)"
+
+    cd "$__BATCH_CWD" || return 1
+
+    local base_commit
+    base_commit=$(jq -r '.base_commit' "$BATCH_MANIFEST")
+
+    git checkout -b "$merge_branch" "$base_branch" 2>/dev/null || return 1
+
+    # Sort completed tasks by diff size (smallest first)
+    local sorted_entries=()
+    local i
+    for i in "${!_batch_tasks[@]}"; do
+        local status
+        status=$(_batch_get_task_status $((i + 1)))
+        [[ "$status" != "completed" ]] && continue
+        local branch="buildcrew/${_batch_slugs[$i]}"
+        local diff_size=999
+        diff_size=$(git diff --numstat "${base_commit}..${branch}" 2>/dev/null | awk '{s+=$1+$2}END{print s+0}') || diff_size=999
+        sorted_entries+=("$diff_size:$i")
+    done
+    # Sort by diff size (numeric)
+    local sorted_sorted=()
+    while IFS= read -r line; do
+        [[ -n "$line" ]] && sorted_sorted+=("$line")
+    done < <(printf '%s\n' "${sorted_entries[@]}" | sort -t: -k1 -n)
+
+    local merged_count=0 conflict_count=0
+    local entry
+    for entry in "${sorted_sorted[@]}"; do
+        i="${entry#*:}"
+        local manifest_idx=$((i + 1))
+        local branch="buildcrew/${_batch_slugs[$i]}"
+
+        if git merge --squash "$branch" 2>/dev/null && git commit -m "batch: ${_batch_tasks[$i]}" 2>/dev/null; then
+            merged_count=$((merged_count + 1))
+        else
+            git merge --abort 2>/dev/null || git reset --hard HEAD 2>/dev/null || true
+            conflict_count=$((conflict_count + 1))
+            _batch_mark_task "$manifest_idx" "merge_conflict"
+            log_msg "Merge conflict: task $manifest_idx (${_batch_tasks[$i]})"
+        fi
+    done
+
+    if (( merged_count == 0 )); then
+        git checkout "$base_branch" 2>/dev/null
+        git branch -D "$merge_branch" 2>/dev/null || true
+        return 1
+    fi
+
+    print_info "Merged $merged_count task(s). Conflicts: $conflict_count" >&2
+    echo "$merge_branch"
+}
+
+# Assemble combined context from all merged task worktrees into .claude/batch-combined-context.md.
+# Must run before worktree cleanup.
+_batch_assemble_combined_context() {
+    cd "$__BATCH_CWD" || return 0
+    mkdir -p .claude
+
+    local context_file=".claude/batch-combined-context.md"
+    echo "# Batch Combined Context" > "$context_file"
+    echo "" >> "$context_file"
+    echo "Generated: $(date -u '+%Y-%m-%d %H:%M:%S UTC')" >> "$context_file"
+    echo "" >> "$context_file"
+
+    local i
+    for i in "${!_batch_tasks[@]}"; do
+        local status
+        status=$(_batch_get_task_status $((i + 1)))
+        [[ "$status" != "completed" ]] && continue
+
+        local wt_path
+        wt_path=$(_batch_worktree_path "${_batch_slugs[$i]}" "${_batch_target_dirs[$i]:-}")
+
+        echo "---" >> "$context_file"
+        echo "## Task $((i + 1)): ${_batch_tasks[$i]}" >> "$context_file"
+        echo "" >> "$context_file"
+
+        # Copy spec (extract AC lines in full, truncate rest)
+        if [[ -f "$wt_path/.claude/spec.md" ]]; then
+            echo "### Acceptance Criteria" >> "$context_file"
+            grep -E '^- \[ \] AC-|^- \[x\] AC-' "$wt_path/.claude/spec.md" >> "$context_file" 2>/dev/null || true
+            echo "" >> "$context_file"
+        fi
+
+        # Copy plan (truncate to 50 lines, single read)
+        if [[ -f "$wt_path/.claude/current-plan.md" ]]; then
+            echo "### Plan" >> "$context_file"
+            local plan_preview
+            plan_preview=$(head -51 "$wt_path/.claude/current-plan.md")
+            local preview_lines
+            preview_lines=$(printf '%s\n' "$plan_preview" | wc -l)
+            printf '%s\n' "$plan_preview" | head -50 >> "$context_file"
+            if (( preview_lines > 50 )); then
+                echo "... (truncated) ..." >> "$context_file"
+            fi
+            echo "" >> "$context_file"
+        fi
+    done
+
+    log_msg "Assembled batch combined context: $context_file"
+}
+
+# Run post-build phases (simplify + verify) on merged code.
+_batch_run_post_build() {
+    local merge_branch="$1"
+    local base_branch="$2"
+    local task_summary="Batch verification: merged tasks on $merge_branch"
+
+    cd "$__BATCH_CWD" || return 1
+
+    # Simplify (gated on >50 lines; pass base_branch for committed diff)
+    if [[ "$COMPLEXITY_AWARE" == "true" ]]; then
+        run_optional_simplify "$task_summary" \
+            "Batch mode: reviewing combined changes. See .claude/batch-combined-context.md" \
+            "$base_branch"
+    fi
+
+    # Merged verify (includes AC verification)
+    run_phase_group "verify" "$task_summary" \
+        "BATCH MODE: Read .claude/batch-combined-context.md for all task specs/plans. Verify each task's ACs independently." \
+        || return 1
+
+    local verdict
+    verdict=$(jq -r '.verdict' "$PHASE_RESULT_FILE" 2>/dev/null)
+    [[ "$verdict" == "complete" ]] && return 0
+    return 1
+}
+
 # Post-completion: summary, optional PR creation, worktree cleanup.
 _batch_post_completion() {
     local base_branch="$1"
@@ -1004,6 +1149,67 @@ _batch_post_completion() {
             fi
         done
         echo ""
+    fi
+
+    # List merge conflicts (single pass: collect lines, then print if any)
+    local merge_conflict_lines=""
+    for i in "${!_batch_tasks[@]}"; do
+        local status
+        status=$(_batch_get_task_status $((i + 1)))
+        if [[ "$status" == "merge_conflict" ]]; then
+            merge_conflict_lines="${merge_conflict_lines}  ${YELLOW}!${NC} buildcrew/${_batch_slugs[$i]}  --  ${_batch_tasks[$i]}"$'\n'
+        fi
+    done
+    if [[ -n "$merge_conflict_lines" ]]; then
+        print_warning "Merge conflicts (inspect branches manually):"
+        echo -e "$merge_conflict_lines"
+    fi
+
+    # Assemble combined context (before worktree cleanup)
+    if (( _batch_completed > 0 )); then
+        _batch_assemble_combined_context
+    fi
+
+    # Merge + post-build verification (single-repo mode only)
+    local merge_branch=""
+    if (( _batch_completed > 0 )) && [[ "$__BATCH_PARENT_IS_GIT" == "true" ]]; then
+        print_header "Post-Build: Merge + Verify"
+        merge_branch=$(_batch_merge_worktrees "$base_branch") || true
+
+        if [[ -n "$merge_branch" ]]; then
+            if _batch_run_post_build "$merge_branch" "$base_branch"; then
+                print_success "Post-build verification passed on $merge_branch"
+            else
+                print_warning "Post-build verification failed"
+                # Log per-task AC results if available
+                if [[ -f ".claude/outcome-report.md" ]]; then
+                    print_info "AC results in .claude/outcome-report.md"
+                fi
+                # Print individual branch names for inspection
+                print_info "Individual task branches preserved for inspection:"
+                for i in "${!_batch_tasks[@]}"; do
+                    local status
+                    status=$(_batch_get_task_status $((i + 1)))
+                    if [[ "$status" == "completed" ]]; then
+                        echo -e "  ${CYAN}*${NC} buildcrew/${_batch_slugs[$i]}"
+                    fi
+                done
+                # Restore clean state
+                git checkout "$base_branch" 2>/dev/null || true
+                git branch -D "$merge_branch" 2>/dev/null || true
+                merge_branch=""
+                # Mark merged tasks as verify_failed
+                for i in "${!_batch_tasks[@]}"; do
+                    local status
+                    status=$(_batch_get_task_status $((i + 1)))
+                    if [[ "$status" == "completed" ]]; then
+                        _batch_mark_task $((i + 1)) "verify_failed"
+                    fi
+                done
+            fi
+        else
+            print_warning "No tasks merged cleanly — skipping post-build verification"
+        fi
     fi
 
     # PR creation offer (only if gh is available, remote exists, and parent is a git repo)
@@ -3285,7 +3491,19 @@ process_task_isolated() {
         fi
     fi
 
-    if [[ "$SKIP_SPEC" == "true" ]]; then
+    # Plan-ref skip: if a reviewed plan exists with actionable content, skip spec/research/review
+    local __plan_ref_skip=false
+    if [[ -n "$plan_ref" ]] && [[ -f "$plan_ref" ]] && grep -qE '(## Implementation|## Acceptance|^[0-9]+\.)' "$plan_ref" 2>/dev/null; then
+        __plan_ref_skip=true
+        mkdir -p .claude
+        cp "$plan_ref" .claude/current-plan.md
+    fi
+
+    if [[ "$__plan_ref_skip" == "true" ]]; then
+        print_info "Skipping phase: spec (reviewed plan provided: $plan_ref)"
+        update_workflow_state "spec" "skipped"
+        __spec_context="Implementation plan provided at $plan_ref. No separate spec was generated."
+    elif [[ "$SKIP_SPEC" == "true" ]]; then
         print_info "Skipping phase: spec (--skip-spec flag set)"
         update_workflow_state "spec" "skipped"
     elif [[ "$task_complexity" == "trivial" || "$task_complexity" == "simple" ]]; then
@@ -3358,7 +3576,10 @@ process_task_isolated() {
     # If spec skill is not installed, fall through silently (no message, no context set)
 
     # --- research + plan ---
-    if phase_completed "research"; then
+    if [[ "$__plan_ref_skip" == "true" ]]; then
+        print_info "Skipping phase: research (reviewed plan provided: $plan_ref)"
+        update_workflow_state "research" "skipped"
+    elif phase_completed "research"; then
         print_info "Skipping phase: research (completed in previous run)"
         update_workflow_state "research" "skipped"
     elif [[ "$task_complexity" == "trivial" ]]; then
@@ -3387,7 +3608,10 @@ process_task_isolated() {
     fi
 
     # --- plan-review (max 3 external cycles, circuit breaker at 2 consecutive failures) ---
-    if phase_completed "review"; then
+    if [[ "$__plan_ref_skip" == "true" ]]; then
+        print_info "Skipping phase: review (reviewed plan provided: $plan_ref)"
+        update_workflow_state "review" "skipped"
+    elif phase_completed "review"; then
         print_info "Skipping phase: review (completed in previous run)"
         update_workflow_state "review" "skipped"
     elif [[ "$task_complexity" == "trivial" || "$task_complexity" == "simple" ]]; then
@@ -3743,161 +3967,20 @@ process_task_isolated() {
         save_task_progress "$task" "$__completed_phases" "$__INVOCATION_COUNT"
     fi
 
-    # --- outcome (validates against spec acceptance criteria) ---
-    if phase_completed "outcome"; then
-        print_info "Skipping phase: outcome (completed in previous run)"
-        update_workflow_state "outcome" "skipped"
-    elif [[ "$task_complexity" == "trivial" || "$task_complexity" == "simple" ]]; then
-        print_info "Skipping phase: outcome (complexity: $task_complexity)"
-        update_workflow_state "outcome" "skipped"
-    elif [[ -d ".claude/skills/buildcrew-outcome" ]] && [[ "$SKIP_SPEC" != "true" ]]; then
-        local outcome_attempt=0
-        local consecutive_outcome_failures=0
-        while true; do
-            ((outcome_attempt++))
-
-            local outcome_extra="Read .claude/spec.md for acceptance criteria to verify. STRICT_MODE=${STRICT_MODE}"
-            if (( outcome_attempt > 1 )); then
-                local prev_outcome_reason
-                prev_outcome_reason=$(jq -r '.details // "unknown"' "$PHASE_RESULT_FILE")
-                outcome_extra="$outcome_extra | Retry after fix. Previous failure: $prev_outcome_reason"
-            fi
-
-            run_phase_group "outcome" "$task" "$outcome_extra" || { mark_task_blocked "$task" "outcome phase failed to produce a valid result"; clear_task_progress; return 1; }
-
-            local outcome_verdict
-            outcome_verdict=$(jq -r '.verdict // "unknown"' "$PHASE_RESULT_FILE")
-            case "$outcome_verdict" in
-                passed)
-                    consecutive_outcome_failures=0
-                    break ;;
-                partial)
-                    # Some criteria failed — warn but allow if not --strict
-                    if [[ "$STRICT_MODE" == "true" ]]; then
-                        local partial_details
-                        partial_details=$(jq -r '.details // "Some acceptance criteria not met"' "$PHASE_RESULT_FILE")
-                        print_warning "--strict mode: partial outcome failure blocks commit. Rebuilding..."
-                        # Fall through to failed path
-                        ((consecutive_outcome_failures++))
-                        if (( consecutive_outcome_failures >= 2 )); then
-                            local failure_summary
-                            failure_summary=$(jq -r '.details // "Outcome verification failed twice"' "$PHASE_RESULT_FILE")
-                            print_warning "[CIRCUIT BREAKER] Approach failed twice at Outcome Verification. Re-planning from scratch."
-                            print_debug "Circuit breaker: consecutive_failures=$consecutive_outcome_failures, replan_count=$__replan_count"
-                            append_lesson "outcome" \
-                                "Acceptance criteria not met after $outcome_attempt attempts: $failure_summary" \
-                                "Triggered circuit breaker and re-planned from scratch" \
-                                "When acceptance criteria fail twice, the implementation misunderstands the spec — re-read spec carefully before coding"
-                            if (( __replan_count >= 1 )); then
-                                print_error "Circuit breaker triggered again after re-planning. Stopping task."
-                                mark_task_blocked "$task" "Circuit breaker: outcome verification failed twice even after re-planning"
-                                clear_task_progress
-                                return 1
-                            fi
-                            ((__replan_count++))
-                            __replan_context="CIRCUIT BREAKER: Outcome verification failed twice. Unmet criteria: $failure_summary. Re-read the spec in .claude/spec.md. Knowing everything you know now, scrap this and implement the elegant solution."
-                            print_debug "Re-plan context: $__replan_context"
-                            __need_replan=true
-                            __completed_phases=""
-                            __cleanup_tdd_artifacts
-                            clear_task_progress
-                            update_workflow_state "replanning" "running"
-                            break
-                        fi
-                        # Rebuild to fix failing criteria
-                        ((build_attempt++))
-                        run_phase_group "build" "$task" "OUTCOME FIX: $partial_details | RULE: Partial acceptance means the implementation is incomplete — re-read the specific failing criteria in .claude/spec.md before writing any code. | $__spec_context"$'\n\n'"$__lesson_instruction" || { mark_task_blocked "$task" "build phase failed during outcome fix"; clear_task_progress; return 1; }
-                        if [[ "$task_complexity" == "trivial" || "$task_complexity" == "simple" ]]; then
-                            cr_verdict="approved"
-                        else
-                            run_optional_simplify "$task" "${__spec_context}"
-                            run_phase_group "codereview" "$task" "${__spec_context}" || { mark_task_blocked "$task" "codereview phase failed to produce a valid result"; clear_task_progress; return 1; }
-                            cr_verdict=$(jq -r '.verdict' "$PHASE_RESULT_FILE")
-                        fi
-                        if [[ "$cr_verdict" == "needs_rebuild" ]]; then
-                            mark_task_blocked "$task" "Code review rejected rebuild at outcome stage"
-                            clear_task_progress; return 1
-                        fi
-                        if [[ "$task_complexity" != "trivial" ]]; then
-                            run_phase_group "test" "$task" "$__spec_context" || { mark_task_blocked "$task" "test phase failed during outcome fix"; clear_task_progress; return 1; }
-                        fi
-                        continue
-                    else
-                        local partial_details
-                        partial_details=$(jq -r '.details // "Some acceptance criteria not met"' "$PHASE_RESULT_FILE")
-                        print_warning "Outcome verification: some acceptance criteria not fully met. Proceeding without --strict."
-                        print_warning "Details: $partial_details"
-                        print_debug "Outcome partial — proceeding (strict=$STRICT_MODE)"
-                        break
-                    fi
-                    ;;
-                failed)
-                    ((consecutive_outcome_failures++))
-                    if (( consecutive_outcome_failures >= 2 )); then
-                        local failure_summary
-                        failure_summary=$(jq -r '.details // "Outcome verification failed twice"' "$PHASE_RESULT_FILE")
-                        print_warning "[CIRCUIT BREAKER] Approach failed twice at Outcome Verification. Re-planning from scratch."
-                        print_debug "Circuit breaker: consecutive_failures=$consecutive_outcome_failures, replan_count=$__replan_count"
-                        append_lesson "outcome" \
-                            "Acceptance criteria failed after $outcome_attempt attempts: $failure_summary" \
-                            "Triggered circuit breaker and re-planned from scratch" \
-                            "When acceptance criteria fail twice, the implementation misunderstands the spec — re-read spec before coding"
-                        if (( __replan_count >= 1 )); then
-                            print_error "Circuit breaker triggered again after re-planning. Stopping task."
-                            mark_task_blocked "$task" "Circuit breaker: outcome verification failed twice even after re-planning"
-                            clear_task_progress
-                            return 1
-                        fi
-                        ((__replan_count++))
-                        __replan_context="CIRCUIT BREAKER: Outcome verification failed twice. Unmet criteria: $failure_summary. Re-read the spec in .claude/spec.md. Knowing everything you know now, scrap this and implement the elegant solution."
-                        print_debug "Re-plan context: $__replan_context"
-                        __need_replan=true
-                        __completed_phases=""
-                        __cleanup_tdd_artifacts
-                        clear_task_progress
-                        update_workflow_state "replanning" "running"
-                        break
-                    fi
-                    local rebuild_ctx
-                    rebuild_ctx=$(jq -r '.details // "Acceptance criteria not met"' "$PHASE_RESULT_FILE")
-                    print_info "Outcome verification failed — rebuilding to fix failing criteria..."
-                    append_lesson "outcome" \
-                        "Acceptance criteria failed: $rebuild_ctx" \
-                        "Rebuilt with targeted fix for failing criteria" \
-                        "Always run the feature against its acceptance criteria before consider it done"
-                    ((build_attempt++))
-                    run_phase_group "build" "$task" "OUTCOME FIX: $rebuild_ctx | $__spec_context"$'\n\n'"$__lesson_instruction" || { mark_task_blocked "$task" "build phase failed during outcome fix"; clear_task_progress; return 1; }
-                    if [[ "$task_complexity" == "trivial" || "$task_complexity" == "simple" ]]; then
-                        cr_verdict="approved"
-                    else
-                        run_optional_simplify "$task" "${__spec_context}"
-                        run_phase_group "codereview" "$task" "${__spec_context}" || { mark_task_blocked "$task" "codereview phase failed to produce a valid result"; clear_task_progress; return 1; }
-                        cr_verdict=$(jq -r '.verdict' "$PHASE_RESULT_FILE")
-                    fi
-                    if [[ "$cr_verdict" == "needs_rebuild" ]]; then
-                        mark_task_blocked "$task" "Code review rejected rebuild at outcome stage"
-                        clear_task_progress; return 1
-                    fi
-                    if [[ "$task_complexity" != "trivial" ]]; then
-                        run_phase_group "test" "$task" "$__spec_context" || { mark_task_blocked "$task" "test phase failed during outcome fix"; clear_task_progress; return 1; }
-                    fi
-                    continue ;;
-                *)
-                    mark_task_blocked "$task" "Unexpected outcome verdict: $outcome_verdict"
-                    clear_task_progress
-                    return 1 ;;
-            esac
-        done
-
-        if [[ "$__need_replan" == "true" ]]; then
-            continue  # restart outer while loop
-        fi
-
-        __completed_phases="${__completed_phases:+$__completed_phases }outcome"
-        save_task_progress "$task" "$__completed_phases" "$__INVOCATION_COUNT"
+    # --- batch build-only early exit ---
+    if [[ "$_BATCH_BUILD_ONLY" == "true" ]]; then
+        git add -A 2>/dev/null
+        git commit -m "buildcrew(batch-build): $task" --allow-empty 2>/dev/null || true
+        print_info "Stopping after build phase (batch mode)"
+        clear_task_progress
+        rm -f "$CURRENT_TASK_FILE"
+        mark_task_complete "$task"
+        break
     fi
 
     # --- verify + commit (never skipped — always re-verify) ---
+    # NOTE: Outcome verification (AC checks) is now absorbed into the verify phase.
+    # The verify SKILL runs 3 parallel sub-agents: security audit, test suite, AC verification.
     local verify_attempt=0
     local consecutive_verify_failures=0
     while true; do

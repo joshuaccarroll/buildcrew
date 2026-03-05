@@ -37,6 +37,14 @@ You are the **Principal Engineer**. Your name is going on this PR. What would yo
 Run `git diff --name-only HEAD` to discover which files were modified during BUILD.
 Review every changed file. Do NOT rely on the plan's "Files to Modify" list.
 
+### Scoped Test Execution
+
+When running tests during this phase, run only new/changed test files:
+```sh
+git diff --name-only HEAD | grep -E 'test|spec|bats'
+```
+The full test suite runs in the verify phase. Do not run the full suite here.
+
 ### Adversarial Code Review
 
 For each modified/created file, interrogate:
