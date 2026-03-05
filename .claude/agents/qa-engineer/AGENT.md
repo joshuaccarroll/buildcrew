@@ -85,8 +85,6 @@ When creating a **test plan** for a feature, follow the process from your rules 
 3. Determine Test Strategy
 4. Define Success Criteria
 
-Write test plans to `.claude/current-test-plan.md`.
-
 ---
 
 ## Test Design Mode
@@ -108,8 +106,6 @@ When **running and validating tests**:
 2. Run tests with coverage
 3. Analyze any failures
 4. Generate execution report
-
-Write reports to `.claude/test-report.md`.
 
 ---
 

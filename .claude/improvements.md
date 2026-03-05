@@ -38,16 +38,7 @@ Track completed phases in `.buildcrew/task-progress.json`. Add `--resume` flag t
 
 - [x] Done
 
-### 5. Treat `test_failure` like `needs_rebuild` in build loop
-**Category**: Improvement
-**Priority**: Medium
-**Files**: `lib/workflow.sh` (lines 542-544)
-
-Currently `test_failure` immediately blocks the task in the build loop, while `needs_rebuild` gets a retry. The verify loop already rebuilds on test failures (lines 569-571), so the tool acknowledges rebuilds can fix test issues — just not in the build loop. Give `test_failure` one more build attempt before blocking.
-
-- [x] Done
-
-### 6. Remove README update from research/plan phase
+### 5. Remove README update from research/plan phase
 **Category**: Token savings
 **Priority**: Medium
 **Files**: `skills/buildcrew-research/SKILL.md` (lines 185-189)
@@ -56,25 +47,25 @@ The research skill updates README speculatively (before code exists), then the b
 
 - [x] Done
 
-### 7. Archive artifacts for blocked tasks
+### 6. Archive artifacts for blocked tasks
 **Category**: Feature
 **Priority**: Low
 **Files**: `lib/workflow.sh` (lines 466-469)
 
-Artifacts are deleted at the start of each task. If a task was blocked, the debugging artifacts (research.md, plan-review.md, test-report.md, etc.) are gone when the next task starts. Save them to `.buildcrew/history/<task-slug>/<timestamp>/` before cleanup.
+Artifacts are deleted at the start of each task. If a task was blocked, the debugging artifacts (research.md, plan-review.md, etc.) are gone when the next task starts. Save them to `.buildcrew/history/<task-slug>/<timestamp>/` before cleanup.
 
 - [x] Done
 
-### 8. Richer context on verify-failure rebuilds
+### 7. Richer context on verify-failure rebuilds
 **Category**: Quality
 **Priority**: Low
 **Files**: `lib/workflow.sh` (line 570), `skills/buildcrew-build/SKILL.md`
 
-When verify fails and triggers a rebuild, the context passed is thin: `"Verify failed: $failing. Fix and rebuild."` The build skill doesn't know to read `.claude/security-audit.md` or `.claude/test-report.md`. Fix: (a) pass structured failure details in the orchestrator's extra_context, and (b) add conditional instructions to the build skill to read failure artifacts when rebuilding.
+When verify fails and triggers a rebuild, the context passed is thin: `"Verify failed: $failing. Fix and rebuild."` The build skill doesn't know to read `.claude/security-audit.md` or `.claude/verify-report.md`. Fix: (a) pass structured failure details in the orchestrator's extra_context, and (b) add conditional instructions to the build skill to read failure artifacts when rebuilding.
 
 - [x] Done
 
-### 9. Add `--task` targeting
+### 8. Add `--task` targeting
 **Category**: QoL
 **Priority**: Low
 **Files**: `lib/workflow.sh`, `bin/buildcrew`
@@ -83,7 +74,7 @@ Add `buildcrew run --task "task name"` or `--task 3` to process a specific task 
 
 - [x] Done
 
-### 10. Add `buildcrew reset` command
+### 9. Add `buildcrew reset` command
 **Category**: QoL
 **Priority**: Low
 **Files**: `bin/buildcrew`

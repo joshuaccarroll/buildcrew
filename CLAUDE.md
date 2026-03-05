@@ -3,7 +3,7 @@
 ## Architecture
 
 - The shell orchestrator (`lib/workflow.sh`) launches `claude -p` once per phase in **phase-isolated mode**.
-- Each phase is a separate skill: `skills/buildcrew-*/SKILL.md` (spec, research, review, build, simplify, codereview, test, outcome, verify).
+- Each phase is a separate skill: `skills/buildcrew-*/SKILL.md` (spec, research, review, build, simplify, codereview, outcome, verify).
 - **UAT subsystem** (`lib/uat.sh`, `lib/uat_signal.sh`, `lib/artifact.sh`) provides blind scenario-based acceptance testing.
 - All orchestrator↔Claude communication is **file-based only** — no pipes, no env vars, no return values.
 
@@ -29,7 +29,6 @@ An unknown verdict hits the catch-all and marks the task blocked:
 | build      | `complete`                                   |
 | simplify   | `complete`                                   |
 | codereview | `approved`, `needs_rebuild`                  |
-| test       | `approved`, `needs_rebuild`, `test_failure`  |
 | outcome    | `passed`, `partial`, `failed`                |
 | tdd-scaffold | `complete`, `blocked`                      |
 | verify     | `complete`, `blocked`                        |
@@ -97,10 +96,9 @@ When context is compacted, always preserve:
 4. **build** — Implement per plan
 5. **simplify** — Non-blocking review: apply targeted simplifications before formal review
 6. **codereview** — Adversarial code review + elegance check; may request rebuild
-7. **test** — QA Engineer writes and runs tests
-8. **outcome** — Verify implementation against spec acceptance criteria
-9. **verify** — Security audit + commit
-10. **inline UAT** — Blind scenario-based acceptance testing against README.md (runs for non-trivial tasks with a README.md; skip with `--no-uat`)
+7. **outcome** — Verify implementation against spec acceptance criteria
+8. **verify** — Security audit + commit
+9. **inline UAT** — Blind scenario-based acceptance testing against README.md (runs for non-trivial tasks with a README.md; skip with `--no-uat`)
 
 ## Modes
 
@@ -111,6 +109,6 @@ BuildCrew has two runtime modes:
 
 - **TDD** — Always active for `standard` complexity tasks. Inserts a tdd-scaffold phase between plan-review and build. Tests are written before implementation and verified to fail, then the build phase must make them pass. Trivial/simple tasks skip tdd-scaffold.
 
-- **Inline UAT** — Runs automatically after verify for all non-trivial tasks that have a `README.md`. The UAT subsystem publishes an artifact, generates user stories and scenarios from the README, then executes them in an isolated working directory. On failure, it triggers a rebuild loop (build -> simplify -> codereview -> test -> verify) and retries. Disable with `--no-uat`.
+- **Inline UAT** — Runs automatically after verify for all non-trivial tasks that have a `README.md`. The UAT subsystem publishes an artifact, generates user stories and scenarios from the README, then executes them in an isolated working directory. On failure, it triggers a rebuild loop (build -> simplify -> codereview -> verify) and retries. Disable with `--no-uat`.
 
 Note: "Chunked Build Mode" is a separate concept (sub-mode within the build phase for large builds). It is unrelated to the modes above.
