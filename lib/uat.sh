@@ -541,7 +541,8 @@ uat_run_phases() {
     local run_start_time; run_start_time=$(date +%s)
 
     # Set up cleanup trap
-    trap 'uat_cleanup' EXIT INT TERM
+    trap 'uat_cleanup; exit 130' INT TERM
+    trap 'uat_cleanup' EXIT
 
     # Initialize logging
     log_init
@@ -1389,7 +1390,11 @@ uat_stop_server() {
 # 11. uat_cleanup — Cleanup trap
 # ═══════════════════════════════════════════════════════════════════════════════
 
+__uat_cleaned=false
 uat_cleanup() {
+    [[ "$__uat_cleaned" == "true" ]] && return
+    __uat_cleaned=true
+
     # Stop any running server
     uat_stop_server
 
@@ -1398,4 +1403,10 @@ uat_cleanup() {
 
     # Clear temp files
     rm -f "$UAT_PHASE_RESULT_FILE" 2>/dev/null || true
+
+    # Remove stale artifact directory for this project
+    if [[ -n "${UAT_PROJECT_NAME:-}" ]]; then
+        local artifact_dir="${UAT_ARTIFACT_DIR:-${HOME}/.buildcrew/artifacts}/${UAT_PROJECT_NAME}"
+        rm -rf "$artifact_dir" 2>/dev/null || true
+    fi
 }

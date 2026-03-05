@@ -3998,9 +3998,14 @@ process_task_isolated() {
     # The project_name is derived from the current directory name.
     if [[ "${UAT_MODE:-}" == "true" ]]; then
         local project_name
-        project_name="$(basename "$(pwd)")"
+        project_name=$(extract_task_dir "$task")
+        if [[ -z "$project_name" ]]; then
+            project_name="$(basename "$(pwd)")"
+        fi
+        local task_for_uat
+        task_for_uat=$(strip_task_dir "$task")
         local uat_result=0
-        enter_uat_watch_mode "$project_name" "$task" "$task_complexity" || uat_result=$?
+        enter_uat_watch_mode "$project_name" "$task_for_uat" "$task_complexity" || uat_result=$?
         if [[ $uat_result -eq 2 ]]; then
             print_warning "UAT completed with disputed scenarios (exit 2)"
             exit 2

@@ -1195,3 +1195,42 @@ EOF
     [[ "$output" != *"Duration:"* ]]
     rm -rf "$signal_dir"
 }
+
+# ─────────────────────────────────────────────────────────────────────────────
+# uat_cleanup idempotency
+# ─────────────────────────────────────────────────────────────────────────────
+
+@test "uat_cleanup: idempotency guard prevents double cleanup" {
+    # Reset the guard
+    __uat_cleaned=false
+    UAT_PHASE_RESULT_FILE="$TEST_DIR/.claude/phase-result.json"
+    mkdir -p "$TEST_DIR/.claude"
+    touch "$UAT_PHASE_RESULT_FILE"
+
+    # First call should run cleanup
+    uat_cleanup
+    [[ "$__uat_cleaned" == "true" ]]
+
+    # Create the file again to prove second call is a no-op
+    touch "$UAT_PHASE_RESULT_FILE"
+    uat_cleanup
+    # File still exists because second call was short-circuited
+    [[ -f "$UAT_PHASE_RESULT_FILE" ]]
+}
+
+@test "uat_cleanup: removes stale artifact directory when UAT_PROJECT_NAME set" {
+    __uat_cleaned=false
+    UAT_PHASE_RESULT_FILE="$TEST_DIR/.claude/phase-result.json"
+    mkdir -p "$TEST_DIR/.claude"
+
+    local artifact_base="$TEST_DIR/artifacts"
+    UAT_ARTIFACT_DIR="$artifact_base"
+    UAT_PROJECT_NAME="test-project"
+    mkdir -p "$artifact_base/test-project"
+    touch "$artifact_base/test-project/some-artifact.txt"
+
+    uat_cleanup
+
+    # Artifact directory should be removed
+    [[ ! -d "$artifact_base/test-project" ]]
+}
