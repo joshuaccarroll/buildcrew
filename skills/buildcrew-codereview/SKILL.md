@@ -6,7 +6,7 @@ allowed-tools: Read, Write, Edit, Glob, Grep, Bash, Task
 
 # BuildCrew — Code Review
 
-`[Phase: codereview | Input: built code, .claude/current-plan.md | Output: .claude/code-review.md | Next: test or build]`
+`[Phase: codereview | Input: built code, .claude/current-plan.md | Output: .claude/code-review.md | Next: verify or build]`
 
 You are executing the code-review phase of the BuildCrew autonomous development workflow.
 
@@ -93,6 +93,17 @@ After identifying flaws, ask: **"Knowing what I now know about this feature, is 
 - If flagged: the review verdict should still reflect code quality, but the Build phase can optionally refactor toward the simpler approach.
 - If no simpler approach is apparent, omit this section.
 
+### Adversarial Coverage Check
+
+Review the implementation for edge-case coverage gaps. Consider:
+- Wrong input types, null/empty values, boundary conditions
+- Out-of-order operations, missing prerequisites
+- Repeated/idempotent calls, concurrent access
+
+If significant gaps exist, issue `needs_rebuild` requesting the build agent
+add targeted edge-case tests in the TDD test directory. Be specific about
+which failure modes need coverage rather than requesting a minimum count.
+
 ### Before Writing Your Verdict
 
 If you are about to write `APPROVED` with no concerns:
@@ -140,7 +151,7 @@ Write your review to `.claude/code-review.md`:
 
 ### Verdict Definitions
 
-- **APPROVED**: Code is ready for testing. Minor/advisory findings are logged but don't block.
+- **APPROVED**: Code is ready for verification. Minor/advisory findings are logged but don't block.
 - **NEEDS_REFACTOR** (repair): Issues are localized, approach is sound. Fix specific things and re-review.
 - **NEEDS_REBUILD** (regenerate): Implementation diverged from plan, issues are structural, or fixing means rewriting most of the code.
 

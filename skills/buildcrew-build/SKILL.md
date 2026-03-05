@@ -50,7 +50,7 @@ Red flags that trigger rebuild: wrong architecture pattern | fundamentally wrong
 If the context mentions **REBUILD AFTER VERIFY FAILURE**, this is a targeted fix — not a full rebuild. Before writing any code:
 
 1. **Read the failure artifacts** referenced in the context:
-   - Test failures → read `.claude/test-report.md` and `.claude/verify-report.md`
+   - Test failures → read `.claude/verify-report.md`
    - Security failures → read `.claude/security-audit.md` and `.claude/verify-report.md`
 2. **Identify the specific failures** — extract the exact test names, error messages, or vulnerability descriptions
 3. **Make surgical fixes** — only change what's needed to resolve the failures. Do not refactor or expand scope.
@@ -88,7 +88,7 @@ When you encounter routine errors during the build, attempt to fix them directly
 - The error suggests the approach itself is wrong (e.g., "cannot extend final class", "circular dependency", "interface not satisfied")
 - The fix would require changing files you did NOT modify during this build (framework files, dependencies, unrelated modules)
 - Your first autonomous fix attempt failed
-- The error is in test files (test fixes belong in the test phase)
+- The error is in test files — fix test errors directly or flag in phase-result details
 
 When escalating, write the phase result with the error details so the review phase has full context.
 

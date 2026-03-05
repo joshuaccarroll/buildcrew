@@ -298,7 +298,7 @@ Create `.claude/workflow-status.json`:
 ## Lessons Awareness
 
 Before finalizing, check if this task encountered any failures that were resolved:
-- Review `.claude/code-review.md` and `.claude/test-report.md` for failure/retry evidence
+- Review `.claude/verify-report.md` and `.claude/code-review.md` for failure/retry evidence
 - Check existing `.buildcrew/lessons.md` for relevance to the code being committed
 
 If failures were resolved during this task and no lesson has been recorded for them, append a retrospective lesson to `.buildcrew/lessons.md` using this format:
