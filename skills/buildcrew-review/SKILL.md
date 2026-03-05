@@ -73,6 +73,9 @@ Read `.claude/current-plan.md` and interrogate it against:
    - Are foundations laid before features?
    - Each step: does it produce a verifiable state?
    - Human prerequisites (API keys, accounts, DNS) — are they early enough?
+   - **Cross-reference lint**: For each step that names a file, function, or config key, verify
+     it matches an actual artifact in the codebase or is explicitly created by an earlier step.
+     Flag any dangling reference (typo, renamed symbol, removed file) as NEEDS_REVISION.
 
 Write your review to `.claude/review-pass1-pe.md`. Do NOT modify `.claude/current-plan.md`.
 Keep your review concise: max 80 lines. Focus on the top 3-5 findings, not exhaustive nitpicking.

@@ -399,6 +399,79 @@ __inject_tdd_prompt() {
     esac
 }
 
+# Lock TDD test files to read-only during the build phase.
+# Prevents accidental modification — tamper detection via checksums remains
+# the canonical gate, but chmod provides a first line of defence.
+# Args: none (reads .claude/tdd-manifest.json)
+__lock_tdd_files() {
+    [[ "$TDD_MODE" == "true" ]] || return 0
+    [[ -f ".claude/tdd-manifest.json" ]] || return 0
+    local _f
+    for _f in $(jq -r '.test_files[]? // empty' ".claude/tdd-manifest.json" 2>/dev/null); do
+        [[ -f "$_f" ]] && chmod a-w "$_f" 2>/dev/null || true
+    done
+}
+
+# Restore write permissions on TDD test files after the build phase.
+# Must be called even if the build fails (use __with_tdd_lock for safety).
+__unlock_tdd_files() {
+    [[ "$TDD_MODE" == "true" ]] || return 0
+    [[ -f ".claude/tdd-manifest.json" ]] || return 0
+    local _f
+    for _f in $(jq -r '.test_files[]? // empty' ".claude/tdd-manifest.json" 2>/dev/null); do
+        [[ -f "$_f" ]] && chmod u+w "$_f" 2>/dev/null || true
+    done
+}
+
+# Run a command with TDD files locked (read-only) for the duration.
+# Ensures unlock happens even if the command fails.
+# Usage: __with_tdd_lock run_phase_group "build" "$task" "$ctx"
+__with_tdd_lock() {
+    __lock_tdd_files
+    local _rc=0
+    "$@" || _rc=$?
+    __unlock_tdd_files
+    return $_rc
+}
+
+# Run a command with a timeout (in seconds). Returns 124 on timeout.
+# Args: $1=timeout_seconds  $2...=command and args
+__run_with_timeout() {
+    local timeout="$1"; shift
+    if command -v timeout >/dev/null 2>&1; then
+        timeout "$timeout" "$@"
+    else
+        # macOS fallback: use perl alarm
+        perl -e 'alarm shift; exec @ARGV' "$timeout" "$@"
+    fi
+}
+
+# Validate TDD scaffold output: run the test command and verify tests fail.
+# If tests pass (exit 0) the scaffold is invalid — tests should fail before build.
+# Returns 0 if validation passes (tests failed as expected), 1 otherwise.
+__validate_tdd_scaffold() {
+    [[ "$TDD_MODE" == "true" ]] || return 0
+    [[ -f ".claude/tdd-manifest.json" ]] || return 0
+    local test_cmd
+    test_cmd=$(jq -r '.test_command // ""' ".claude/tdd-manifest.json" 2>/dev/null)
+    [[ -n "$test_cmd" ]] || return 0
+
+    print_info "Validating TDD scaffold — tests should fail..."
+    local rc=0
+    __run_with_timeout 30 bash -c "$test_cmd" >/dev/null 2>&1 || rc=$?
+
+    if [[ $rc -eq 0 ]]; then
+        print_warning "TDD scaffold validation failed: tests pass before build (expected failures)"
+        return 1
+    elif [[ $rc -eq 124 ]]; then
+        print_warning "TDD scaffold validation timed out (30s) — proceeding anyway"
+        return 0
+    else
+        print_info "TDD scaffold validated — tests fail as expected (exit $rc)"
+        return 0
+    fi
+}
+
 # Clean up TDD scaffold artifacts before re-planning.
 # Safe: only removes files in the dedicated tests/tdd/ directory and stubs.
 __cleanup_tdd_artifacts() {
@@ -3743,7 +3816,14 @@ process_task_isolated() {
             local tdd_verdict
             tdd_verdict=$(jq -r '.verdict // "unknown"' "$PHASE_RESULT_FILE")
             case "$tdd_verdict" in
-                complete) print_info "TDD scaffold complete — failing tests written" ;;
+                complete)
+                    print_info "TDD scaffold complete — failing tests written"
+                    if ! __validate_tdd_scaffold; then
+                        print_warning "TDD scaffold produced passing tests — treating as blocked"
+                        mark_task_blocked "$task" "TDD scaffold invalid: tests pass before build"
+                        clear_task_progress; return 1
+                    fi
+                    ;;
                 blocked)  print_warning "TDD scaffold blocked — proceeding without TDD" ;;
                 *) mark_task_blocked "$task" "Unexpected tdd-scaffold verdict: $tdd_verdict"
                    clear_task_progress; return 1 ;;
@@ -3775,15 +3855,24 @@ process_task_isolated() {
                 prev_reason=$(jq -r '.details // "unknown"' "$PHASE_RESULT_FILE")
                 build_context="${build_context:+$build_context | }This is build attempt $build_attempt. Previous attempt failed: $prev_reason. Avoid the same mistakes."
                 build_context="$build_context"$'\n\n'"$__lesson_instruction"
+                # Inject code-review feedback so the build agent knows what to fix
+                if [[ -f ".claude/code-review.md" ]]; then
+                    local cr_feedback
+                    cr_feedback=$(head -80 ".claude/code-review.md")
+                    build_context="$build_context"$'\n\n'"## Code Review Feedback (from previous attempt)"$'\n'"$cr_feedback"
+                fi
             fi
 
+            # Ensure stale TDD locks are cleared before each build attempt
+            __unlock_tdd_files
+
             local build_result=0
-            run_phase_group "build" "$task" "$build_context" || build_result=$?
+            __with_tdd_lock run_phase_group "build" "$task" "$build_context" || build_result=$?
 
             if [[ $build_result -eq 2 ]]; then
                 print_info "Build hit max-turns. Switching to chunked build."
                 local chunked_result=0
-                run_chunked_build "$task" "$__spec_context" || chunked_result=$?
+                __with_tdd_lock run_chunked_build "$task" "$__spec_context" || chunked_result=$?
                 if [[ $chunked_result -ne 0 ]]; then
                     local block_reason="Chunked build failed"
                     [[ $chunked_result -eq 2 ]] && block_reason="Build step too large even for chunked execution"

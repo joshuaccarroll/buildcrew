@@ -53,6 +53,7 @@ print_help() {
     echo "    lessons          List recorded lessons"
     echo "    lessons promote  Graduate a lesson to permanent project rules"
     echo "    lessons prune    Interactively remove stale lessons"
+    echo "    lessons lint     Check lessons for vague or weak rules"
     echo "    plugins          Show recommended plugins for your project"
     echo "    update           Check for and install updates"
     echo "    uat              Run blind UAT against a project's README"
@@ -1012,6 +1013,7 @@ cmd_lessons() {
             echo ""
             echo -e "  ${BOLD}buildcrew lessons promote N${NC}   Graduate lesson N to project rules"
             echo -e "  ${BOLD}buildcrew lessons prune${NC}        Interactively remove stale lessons"
+            echo -e "  ${BOLD}buildcrew lessons lint${NC}         Check lessons for vague or weak rules"
             ;;
 
         promote)
@@ -1127,9 +1129,43 @@ EOF
             echo -e "${GREEN}✓${NC} Pruning complete: kept $kept, removed $pruned lesson(s)"
             ;;
 
+        lint)
+            if [[ ! -f "$lessons_file" ]]; then
+                echo -e "${CYAN}No lessons to lint.${NC}"
+                return
+            fi
+
+            # Blocklist of vague first words that indicate a weak rule
+            local blocklist="always|never|ensure|remember|make sure|avoid|try|don't forget|be careful"
+            local issues=0
+            local lesson_num=""
+
+            while IFS= read -r line; do
+                if [[ "$line" =~ ^##\ Lesson\ ([0-9]+): ]]; then
+                    lesson_num="${BASH_REMATCH[1]}"
+                elif [[ "$line" =~ ^\*\*Rule\*\*:\ (.+) ]]; then
+                    local rule="${BASH_REMATCH[1]}"
+                    local first_word
+                    first_word=$(echo "$rule" | awk '{print tolower($1)}')
+                    if echo "$first_word" | grep -qiE "^($blocklist)$"; then
+                        echo -e "  ${YELLOW}⚠${NC} Lesson $lesson_num: rule starts with vague word '${first_word}'"
+                        echo "    Rule: $rule"
+                        ((issues++))
+                    fi
+                fi
+            done < "$lessons_file"
+
+            if [[ $issues -eq 0 ]]; then
+                echo -e "${GREEN}✓${NC} All lesson rules look actionable."
+            else
+                echo ""
+                echo -e "  ${BOLD}$issues${NC} lesson(s) with vague rules. Consider rephrasing to be specific and actionable."
+            fi
+            ;;
+
         *)
             echo -e "${RED}Error:${NC} Unknown lessons subcommand '$subcommand'"
-            echo "Usage: buildcrew lessons [promote <N> | prune]"
+            echo "Usage: buildcrew lessons [promote <N> | prune | lint]"
             exit 1
             ;;
     esac
