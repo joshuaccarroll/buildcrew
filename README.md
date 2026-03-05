@@ -4,7 +4,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-BuildCrew is an autonomous development pipeline where expert AI personas — Product Manager, Feature Engineer, Principal Engineer, QA Engineer, Security Engineer — review each other's work. No single agent has the final say. Each has expertise, standards, and veto power.
+BuildCrew is an autonomous development pipeline (dark factory) that uses a true "Ralph Wiggum Loop," smart subagent parallelization, and expert AI personas (Product Manager, Feature Engineer, Principal Engineer, QA Engineer, Security Engineer) that review each other's work to produce high-quality, working code autonomously.
 
 ---
 
@@ -88,8 +88,8 @@ Each task runs through up to 10 phases (each a separate Claude invocation). Tota
 
 ```bash
 buildcrew init               # Link project to BuildCrew
-buildcrew run                # Run workflow on BACKLOG.md
 buildcrew plan               # Launch Product Manager for project planning
+buildcrew run                # Run workflow on BACKLOG.md
 buildcrew status             # Show backlog stats and last workflow result
 buildcrew stop               # Stop after current task completes
 buildcrew reset              # Clear blocked tasks and clean up artifacts
