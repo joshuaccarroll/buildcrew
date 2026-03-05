@@ -146,6 +146,13 @@ report_template_block() {
     grep -q 'outcome-report.md' "$SKILL_FILE"
 }
 
+@test "ADV09b_cross_reference_artifacts" {
+    # Sub-agent 3 must reference the TDD manifest and ac_coverage for cross-referencing
+    grep -q 'tdd-manifest.json' "$SKILL_FILE"
+    grep -q 'ac_coverage' "$SKILL_FILE"
+    grep -q 'verify-evidence.md' "$SKILL_FILE"
+}
+
 @test "ADV10_batch_mode_context" {
     # Verify batch mode context reading is documented
     grep -q 'batch-combined-context.md' "$SKILL_FILE"

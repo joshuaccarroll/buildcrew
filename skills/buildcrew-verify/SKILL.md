@@ -83,44 +83,33 @@ If test output exceeds 500 lines, keep first 50 and last 200 lines, replacing om
 Spawn a Task sub-agent **(general-purpose type)** with this prompt:
 
 ```
-You are a Senior QA Engineer verifying acceptance criteria.
+You are a QA Engineer performing acceptance criteria cross-referencing.
 
-BATCH MODE CHECK: If `.claude/batch-combined-context.md` exists, read it for acceptance criteria (spec.md may not exist when plan-skip was used). Verify each task's criteria independently.
+BATCH MODE CHECK: If `.claude/batch-combined-context.md` exists, read it for acceptance criteria (spec.md may not exist when plan-skip was used). Extract AC-XX lines from whichever source is available.
 
 SEQUENTIAL MODE: Read `.claude/spec.md`. Extract every acceptance criterion (lines starting with `- [ ] AC-`).
 
-If no spec or acceptance criteria are found, write a report noting this and mark as SKIPPED.
+If no spec, batch context, or acceptance criteria are found: write outcome-report.md noting this and mark as SKIPPED.
 
-For each acceptance criterion:
-1. Understand what it requires — re-read carefully
-2. Exercise the feature — actually run it, call it, or check it. Do not just read code
-3. Determine pass/fail — does actual behavior match the criterion?
+1. Read the AC source identified above. Extract every AC-XX identifier.
+2. Read `.claude/tdd-manifest.json`. Extract the `ac_coverage` mapping.
+3. Read `.claude/verify-evidence.md` (written by sub-agent 2). This contains raw test output (stdout+stderr), not structured results.
 
-Verification methods:
-| Criterion type | How to verify |
-|---------------|---------------|
-| CLI command behavior | Run the command, check stdout/stderr/exit code |
-| File creation/modification | Create precondition, trigger action, check file |
-| Error handling | Trigger error condition, verify error message |
-| Data transformation | Provide input, check output |
+Validation checks:
+- If `tdd-manifest.json` does not exist: verdict is SKIPPED with reason "no TDD manifest (TDD not applicable or scaffold was skipped)." Write outcome-report.md with this status and exit.
+- If `verify-evidence.md` does not exist or contains no test output: verdict is FAIL with reason "missing test evidence from sub-agent 2."
+- If `tdd-manifest.json` exists but `ac_coverage` is missing or empty: verdict is FAIL with reason "manifest has no AC coverage data."
 
-Scope limits: If a criterion requires an external service not available, mark as SKIPPED.
+Cross-reference:
+- Normalize AC identifiers for comparison (case-insensitive, strip leading zeros: AC-1 matches AC-01, strip underscores/spaces so AC_01 also matches). Normalize BOTH the spec-extracted IDs and the manifest keys before comparing. Only the `AC-XX` format (with hyphen) is canonical; normalization is a robustness measure.
+- For each AC-XX in the spec, confirm there is at least one mapped test in ac_coverage.
+- Read the `framework` field from `tdd-manifest.json` to determine the output format. Use framework-specific pass indicators: "ok" for bats/TAP, "PASS" for jest/vitest, "PASSED" for pytest, "ok" for cargo test, "ok"/"PASS" for go test. For each mapped test, search the raw test output in verify-evidence.md for evidence that it passed (test function name near a pass indicator). If the overall test suite exited with rc=0 (check for "All N tests passed", "Tests: X passed", or similar summary line with zero failures), treat all tests as passing.
+- If any AC has no mapped test: flag as UNCOVERED.
+- If any mapped test has no passing evidence in the output: flag as FAILING.
 
-Integration Smoke Test — run if ANY of these are true:
-1. New binary, CLI command, server route, or background worker was added
-2. New environment variable or config key is consumed
-3. New external API or third-party service is called
-4. Modified code paths are callable from existing entry points
-
-Smoke checks:
-- SMOKE-01: Startup, clean state — run entry point with no config. Expect helpful error, not crash
-- SMOKE-02: Startup, valid config — run entry point with valid config. Expect successful init
-- SMOKE-03: End-to-end, happy path — trace complete user journey
-
-Autonomous Fix Attempt (Scoped):
-If a criterion fails and the fix is clearly localized (same file, mechanical error, first attempt), fix it and re-verify. Otherwise mark as failed.
-
-Write results to `.claude/outcome-report.md` with AC results table and smoke test results.
+Write results to `.claude/outcome-report.md`:
+- List each AC, its mapped tests, and status (one per line)
+- End with verdict: PASS (all ACs covered and passing), FAIL (any UNCOVERED or FAILING), or SKIPPED (no manifest or no ACs found)
 ```
 
 ### After All Sub-Agents Complete
@@ -174,11 +163,10 @@ All items must be checked and pass:
 **If architecture issues found**: Write phase-result.json with `blocked` verdict, `failing_check: "architecture"`.
 
 #### 5. Acceptance Criteria Verification
-- [ ] All verifiable acceptance criteria pass — use results from `.claude/outcome-report.md`
-- [ ] Smoke tests pass (if applicable)
-- [ ] No critical criterion failures
+- [ ] All ACs have mapped passing tests per cross-reference report in .claude/outcome-report.md (or SKIPPED if no TDD manifest)
 
-**If AC verification fails**: Write phase-result.json with `blocked` verdict, `failing_check: "acceptance"`.
+**If AC verification FAILS (UNCOVERED or FAILING ACs)**: Write phase-result.json with `blocked` verdict, `failing_check: "acceptance"`.
+**If AC verification is SKIPPED**: Checklist item passes — do not write a blocked verdict.
 
 ### Verify Report
 
@@ -214,11 +202,11 @@ Write verification status to `.claude/verify-report.md`:
 - **Notes**: [Any architectural concerns]
 
 ### Acceptance Criteria
-- **Status**: [PASS | PARTIAL | FAIL]
-- **Passed**: X of Y criteria
-- **Failed**: X criteria
+- **Status**: [PASS | FAIL | SKIPPED]
+- **Covered & Passing**: X of Y criteria
+- **Uncovered**: X criteria
+- **Failing**: X criteria
 - **Skipped**: X criteria
-- **Smoke Tests**: [PASS | FAIL | SKIPPED]
 
 ### Evidence
 - **Source**: `.claude/verify-evidence.md`
