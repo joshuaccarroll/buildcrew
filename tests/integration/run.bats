@@ -237,24 +237,6 @@ EOF
     [[ "$output" == *"discovery mode"* ]]
 }
 
-# ─────────────────────────────────────────────────────────────────────────────
-# --interactive flag compatibility tests
-# ─────────────────────────────────────────────────────────────────────────────
-
-@test "run: --interactive --uat exits with error" {
-    echo "- [ ] Test task" > BACKLOG.md
-    run "$BUILDCREW_HOME/lib/workflow.sh" --interactive --uat
-    [ "$status" -ne 0 ]
-    [[ "$output" == *"--interactive cannot be combined with --uat"* ]]
-}
-
-@test "run: --uat --interactive exits with error (reversed order)" {
-    echo "- [ ] Test task" > BACKLOG.md
-    run "$BUILDCREW_HOME/lib/workflow.sh" --uat --interactive
-    [ "$status" -ne 0 ]
-    [[ "$output" == *"--interactive cannot be combined with --uat"* ]]
-}
-
 @test "run: --review forces sequential (no batch path)" {
     setup_phase_isolation
     echo "- [ ] Test task" > BACKLOG.md

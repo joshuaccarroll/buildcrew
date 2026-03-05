@@ -147,7 +147,6 @@ TDD_MODE=${TDD_MODE:-true}
 TDD_MODE_EXPLICIT=${TDD_MODE_EXPLICIT:-false}
 MAX_PARALLEL=${MAX_PARALLEL:-5}
 TARGET_DIR=${TARGET_DIR:-}
-_BATCH_BUILD_ONLY=${_BATCH_BUILD_ONLY:-false}
 __INVOCATION_COUNT=0
 __RESUME_PHASES=""
 __DISCOVERY_HEARTBEAT_PID=""
@@ -191,7 +190,6 @@ FULL_PIPELINE=false
 SEQUENTIAL_MODE=false
 BATCH_MAX_TURNS=200
 PLAN_MODE=false
-UAT_MODE=false
 INTERACTIVE_FLAG=""
 DEPRECATED_AUTO_USED=""
 
@@ -279,11 +277,6 @@ parse_args() {
                 AUTO_MODE=false
                 shift
                 ;;
-            --uat)
-                UAT_MODE=true
-                AUTO_MODE=true  # --uat requires auto mode (enforced)
-                shift
-                ;;
             --tdd)
                 TDD_MODE=true
                 TDD_MODE_EXPLICIT=true
@@ -340,7 +333,6 @@ parse_args() {
                 echo "  --full-pipeline  Force all phases regardless of complexity assessment"
                 echo "  --auto       (deprecated) Auto mode is now the default. Use --interactive to opt out"
                 echo "  --interactive Restore interactive pauses (spec review, plan review, human review)"
-                echo "  --uat        After build completes, enter watch mode for UAT verdicts (implies --auto)"
                 echo "  --tdd        (deprecated) TDD is now enabled by default; this flag is a no-op"
                 echo "  --no-tdd     Disable TDD mode (skip tdd-scaffold phase)"
                 echo "  --sequential Run tasks one at a time (opt out of parallel batch mode)"
@@ -856,12 +848,6 @@ _batch_launch_task() {
         export BUILDCREW_BATCH_NONCE="${slug}-${idx}"
         export BUILDCREW_HOME
         export AUTO_MODE=true  # Batch workers must run unattended
-        # UAT mode needs full pipeline; otherwise stop after build (merge+test centrally)
-        if [[ "$UAT_MODE" == "true" ]]; then
-            export _BATCH_BUILD_ONLY=false
-        else
-            export _BATCH_BUILD_ONLY=true
-        fi
 
         # When target_dir is set, export absolute BACKLOG_FILE path back to parent
         if [[ -n "$target_dir" ]]; then
@@ -873,7 +859,6 @@ _batch_launch_task() {
             --max-invocations "$MAX_INVOCATIONS" \
             $( [[ "$SKIP_SPEC" == "true" ]] && echo "--skip-spec" ) \
             $( [[ "$FULL_PIPELINE" == "true" ]] && echo "--full-pipeline" ) \
-            $( [[ "$UAT_MODE" == "true" ]] && echo "--uat" ) \
             $( [[ "$VERBOSE" == "true" ]] && echo "--verbose" ) \
             > ".buildcrew/logs/batch-${slug}.log" 2>&1
     ) &
@@ -3221,275 +3206,6 @@ build_verify_failure_context() {
     echo "$context"
 }
 
-# ═════════════════════════════════════════════════════════════════════════════════
-# UAT Watch Mode (--uat flag on buildcrew run)
-# ═════════════════════════════════════════════════════════════════════════════════
-#
-# After the standard build pipeline completes (build through verify), this
-# function publishes the artifact and enters a polling loop that watches for
-# UAT verdict files. On failure/error verdicts, it re-enters the build pipeline
-# with the verdict context, then republishes the artifact.
-#
-# Called from the end of process_task_isolated() when UAT_MODE=true.
-# ═════════════════════════════════════════════════════════════════════════════════
-
-# enter_uat_watch_mode — poll for UAT verdicts and retry on failure.
-# Args: project_name task task_complexity
-# Returns: 0 on all-pass, 1 on max retries/timeout, 2 on only-disputed
-enter_uat_watch_mode() {
-    local project_name="$1"
-    local task="$2"
-    local task_complexity="${3:-standard}"
-
-    # Source artifact.sh and uat_signal.sh (idempotent via source guards)
-    local __wf_lib_dir
-    __wf_lib_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-    source "$__wf_lib_dir/artifact.sh"
-    source "$__wf_lib_dir/uat_signal.sh"
-
-    # Read config defaults
-    local max_retries="${UAT_MAX_RETRIES:-5}"
-    local watch_timeout="${BUILD_UAT_WATCH_TIMEOUT:-600}"
-    local poll_interval=5
-
-    # Load from .buildcrew/config if available (config overrides defaults)
-    local cfg_val
-    cfg_val=$(read_config_key "UAT_MAX_RETRIES")
-    [[ -n "$cfg_val" ]] && max_retries="$cfg_val"
-    cfg_val=$(read_config_key "BUILD_UAT_WATCH_TIMEOUT")
-    [[ -n "$cfg_val" ]] && watch_timeout="$cfg_val"
-
-    print_header "UAT Watch Mode"
-    print_info "Project: $project_name"
-    print_info "Max retries: $max_retries | Timeout: ${watch_timeout}s"
-
-    # 1. Publish artifact
-    publish_artifact "$project_name" || {
-        print_error "Failed to publish artifact for UAT"
-        return 1
-    }
-
-    local current_iteration="$__MANIFEST_BUILD_ITERATION"
-    if [[ -z "$current_iteration" ]]; then
-        # Re-read manifest to get the iteration
-        local manifest_path="$HOME/.buildcrew/artifacts/$project_name/manifest.json"
-        current_iteration=$(jq -r '.build_iteration // 1' "$manifest_path" 2>/dev/null) || current_iteration=1
-    fi
-
-    # 2. Create signal directory
-    create_signal_dir "$project_name" || {
-        print_error "Failed to create signal directory"
-        return 1
-    }
-
-    local signal_dir="$HOME/.buildcrew/uat-signals/$project_name"
-
-    # Read last processed iteration (crash-safe resume)
-    local last_processed
-    last_processed=$(read_last_processed_iteration ".buildcrew")
-
-    # Track UAT retry count
-    local uat_retry_count=0
-    local watch_start_time
-    watch_start_time=$(date +%s)
-
-    # Trap for cleanup on Ctrl-C during watch mode
-    local __uat_watch_running=true
-    trap '__uat_watch_running=false' INT TERM
-
-    print_info "Watching for UAT verdict at: $signal_dir/verdict.json"
-    print_info "Published artifact iteration: $current_iteration"
-
-    # 3. Enter polling loop
-    while [[ "$__uat_watch_running" == "true" ]]; do
-        # Check timeout
-        local now
-        now=$(date +%s)
-        local elapsed=$((now - watch_start_time))
-        if (( elapsed >= watch_timeout )); then
-            print_warning "UAT watch mode timed out after ${watch_timeout}s without receiving a matching verdict"
-            trap - INT TERM
-            return 1
-        fi
-
-        # Check for stop signal
-        if [[ -f "$STOP_FILE" ]]; then
-            print_info "Stop signal received — exiting watch mode"
-            trap - INT TERM
-            return 0
-        fi
-
-        # Poll for verdict
-        if ! read_verdict "$signal_dir"; then
-            sleep "$poll_interval"
-            continue
-        fi
-
-        # Check if this verdict matches our current published iteration
-        if [[ "$__VERDICT_BUILD_ITERATION" != "$current_iteration" ]]; then
-            print_debug "Verdict iteration ($__VERDICT_BUILD_ITERATION) does not match published iteration ($current_iteration) — skipping"
-            sleep "$poll_interval"
-            continue
-        fi
-
-        # Check if we already processed this iteration
-        if [[ "$__VERDICT_BUILD_ITERATION" -le "$last_processed" ]]; then
-            print_debug "Verdict iteration ($__VERDICT_BUILD_ITERATION) already processed — skipping"
-            sleep "$poll_interval"
-            continue
-        fi
-
-        # ── Process verdict ──────────────────────────────────────────────────
-        print_info "Verdict received: status=$__VERDICT_STATUS passed=$__VERDICT_PASSED failed=$__VERDICT_FAILED errored=$__VERDICT_ERRORED disputed=$__VERDICT_DISPUTED"
-
-        case "$__VERDICT_STATUS" in
-            pass)
-                print_success "UAT: All $__VERDICT_TOTAL scenarios passed!"
-                trap - INT TERM
-                return 0
-                ;;
-
-            fail|error)
-                ((uat_retry_count++))
-
-                if (( uat_retry_count > max_retries )); then
-                    print_error "UAT: Max retries ($max_retries) exhausted"
-                    print_info "Remaining failures: $__VERDICT_FAILED, errors: $__VERDICT_ERRORED"
-                    trap - INT TERM
-                    return 1
-                fi
-
-                print_warning "UAT: ${__VERDICT_FAILED} failures, ${__VERDICT_ERRORED} errors (retry $uat_retry_count/$max_retries)"
-
-                # Write uat-context.md for the build agent
-                local verdict_file="$signal_dir/verdict.json"
-                write_uat_context "$verdict_file" "$uat_retry_count" "$max_retries" || {
-                    print_error "Failed to write UAT context"
-                }
-
-                # Persist last processed iteration (crash-safe)
-                write_last_processed_iteration ".buildcrew" "$__VERDICT_BUILD_ITERATION"
-                last_processed="$__VERDICT_BUILD_ITERATION"
-
-                # Re-enter build-through-verify pipeline with UAT context
-                print_header "UAT Rebuild (iteration $uat_retry_count/$max_retries)"
-
-                local uat_rebuild_context="UAT failure context is in .buildcrew/uat-context.md — read it and fix the issues. Do NOT access the UAT directory or scenarios."
-                run_phase_group "build" "$task" "$uat_rebuild_context" || {
-                    print_error "Build phase failed during UAT rebuild"
-                    trap - INT TERM
-                    return 1
-                }
-
-                # Run simplify for non-trivial tasks
-                if [[ "$task_complexity" != "trivial" && "$task_complexity" != "simple" ]]; then
-                    run_optional_simplify "$task" ""
-                fi
-
-                # Code review
-                if [[ "$task_complexity" != "trivial" && "$task_complexity" != "simple" ]]; then
-                    run_phase_group "codereview" "$task" "" || {
-                        print_error "Code review failed during UAT rebuild"
-                        trap - INT TERM
-                        return 1
-                    }
-                    local cr_verdict
-                    cr_verdict=$(jq -r '.verdict' "$PHASE_RESULT_FILE")
-                    if [[ "$cr_verdict" == "needs_rebuild" ]]; then
-                        print_warning "Code review rejected UAT rebuild — running another build pass"
-                        run_phase_group "build" "$task" "$uat_rebuild_context" || {
-                            print_error "Second build pass failed during UAT rebuild"
-                            trap - INT TERM
-                            return 1
-                        }
-                    fi
-                fi
-
-                # Test
-                run_phase_group "test" "$task" "" || {
-                    print_error "Test phase failed during UAT rebuild"
-                    trap - INT TERM
-                    return 1
-                }
-
-                # Verify
-                run_phase_group "verify" "$task" "" || {
-                    print_error "Verify phase failed during UAT rebuild"
-                    trap - INT TERM
-                    return 1
-                }
-                local verify_verdict
-                verify_verdict=$(jq -r '.verdict' "$PHASE_RESULT_FILE")
-                if [[ "$verify_verdict" != "complete" ]]; then
-                    print_error "Verify phase blocked during UAT rebuild"
-                    trap - INT TERM
-                    return 1
-                fi
-
-                # Republish artifact with incremented iteration
-                publish_artifact "$project_name" || {
-                    print_error "Failed to republish artifact after UAT rebuild"
-                    trap - INT TERM
-                    return 1
-                }
-
-                # Update current iteration
-                local manifest_path="$HOME/.buildcrew/artifacts/$project_name/manifest.json"
-                current_iteration=$(jq -r '.build_iteration // 1' "$manifest_path" 2>/dev/null) || current_iteration=$((current_iteration + 1))
-
-                # Reset watch timeout for the new iteration
-                watch_start_time=$(date +%s)
-
-                print_info "Republished artifact (iteration $current_iteration) — watching for new verdict"
-                ;;
-
-            disputed)
-                print_warning "UAT: Only disputed scenarios remain ($__VERDICT_DISPUTED disputed)"
-
-                # Log disputes
-                local disputed_scenarios
-                disputed_scenarios=$(echo "$__VERDICT_SCENARIOS_JSON" | jq -r '.[] | select(.status == "disputed") | "  - " + .scenario + ": " + .summary')
-                if [[ -n "$disputed_scenarios" ]]; then
-                    echo ""
-                    echo -e "${YELLOW}Disputed scenarios:${NC}"
-                    echo "$disputed_scenarios"
-                    echo ""
-                fi
-
-                if [[ "$AUTO_MODE" == "true" ]]; then
-                    print_info "Auto mode — exiting with code 2 (disputed scenarios require manual resolution)"
-                    trap - INT TERM
-                    return 2
-                else
-                    # Interactive mode — prompt user
-                    echo -e "${YELLOW}${BOLD}Disputed scenarios require manual resolution.${NC}"
-                    echo "Review disputes.md in the UAT directory and either:"
-                    echo "  (a) Update the README to clarify disputed behavior, then re-run"
-                    echo "  (b) Accept the disputed behavior as correct"
-                    echo ""
-                    read -r -p "Continue watching? (y/n) " answer
-                    if [[ "$answer" != "y" && "$answer" != "Y" ]]; then
-                        trap - INT TERM
-                        return 2
-                    fi
-                    # Continue watching (user may have resolved disputes)
-                fi
-                ;;
-
-            *)
-                print_warning "Unknown verdict status: $__VERDICT_STATUS — skipping"
-                ;;
-        esac
-
-        sleep "$poll_interval"
-    done
-
-    # Reached here via Ctrl-C trap
-    print_info "Watch mode interrupted"
-    trap - INT TERM
-    return 0
-}
-
 # ─────────────────────────────────────────────────────────────────────────────────
 # Phase-Isolated Mode: process_task_isolated
 # ─────────────────────────────────────────────────────────────────────────────────
@@ -4089,17 +3805,6 @@ process_task_isolated() {
         save_task_progress "$task" "$__completed_phases" "$__INVOCATION_COUNT"
     fi
 
-    # --- batch build-only early exit ---
-    if [[ "$_BATCH_BUILD_ONLY" == "true" ]]; then
-        git add -A 2>/dev/null
-        git commit -m "buildcrew(batch-build): $task" --allow-empty 2>/dev/null || true
-        print_info "Stopping after build phase (batch mode)"
-        clear_task_progress
-        rm -f "$CURRENT_TASK_FILE"
-        mark_task_complete "$task"
-        break
-    fi
-
     # --- verify + commit (never skipped — always re-verify) ---
     # NOTE: Outcome verification (AC checks) is now absorbed into the verify phase.
     # The verify SKILL runs 3 parallel sub-agents: security audit, test suite, AC verification.
@@ -4197,29 +3902,6 @@ process_task_isolated() {
     summary=$(jq -r '.summary // "Completed"' "$STATUS_FILE" 2>/dev/null || echo "Completed")
     print_success "Completed: $task"
     print_info "Summary: $summary"
-
-    # ── UAT Watch Mode integration ──────────────────────────────────────────
-    # After verify succeeds, if --uat flag was set, enter watch mode.
-    # The project_name is derived from the current directory name.
-    if [[ "${UAT_MODE:-}" == "true" ]]; then
-        local project_name
-        project_name=$(extract_task_dir "$task")
-        if [[ -z "$project_name" ]]; then
-            project_name="$(basename "$(pwd)")"
-        fi
-        local task_for_uat
-        task_for_uat=$(strip_task_dir "$task")
-        local uat_result=0
-        enter_uat_watch_mode "$project_name" "$task_for_uat" "$task_complexity" || uat_result=$?
-        if [[ $uat_result -eq 2 ]]; then
-            print_warning "UAT completed with disputed scenarios (exit 2)"
-            exit 2
-        elif [[ $uat_result -ne 0 ]]; then
-            print_error "UAT watch mode failed (exit $uat_result)"
-            return 1
-        fi
-    fi
-    # ── End UAT Watch Mode integration ──────────────────────────────────────
 }
 
 # ─────────────────────────────────────────────────────────────────────────────────
@@ -4270,11 +3952,6 @@ main() {
         fi
         enter_discovery_mode "$plan_prompt"
         # enter_discovery_mode calls exit 0, never returns
-    fi
-
-    if [[ "$UAT_MODE" == "true" && "$INTERACTIVE_FLAG" == "true" ]]; then
-        print_error "--interactive cannot be combined with --uat (UAT requires unattended operation)"
-        exit 1
     fi
 
     if [[ "$SEQUENTIAL_MODE" != "true" ]]; then

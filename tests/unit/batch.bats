@@ -113,12 +113,6 @@ EOF
     [ "$SEQUENTIAL_MODE" = "true" ]
 }
 
-@test "parse_args: --uat does not force SEQUENTIAL_MODE" {
-    parse_args --uat
-    [ "$UAT_MODE" = "true" ]
-    [ "$SEQUENTIAL_MODE" = "false" ]
-}
-
 @test "parse_args: --help mentions --sequential" {
     run bash -c "source '$BUILDCREW_ROOT/lib/workflow.sh' 2>/dev/null; parse_args --help"
     [[ "$output" == *"--sequential"* ]]
@@ -1067,24 +1061,6 @@ EOF
     cp "$plan_file" .claude/current-plan.md
     [ -f ".claude/current-plan.md" ]
     grep -q "Do the thing" .claude/current-plan.md
-}
-
-# ─────────────────────────────────────────────────────────────────────────────
-# _BATCH_BUILD_ONLY default
-# ─────────────────────────────────────────────────────────────────────────────
-
-@test "_BATCH_BUILD_ONLY: defaults to false" {
-    [ "$_BATCH_BUILD_ONLY" = "false" ]
-}
-
-@test "_BATCH_BUILD_ONLY: set in batch launch code" {
-    grep -q 'export _BATCH_BUILD_ONLY=true' "$BUILDCREW_ROOT/lib/workflow.sh"
-}
-
-@test "_BATCH_BUILD_ONLY: early exit check exists after build phase" {
-    # Verify the early exit pattern exists: check for _BATCH_BUILD_ONLY and "Stopping after build"
-    grep -q '_BATCH_BUILD_ONLY' "$BUILDCREW_ROOT/lib/workflow.sh"
-    grep -q 'Stopping after build phase (batch mode)' "$BUILDCREW_ROOT/lib/workflow.sh"
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
