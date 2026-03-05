@@ -71,6 +71,8 @@ An unknown verdict hits the catch-all and marks the task blocked:
 
 ## Testing
 
+Always build in a Test-Driven manner (TDD). Follow the princples outlined in buildcrew/skills/buildcrew-tdd-scaffold/SKILL.md
+
 ```
 ./test.sh                      # unit + integration suite
 bats tests/unit/<file>.bats    # single test file
