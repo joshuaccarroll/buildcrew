@@ -50,9 +50,7 @@ Rules for test planning, test design, and test execution.
 - Test complete user workflows end-to-end
 - Real browser/environment (not mocked)
 - Critical paths only -- high value, low volume
-- Maintain a persistent experience harness (see "Experience Testing Harness" section)
-- Include adversarial scenarios in every harness run
-- Harness failures usually indicate code bugs (fix the application code; see failure classification for exceptions)
+- Include adversarial scenarios in every E2E run
 
 ---
 
@@ -130,23 +128,6 @@ Use descriptive names that explain the scenario:
 - Concurrent/duplicate requests
 - Expired or revoked credentials mid-operation
 
-### Experience Testing Harness
-> "The best test is one that uses your software the way a real person would."
-
-The experience harness is a persistent, project-level E2E test file that simulates actual user interaction:
-
-- **CLI projects**: Execute real shell commands, pipe output, check exit codes
-- **Web apps**: Use Playwright/Cypress to click, type, navigate, and assert
-- **APIs**: Make real HTTP requests, check response status/body/headers
-- **Libraries**: Import and call the public API with realistic usage patterns
-
-Harness principles:
-- **Persistent**: Lives in the project test directory, committed to git. Never recreated from scratch.
-- **Cumulative**: Each task adds scenarios; existing passing scenarios are never removed.
-- **Adversarial**: Every harness update includes at least one "try to break it" scenario.
-- **Regression-aware**: The full harness runs on every test phase, catching regressions from new work.
-- **Auto-fix**: Harness failures usually indicate real user-facing bugs -- fix the application code. Exceptions: intentional behavior changes and stale test fixtures (see failure classification).
-
 ---
 
 ## Coverage Expectations
@@ -188,18 +169,12 @@ Harness principles:
 |----|----------|-------|-----------------|------|
 | ADV-01 | [Misuse/abuse] | [Input] | [Expected defense] | E2E |
 
-### Experience Harness Status
-- **Harness exists**: [YES | NO -- will create]
-- **Scenarios to add**: [list of new scenarios for this task]
-- **Adversarial scenario**: [description of deliberate misuse test]
-
 ### Success Criteria
 - [ ] All happy path tests pass
 - [ ] All error scenarios handled
 - [ ] Edge cases covered
 - [ ] Coverage threshold met
 - [ ] Adversarial scenarios tested
-- [ ] Experience harness updated and passing
 ```
 
 ---
@@ -225,11 +200,4 @@ Harness principles:
 - **Functions**: X%
 - **Lines**: X%
 
-### Experience Harness
-- **Harness File**: [path]
-- **Status**: [CREATED | EXTENDED | EXISTING (unchanged)]
-- **Scenarios Run**: X passed / Y total
-- **New Scenarios Added**: X
-- **Adversarial Scenarios**: X
-- **Bugs Found & Auto-Fixed**: [list or "None"]
 ```

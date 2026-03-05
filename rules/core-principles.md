@@ -143,4 +143,4 @@ After writing any creative or analytical document artifact, improve it through i
 
 Each sub-agent sees the document for the first time, avoiding anchoring bias from the original author.
 
-**Skip for**: Structured reports that capture factual outcomes (test-report.md, verify-report.md, plan-review.md) — these report data, not analysis.
+**Skip for**: Structured reports that capture factual outcomes (verify-report.md, plan-review.md) — these report data, not analysis.
