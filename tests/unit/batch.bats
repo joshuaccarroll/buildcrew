@@ -113,10 +113,10 @@ EOF
     [ "$SEQUENTIAL_MODE" = "true" ]
 }
 
-@test "parse_args: --uat sets SEQUENTIAL_MODE=true" {
+@test "parse_args: --uat does not force SEQUENTIAL_MODE" {
     parse_args --uat
     [ "$UAT_MODE" = "true" ]
-    [ "$SEQUENTIAL_MODE" = "true" ]
+    [ "$SEQUENTIAL_MODE" = "false" ]
 }
 
 @test "parse_args: --help mentions --sequential" {

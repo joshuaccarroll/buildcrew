@@ -282,7 +282,6 @@ parse_args() {
             --uat)
                 UAT_MODE=true
                 AUTO_MODE=true  # --uat requires auto mode (enforced)
-                SEQUENTIAL_MODE=true
                 shift
                 ;;
             --tdd)
@@ -525,7 +524,10 @@ print_human_review_banner() {
 
 # Cleanup handler for EXIT/INT/TERM
 cleanup() {
+    trap '' INT TERM  # prevent re-entry
     stop_file_monitor
+    # Kill child processes (claude -p) in the process group
+    kill -- -$$ 2>/dev/null || true
     clear_workflow_state
     rm -f "$LOCKFILE"
 }
@@ -854,7 +856,12 @@ _batch_launch_task() {
         export BUILDCREW_BATCH_NONCE="${slug}-${idx}"
         export BUILDCREW_HOME
         export AUTO_MODE=true  # Batch workers must run unattended
-        export _BATCH_BUILD_ONLY=true  # Workers stop after build phase
+        # UAT mode needs full pipeline; otherwise stop after build (merge+test centrally)
+        if [[ "$UAT_MODE" == "true" ]]; then
+            export _BATCH_BUILD_ONLY=false
+        else
+            export _BATCH_BUILD_ONLY=true
+        fi
 
         # When target_dir is set, export absolute BACKLOG_FILE path back to parent
         if [[ -n "$target_dir" ]]; then
@@ -866,6 +873,7 @@ _batch_launch_task() {
             --max-invocations "$MAX_INVOCATIONS" \
             $( [[ "$SKIP_SPEC" == "true" ]] && echo "--skip-spec" ) \
             $( [[ "$FULL_PIPELINE" == "true" ]] && echo "--full-pipeline" ) \
+            $( [[ "$UAT_MODE" == "true" ]] && echo "--uat" ) \
             $( [[ "$VERBOSE" == "true" ]] && echo "--verbose" ) \
             > ".buildcrew/logs/batch-${slug}.log" 2>&1
     ) &
@@ -1918,7 +1926,13 @@ _strip_task_annotation() {
 
 extract_task_dir()      { _extract_task_annotation "dir"  "$1"; }
 strip_task_dir()        { _strip_task_annotation   "dir"  "$1"; }
-extract_task_plan_ref() { _extract_task_annotation "plan" "$1"; }
+extract_task_plan_ref() {
+    local ref
+    ref=$(_extract_task_annotation "plan" "$1")
+    # Expand leading ~ to $HOME (tilde not expanded inside double quotes)
+    [[ -n "$ref" ]] && ref="${ref/#\~/$HOME}"
+    echo "$ref"
+}
 strip_task_plan_ref()   { _strip_task_annotation   "plan" "$1"; }
 
 # Resolve the target directory for a task: inline [dir:...] > TARGET_DIR config > empty.
