@@ -155,60 +155,6 @@ EOF
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
-# _uat_read_manifest tests
-# ─────────────────────────────────────────────────────────────────────────────
-
-@test "_uat_read_manifest: reads valid manifest" {
-    mkdir -p artifacts
-    cat > artifacts/manifest.json << 'EOF'
-{
-    "project": "test-project",
-    "artifact_type": "cli",
-    "artifact_path": "/tmp/test",
-    "run_command": "./bin/test",
-    "install_command": "",
-    "health_check": "",
-    "stop_command": "",
-    "build_timestamp": "2024-01-01T00:00:00Z",
-    "build_iteration": 1,
-    "readme_hash": "abc123"
-}
-EOF
-    _uat_read_manifest artifacts/manifest.json
-    [ "$__UAT_ARTIFACT_TYPE" = "cli" ]
-    [ "$__UAT_ARTIFACT_PATH" = "/tmp/test" ]
-    [ "$__UAT_RUN_COMMAND" = "./bin/test" ]
-    [ "$__UAT_BUILD_ITERATION" = "1" ]
-    [ "$__UAT_README_HASH" = "abc123" ]
-}
-
-@test "_uat_read_manifest: returns 1 for missing file" {
-    run _uat_read_manifest nonexistent.json
-    [ "$status" -eq 1 ]
-}
-
-@test "_uat_read_manifest: returns 1 for invalid JSON" {
-    echo "not json" > bad.json
-    run _uat_read_manifest bad.json
-    [ "$status" -eq 1 ]
-}
-
-@test "_uat_read_manifest: returns 1 for missing required fields" {
-    echo '{"project": "test"}' > incomplete.json
-    run _uat_read_manifest incomplete.json
-    [ "$status" -eq 1 ]
-}
-
-@test "_uat_read_manifest: resets globals on call" {
-    __UAT_ARTIFACT_TYPE="old_value"
-    __UAT_BUILD_ITERATION="old_value"
-    # Call directly (not via run) so globals are set in the current shell
-    _uat_read_manifest nonexistent.json || true
-    [ "$__UAT_ARTIFACT_TYPE" = "" ]
-    [ "$__UAT_BUILD_ITERATION" = "" ]
-}
-
-# ─────────────────────────────────────────────────────────────────────────────
 # _uat_regress_set_artifact tests
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -732,81 +678,128 @@ EOF
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
-# uat_phase_wait_artifact tests (with controlled timeout)
+# uat_run_regress tests
 # ─────────────────────────────────────────────────────────────────────────────
 
-@test "uat_phase_wait_artifact: requires project_name" {
-    run uat_phase_wait_artifact ""
+@test "uat_run_regress: requires readme_path and project_name" {
+    run uat_run_regress "" "" ""
     [ "$status" -eq 1 ]
     [[ "$output" == *"required"* ]]
 }
 
-@test "uat_phase_wait_artifact: finds existing manifest immediately" {
-    local project="test-wait-$$"
-    local artifact_dir="$HOME/.buildcrew/artifacts/$project"
-    mkdir -p "$artifact_dir" .buildcrew
-    # Set last_tested_iteration to 0
-    echo "0" > .buildcrew/last_tested_iteration
-    cat > "$artifact_dir/manifest.json" << EOF
-{
-    "project": "$project",
-    "artifact_type": "cli",
-    "artifact_path": "/tmp/test",
-    "run_command": "./bin/test",
-    "install_command": "",
-    "health_check": "",
-    "stop_command": "",
-    "build_timestamp": "2024-01-01T00:00:00Z",
-    "build_iteration": 1,
-    "readme_hash": "abc123"
-}
-EOF
-    UAT_POLL_INTERVAL=1
-    UAT_ARTIFACT_TIMEOUT=3
-    uat_phase_wait_artifact "$project"
-    [ "$__UAT_ARTIFACT_TYPE" = "cli" ]
-    [ "$__UAT_BUILD_ITERATION" = "1" ]
-    # Cleanup
-    rm -rf "$artifact_dir"
+@test "uat_run_regress: requires valid regress_path" {
+    local src_dir
+    src_dir=$(mktemp -d)
+    create_test_readme "$src_dir"
+    run uat_run_regress "$src_dir/README.md" "test-project" ""
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"required"* ]]
+    rm -rf "$src_dir"
 }
 
-@test "uat_phase_wait_artifact: skips already-tested iteration" {
-    local project="test-skip-$$"
-    local artifact_dir="$HOME/.buildcrew/artifacts/$project"
-    mkdir -p "$artifact_dir" .buildcrew
-    # Set last_tested_iteration to 1 (already tested)
-    echo "1" > .buildcrew/last_tested_iteration
-    cat > "$artifact_dir/manifest.json" << EOF
-{
-    "project": "$project",
-    "artifact_type": "cli",
-    "artifact_path": "/tmp/test",
-    "run_command": "./bin/test",
-    "install_command": "",
-    "health_check": "",
-    "stop_command": "",
-    "build_timestamp": "2024-01-01T00:00:00Z",
-    "build_iteration": 1,
-    "readme_hash": "abc123"
-}
-EOF
-    UAT_POLL_INTERVAL=1
-    UAT_ARTIFACT_TIMEOUT=3
-    run uat_phase_wait_artifact "$project"
-    [ "$status" -eq 1 ]
-    [[ "$output" == *"timeout"* ]] || [[ "$output" == *"Artifact not published"* ]]
-    # Cleanup
-    rm -rf "$artifact_dir"
+@test "uat_run_regress: returns 0 on all-pass verdict" {
+    local src_dir artifact_dir
+    src_dir=$(mktemp -d)
+    artifact_dir=$(mktemp -d)
+    create_test_readme "$src_dir"
+    mkdir -p .buildcrew scenarios harness results
+
+    # Force mismatch so phases 1-3 run
+    echo "hello" > .buildcrew/last_readme_hash
+
+    # Mock all phase functions so they succeed quickly
+    uat_phase_stories() { return 0; }
+    uat_phase_scenarios() { return 0; }
+    _uat_list_scenarios() { return 0; }
+    uat_phase_harness() { return 0; }
+    uat_phase_setup_env() { __UAT_ARTIFACT_CONTEXT="test context"; return 0; }
+    uat_phase_execute() { return 0; }
+    uat_stop_server() { return 0; }
+
+    # Mock uat_phase_verdict to write a pass verdict
+    uat_phase_verdict() {
+        local sig_dir="$1"
+        local iter="$2"
+        mkdir -p "$sig_dir"
+        cat > "$sig_dir/verdict.json" << VEOF
+{"status":"pass","total":1,"passed":1,"failed":0,"errored":0,"disputed":0,"build_iteration":${iter},"scenarios":[{"scenario":"Test","status":"pass","summary":"OK"}]}
+VEOF
+        return 0
+    }
+    _uat_print_report() { return 0; }
+
+    local rc=0
+    uat_run_regress "$src_dir/README.md" "test-regress-pass-$$" "$artifact_dir" || rc=$?
+    [ "$rc" -eq 0 ]
+    rm -rf "$src_dir" "$artifact_dir" "$HOME/.buildcrew/uat-signals/test-regress-pass-$$"
 }
 
-@test "uat_phase_wait_artifact: times out when no manifest" {
-    local project="test-timeout-$$"
-    UAT_POLL_INTERVAL=1
-    UAT_ARTIFACT_TIMEOUT=2
-    mkdir -p .buildcrew
-    run uat_phase_wait_artifact "$project"
-    [ "$status" -eq 1 ]
-    [[ "$output" == *"Artifact not published"* ]]
+@test "uat_run_regress: returns 1 on failure verdict" {
+    local src_dir artifact_dir
+    src_dir=$(mktemp -d)
+    artifact_dir=$(mktemp -d)
+    create_test_readme "$src_dir"
+    mkdir -p .buildcrew scenarios harness results
+
+    echo "hello" > .buildcrew/last_readme_hash
+
+    uat_phase_stories() { return 0; }
+    uat_phase_scenarios() { return 0; }
+    _uat_list_scenarios() { return 0; }
+    uat_phase_harness() { return 0; }
+    uat_phase_setup_env() { __UAT_ARTIFACT_CONTEXT="test context"; return 0; }
+    uat_phase_execute() { return 0; }
+    uat_stop_server() { return 0; }
+
+    uat_phase_verdict() {
+        local sig_dir="$1"
+        local iter="$2"
+        mkdir -p "$sig_dir"
+        cat > "$sig_dir/verdict.json" << VEOF
+{"status":"fail","total":2,"passed":1,"failed":1,"errored":0,"disputed":0,"build_iteration":${iter},"scenarios":[{"scenario":"Test A","status":"pass","summary":"OK"},{"scenario":"Test B","status":"fail","summary":"Bad"}]}
+VEOF
+        return 0
+    }
+    _uat_print_report() { return 0; }
+
+    local rc=0
+    uat_run_regress "$src_dir/README.md" "test-regress-fail-$$" "$artifact_dir" || rc=$?
+    [ "$rc" -eq 1 ]
+    rm -rf "$src_dir" "$artifact_dir" "$HOME/.buildcrew/uat-signals/test-regress-fail-$$"
+}
+
+@test "uat_run_regress: returns 2 on disputed-only verdict" {
+    local src_dir artifact_dir
+    src_dir=$(mktemp -d)
+    artifact_dir=$(mktemp -d)
+    create_test_readme "$src_dir"
+    mkdir -p .buildcrew scenarios harness results
+
+    echo "hello" > .buildcrew/last_readme_hash
+
+    uat_phase_stories() { return 0; }
+    uat_phase_scenarios() { return 0; }
+    _uat_list_scenarios() { return 0; }
+    uat_phase_harness() { return 0; }
+    uat_phase_setup_env() { __UAT_ARTIFACT_CONTEXT="test context"; return 0; }
+    uat_phase_execute() { return 0; }
+    uat_stop_server() { return 0; }
+
+    uat_phase_verdict() {
+        local sig_dir="$1"
+        local iter="$2"
+        mkdir -p "$sig_dir"
+        cat > "$sig_dir/verdict.json" << VEOF
+{"status":"disputed","total":2,"passed":1,"failed":0,"errored":0,"disputed":1,"build_iteration":${iter},"scenarios":[{"scenario":"Test A","status":"pass","summary":"OK"},{"scenario":"Test B","status":"disputed","summary":"Ambiguous"}]}
+VEOF
+        return 0
+    }
+    _uat_print_report() { return 0; }
+
+    local rc=0
+    uat_run_regress "$src_dir/README.md" "test-regress-disp-$$" "$artifact_dir" || rc=$?
+    [ "$rc" -eq 2 ]
+    rm -rf "$src_dir" "$artifact_dir" "$HOME/.buildcrew/uat-signals/test-regress-disp-$$"
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
