@@ -30,3 +30,7 @@ workflow.log
 # Skills installed by buildcrew init (symlinks)
 .claude/skills/buildcrew-*
 .claude/.buildcrew-link
+
+# Claude Code runtime directories
+.claude/skills/simplify-all
+.claude/worktrees/
