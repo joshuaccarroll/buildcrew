@@ -109,10 +109,10 @@ buildcrew reset              # Clear blocked tasks and clean up artifacts
 | `--strict` | (default) Require ALL acceptance criteria to pass before commit |
 | `--no-strict` | Allow partial pass — warnings but no block |
 | `--full-pipeline` | Force all phases regardless of complexity |
-| `--interactive` | Restore interactive review pauses (spec, plan). Incompatible with `--uat` |
-| `--sequential` | Run tasks one at a time (default is parallel). Auto-forced by `--single`, `--task`, `--review`, `--uat` |
+| `--interactive` | Restore interactive review pauses (spec, plan) |
+| `--sequential` | Run tasks one at a time (default is parallel). Auto-forced by `--single`, `--task`, `--review` |
 | `--max-parallel N` | Max concurrent tasks in parallel mode (default: 5) |
-| `--uat` | After build, enter watch mode for UAT verdicts. Implies auto mode |
+| `--no-uat` | Skip inline UAT after verify (UAT is automatic for non-trivial tasks) |
 | `--max-invocations N` | Max Claude invocations per run (default: 15) |
 | `--verbose` / `--debug` | Show orchestrator decisions, phase verdicts, invocation counts |
 
@@ -232,19 +232,21 @@ A blind UAT system tests your project against its README — the test agent neve
 3. Failures are sent back as structured verdicts; the build agent fixes and republishes
 4. Retries up to 5 times (configurable via `UAT_MAX_RETRIES`)
 
-```bash
-# Terminal A: build and watch
-buildcrew run --uat
+**Inline UAT (automatic):** UAT runs automatically after the verify phase for all non-trivial tasks. No extra flags needed — just `buildcrew run`. Use `--no-uat` to opt out.
 
-# Terminal B: run blind UAT
-mkdir ../my-project-uat && cd ../my-project-uat
-buildcrew uat --readme ../my-project/README.md
+```bash
+# Standard run — UAT happens automatically after verify
+buildcrew run
+
+# Skip UAT
+buildcrew run --no-uat
+
+# Regression test against an existing artifact
+buildcrew uat --regress /path/to/artifact
 ```
 
 | Flag | Description |
 |------|-------------|
-| `--readme <path>` | Path to the project's README.md |
-| `--project <name>` | Project identifier (default: derived from README parent dir) |
 | `--regress <path>` | Run UAT standalone against an existing artifact |
 | `--preview` | List existing scenarios without running agents |
 | `--auto` | Log disputes without pausing |
