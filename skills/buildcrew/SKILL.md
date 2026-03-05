@@ -19,16 +19,15 @@ You are executing an autonomous development workflow. Follow each phase in order
                                └─────────────┘   └────▲────┘                         │
                                                       │                       ┌──────▼──────┐
 ┌──────────┐   ┌───────────┐                         │                       │ 7.REFACTOR  │
-│11.SIGNAL │◀──│ 10.COMMIT │                         │                       │ or REBUILD  │
+│10.SIGNAL │◀──│ 9.COMMIT  │                         │                       │ or REBUILD  │
 └──────────┘   └───────────┘                         │                       └──────┬──────┘
                     ▲                                 │                              │
               ┌─────┴──────┐                         └──────────────────────────────┘
-              │ 9.VERIFY   │                         (REBUILD loops to BUILD)
+              │ 8.VERIFY   │                         (REBUILD loops to BUILD)
               │(BLOCKING)  │
-              │- Tests     │   ┌─────────────┐
-              │- Code Rev  │◀──│ 8.TEST      │
-              │- Security  │   │(QA Engineer)│
-              └────────────┘   └─────────────┘
+              │- Code Rev  │
+              │- Security  │
+              └────────────┘
 ```
 
 ## Prompt Dispatch
@@ -102,7 +101,7 @@ while iteration < 5:
     iteration += 1
 ```
 
-**Skip for**: Structured reports that capture factual outcomes (test-report.md, verify-report.md, plan-review.md) — these report data, not analysis.
+**Skip for**: Structured reports that capture factual outcomes (verify-report.md, plan-review.md) — these report data, not analysis.
 
 ---
 
@@ -581,14 +580,14 @@ Write your review to `.claude/code-review.md`:
 ### What's Done Well
 - [Positive observations]
 
-### Proceed to Testing: [YES | NO - refactor first | NO - rebuild required]
+### Proceed to Verification: [YES | NO - refactor first | NO - rebuild required]
 ```
 
 After writing the code review, run the **Document Review Protocol** on `.claude/code-review.md`.
 
 ### Verdict Definitions
 
-- **APPROVED**: Code is ready for testing. Minor/advisory findings are logged but don't block.
+- **APPROVED**: Code is ready for verification. Minor/advisory findings are logged but don't block.
 - **NEEDS_REFACTOR** (repair): Issues are localized, approach is sound. Fix specific things and re-review.
 - **NEEDS_REBUILD** (regenerate): Implementation diverged from plan, issues are structural, or fixing means rewriting most of the code. Discard and rebuild from the approved plan.
 
@@ -649,212 +648,11 @@ Run if Code Review verdict was "NEEDS_REBUILD" or auto-escalated from refactor:
 ```
 code-review → NEEDS_REBUILD → build (attempt 2, with rejection context)
   → code-review (attempt 2)
-    → If APPROVED → continue to test
+    → If APPROVED → continue to verify
     → If NOT APPROVED → task BLOCKED
 ```
 
 After completing any refactor or rebuild, if user-facing behavior or setup steps changed, update `README.md` accordingly.
-
----
-
-## TEST (Senior QA Engineer)
-
-**Goal**: Verify the implementation through comprehensive testing.
-
-### Assume the QA Engineer Persona
-
-You are now a **Senior QA Engineer** with 12+ years of experience. Your philosophy:
-
-- **Tests should fail meaningfully** - Every test must have a clear failure condition
-- **Tests should pass only when correct** - No false positives
-- **Test what matters** - Focus on behavior, not implementation
-
-### Step 1: Create Test Plan
-
-Before running tests, create a test plan in `.claude/current-test-plan.md`:
-
-```markdown
-## Test Plan: [Feature Name]
-
-### Test Scenarios
-
-#### Happy Path
-| ID | Scenario | Input | Expected Output | Type |
-|----|----------|-------|-----------------|------|
-| HP-01 | [Normal usage] | [Input] | [Expected] | Unit |
-
-#### Error Handling
-| ID | Scenario | Input | Expected Output | Type |
-|----|----------|-------|-----------------|------|
-| ERR-01 | [Error case] | [Input] | [Expected error] | Unit |
-
-#### Edge Cases
-| ID | Scenario | Input | Expected Output | Type |
-|----|----------|-------|-----------------|------|
-| EDGE-01 | [Boundary] | [Input] | [Expected] | Unit |
-
-#### Adversarial / Unexpected Usage
-| ID | Scenario | Input | Expected Output | Type |
-|----|----------|-------|-----------------|------|
-| ADV-01 | [Misuse/abuse] | [Input] | [Expected defense] | E2E |
-
-### Success Criteria
-- [ ] All happy path tests pass
-- [ ] All error scenarios handled
-- [ ] Edge cases covered
-- [ ] Coverage meets project standards
-- [ ] Adversarial scenarios tested
-- [ ] Experience harness updated and passing
-```
-
-After writing the test plan, run the **Document Review Protocol** on `.claude/current-test-plan.md`.
-
-### Step 2: Detect Test Framework
-
-Look for these indicators:
-
-| Indicator | Framework | Command |
-|-----------|-----------|---------|
-| `jest.config.*` | Jest | `npm test` or `npx jest` |
-| `vitest.config.*` | Vitest | `npx vitest run` |
-| `pytest.ini` / `pyproject.toml` | Pytest | `pytest` |
-| `*_test.go` | Go Testing | `go test ./...` |
-| `Cargo.toml` | Rust/Cargo | `cargo test` |
-| `*.bats` | Bats | `bats <test-dir>` |
-
-### Step 3: Create or Update Experience Testing Harness
-
-The experience harness is a **persistent test file** in the project's test directory that simulates actual end-user interaction. Unlike unit tests, it exercises the system the way a real user would. It is cumulative -- each task extends it, existing scenarios are never removed unless the current task intentionally changes the tested behavior.
-
-#### Harness Location Convention
-
-| Project Type | Harness File | Tool |
-|--------------|-------------|------|
-| CLI / Shell  | `tests/e2e/experience.bats` or `tests/e2e/experience.test.ts` | Direct command execution |
-| Web App      | `tests/e2e/experience.spec.ts` | Playwright / Cypress |
-| API          | `tests/e2e/experience.test.ts` | HTTP client (fetch/axios) |
-| Library      | `tests/e2e/experience.test.ts` | Import and call public API |
-
-**Directory creation**: Create the harness inside whatever test directory the project already uses (`tests/`, `test/`, `spec/`, `__tests__/`, etc.), adding an `e2e/` subdirectory within it. Only create `tests/e2e/` if there is no existing test directory.
-
-**Running the harness**: The harness may use a different tool than the unit test framework (e.g., Playwright for E2E vs. Jest for units). Detect the harness runner from the harness file extension and imports, not from the unit test framework detection. Run unit tests and harness tests as separate commands if needed. If the harness runner is not installed, install it as a dev dependency. If installation fails, fall back to the project's existing test runner and adjust the harness file format accordingly.
-
-#### Before creating: Check for existing E2E tests
-
-If the project already has E2E tests (e.g., `tests/e2e/workflow.bats`), check whether an `experience.*` file exists. If so, use it as the harness. Do not create a parallel file.
-
-#### If the harness does not exist: Create it
-
-1. **Happy path walkthrough**: A complete user journey from start to finish
-2. **Error recovery path**: Trigger a common error, verify the message is helpful, recover
-3. **Adversarial scenario**: At least one test that deliberately misuses the tool (wrong types, conflicting flags, absurd input, out-of-order operations)
-
-#### If the harness exists: Extend it
-
-1. **Add scenarios** covering new functionality from the current task
-2. **Keep existing scenarios** -- never remove passing tests unless the current task intentionally changes the tested behavior. In that case, update the scenario to match the new behavior and note the change in a comment.
-3. **Add one new adversarial scenario** relevant to the current change
-4. **Run the full harness** to verify existing scenarios still pass (regression check)
-
-**Harness size management**: If the harness exceeds ~50 scenarios, organize into logical groups using `describe` blocks or test sections. Do not split into multiple files -- the single-file convention is important for discoverability. If harness run time becomes a bottleneck (significantly longer than the unit test suite), note the slowest scenarios in the test report and consider whether any can be made faster without reducing coverage.
-
-#### Adversarial Scenario Design
-
-Generate adversarial tests by asking:
-- What if the user provides the **wrong type** of input?
-- What if the user runs this **out of sequence** or skips required steps?
-- What if the user provides **absurdly large, empty, or malformed** data?
-- What if the operation encounters **invalid state mid-way** (file deleted during processing, dependency unavailable, input stream closes early)?
-- What if the user has **conflicting configuration** or environment state?
-
-Each adversarial test must assert a **specific, graceful outcome** -- not just "doesn't crash" but "shows error message X" or "exits with code Y".
-
-### Step 4: Write New Tests (if needed)
-
-For significant new functionality, write tests following the test plan:
-
-```typescript
-describe('FeatureName', () => {
-  describe('scenario', () => {
-    it('should [expected behavior] when [condition]', () => {
-      // Arrange
-      const input = createTestInput();
-
-      // Act
-      const result = featureMethod(input);
-
-      // Assert
-      expect(result).toEqual(expectedOutput);
-    });
-  });
-});
-```
-
-### Step 5: Run Tests
-
-```bash
-# Run full test suite
-npm test
-
-# Run with coverage
-npm test -- --coverage
-```
-
-### Step 6: Handle Failures
-
-**Test Retry Logic** (up to 3 attempts):
-
-```
-attempt = 1
-while tests_fail and attempt <= 3:
-    1. Analyze failure message
-    2. Classify:
-       a. Harness failure (real bug) -> fix application code
-       b. Harness failure (intentional change) -> update harness scenario
-       c. Harness failure (test bug: wrong assertion, stale fixture) -> fix harness test
-       d. Unit/integration test bug -> fix test code
-       e. Code bug caught by unit/integration test -> fix application code
-    3. Apply fix
-    4. Re-run ALL tests (including harness)
-    attempt += 1
-
-if tests_still_fail:
-    mark_task_blocked("Tests failing after 3 attempts: [reason]")
-```
-
-### Test Execution Report
-
-Write results to `.claude/test-report.md`:
-
-```markdown
-## Test Execution Report
-
-### Summary
-- **Total Tests**: X
-- **Passed**: X
-- **Failed**: X
-- **Coverage**: X%
-
-### Test Plan Coverage
-- [x] HP-01: Passed
-- [x] ERR-01: Passed
-- [ ] EDGE-01: Failed - [reason]
-
-### Experience Harness
-- **Harness File**: [path]
-- **Status**: [CREATED | EXTENDED | EXISTING (unchanged)]
-- **Scenarios Run**: X passed / Y total
-- **New Scenarios Added**: X
-- **Adversarial Scenarios**: X
-- **Bugs Found & Auto-Fixed**: [list or "None"]
-
-### Failed Tests (if any)
-| Test | Reason | Fix Applied |
-|------|--------|-------------|
-| [name] | [reason] | [fix] |
-
-### Verdict: [PASS | FAIL - blocked]
-```
 
 ---
 
@@ -873,7 +671,7 @@ All items must be checked and pass:
 - [ ] Coverage meets project threshold (if configured)
 - [ ] No skipped tests without justification
 
-**If tests fail**: Return to build, fix the issue, then re-run through test.
+**If tests fail**: Return to build, fix the issue, then re-verify.
 
 #### 2. Code Review Verification
 - [ ] Code review completed (code-review phase)
@@ -1030,7 +828,6 @@ Create `.claude/workflow-status.json`:
   "reviews_passed": {
     "plan_review": true,
     "code_review": true,
-    "tests": true,
     "security_audit": true,
     "verify": true
   }
@@ -1060,8 +857,6 @@ Remove temporary files:
 - `.claude/simplify-quality.md`
 - `.claude/simplify-efficiency.md`
 - `.claude/code-review.md`
-- `.claude/current-test-plan.md`
-- `.claude/test-report.md`
 - `.claude/security-audit.md`
 - `.claude/verify-report.md`
 
@@ -1084,4 +879,4 @@ This allows the orchestrating bash script to detect completion and automatically
 - **Handle errors gracefully**: Mark as blocked rather than failing silently
 - **Don't push**: Only commit locally, never push to remote
 - **Signal completion**: Always write the status file at the end
-- **Trust the personas**: Let the Principal Engineer and QA Engineer do their jobs
+- **Trust the personas**: Let the Principal Engineer and Security Engineer do their jobs
