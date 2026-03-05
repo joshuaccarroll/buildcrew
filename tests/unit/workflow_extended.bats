@@ -31,11 +31,6 @@ teardown() {
     [ "$output" = "50" ]
 }
 
-@test "get_phase_max_turns: test returns 60" {
-    run get_phase_max_turns "test"
-    [ "$output" = "60" ]
-}
-
 @test "get_phase_max_turns: verify returns 70" {
     run get_phase_max_turns "verify"
     [ "$output" = "70" ]
@@ -239,7 +234,6 @@ teardown() {
     mkdir -p .claude/skills/buildcrew-review
     mkdir -p .claude/skills/buildcrew-build
     mkdir -p .claude/skills/buildcrew-codereview
-    mkdir -p .claude/skills/buildcrew-test
     mkdir -p .claude/skills/buildcrew-verify
     run is_phase_isolation_available
     [ "$status" -eq 0 ]
@@ -2163,73 +2157,6 @@ EOF
     [ -s "$blocked_file" ]
     grep -qi "chunk\|cannot" "$blocked_file"
     rm -f "$blocked_file"
-}
-
-@test "chunked test: triggered when run_phase_group returns 2 for test" {
-    mkdir -p .buildcrew .claude
-    echo "- [ ] test task" > BACKLOG.md
-    SKIP_SPEC=true
-    STRICT_MODE=false
-    HUMAN_REVIEW=false
-    __RESUME_PHASES="research review tdd-scaffold"
-
-    cat > .claude/current-plan.md <<'EOF'
-# Plan
-
-### Step 1: Implementation
-Description.
-EOF
-
-    local blocked_file
-    blocked_file=$(mktemp)
-    local test_call_count_file
-    test_call_count_file=$(mktemp)
-    echo "0" > "$test_call_count_file"
-
-    archive_task_artifacts() { :; }
-    clear_task_progress()    { :; }
-    save_task_progress()     { :; }
-    append_lesson()          { :; }
-    handle_human_review()    { return 0; }
-    handle_plan_review()     { return 0; }
-    mark_task_blocked()      { echo "$*" > "$blocked_file"; }
-
-    run_phase_group() {
-        local phase="$1"
-        mkdir -p .claude
-        case "$phase" in
-            build)
-                echo '{"phase":"build","verdict":"complete","details":"ok"}' > "$PHASE_RESULT_FILE"
-                return 0
-                ;;
-            codereview)
-                echo '{"phase":"codereview","verdict":"approved","details":"ok"}' > "$PHASE_RESULT_FILE"
-                return 0
-                ;;
-            test)
-                local count
-                count=$(cat "$test_call_count_file")
-                count=$(( count + 1 ))
-                echo "$count" > "$test_call_count_file"
-                if [[ "$count" -eq 1 ]]; then
-                    # First test call hits max-turns
-                    return 2
-                fi
-                # Chunked test sub-phases succeed
-                echo '{"phase":"test","verdict":"approved","details":"ok"}' > "$PHASE_RESULT_FILE"
-                return 0
-                ;;
-            *)
-                echo '{"phase":"'"$phase"'","verdict":"complete","details":"ok"}' > "$PHASE_RESULT_FILE"
-                return 0
-                ;;
-        esac
-    }
-
-    run process_task_isolated "test task"
-    # Task should NOT be blocked
-    [ ! -s "$blocked_file" ]
-    rm -f "$blocked_file" "$test_call_count_file"
 }
 
 # -----------------------------------------------------------------------

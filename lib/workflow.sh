@@ -7,14 +7,14 @@
 # This script orchestrates BuildCrew's execution mode — the autonomous development
 # pipeline. It reads tasks from BACKLOG.md and processes each one through phase groups:
 #
-# Phase-isolated mode (up to 9 separate Claude invocations):
+# Phase-isolated mode (up to 8 separate Claude invocations):
 #   spec (optional, skipped with --skip-spec)
 #   research + plan
 #   plan-review (3-pass)
+#   tdd-scaffold (standard complexity)
 #   build
 #   simplify (non-blocking — review and apply targeted simplifications)
 #   codereview (adversarial PE review — independent phase)
-#   test
 #   outcome (validates against spec acceptance criteria)
 #   verify + security audit + commit + signal
 #
@@ -150,7 +150,6 @@ get_phase_max_turns() {
         build)      echo 50 ;;
         simplify)   echo 30 ;;
         codereview) echo 40 ;;
-        test)       echo 60 ;;
         verify)     echo 70 ;;
         *)          echo 30 ;;
     esac
@@ -361,8 +360,6 @@ __inject_tdd_prompt() {
     case "$phase" in
         build)
             printf '%s\n\n%s' "$prompt" "TDD MODE: $tdd_test_count failing tests exist. Read .claude/tdd-manifest.json for test locations. PRIMARY goal: make all TDD tests pass. Run tests after each major change. Do NOT modify TDD test files." ;;
-        test)
-            printf '%s\n\n%s' "$prompt" "TDD VALIDATION MODE: TDD tests already exist (see .claude/tdd-manifest.json). Do NOT rewrite/delete them. Verify TDD test file checksums match tdd-manifest.json (use openssl dgst -sha256) — if any were modified, issue needs_rebuild with tampered file list. Role: (1) verify TDD tests pass, (2) add adversarial/edge-case tests in SEPARATE files, (3) extend experience harness, (4) run full suite. If a TDD test fails, issue needs_rebuild." ;;
         codereview)
             printf '%s\n\n%s' "$prompt" "TDD MODE ACTIVE: Test files listed in .claude/tdd-manifest.json were written by the tdd-scaffold phase, not the build phase. Do NOT flag them as issues. Do NOT request they be moved, renamed, or rewritten. Verify the build made them pass." ;;
         *)
@@ -2417,8 +2414,8 @@ ARTIFACT_FILES=(
     .claude/spec.md .claude/research.md .claude/current-plan.md .claude/plan-review.md
     .claude/review-pass1-pe.md .claude/review-pass2-pm.md
     .claude/plan-review-prev.md .claude/review-pass1-pe-prev.md .claude/review-pass2-pm-prev.md
-    .claude/code-review.md .claude/test-report.md .claude/outcome-report.md
-    .claude/security-audit.md .claude/verify-report.md .claude/current-test-plan.md
+    .claude/code-review.md .claude/outcome-report.md
+    .claude/security-audit.md .claude/verify-report.md
     .claude/tdd-manifest.json
 )
 
@@ -2645,7 +2642,6 @@ is_phase_isolation_available() {
         && [[ -d .claude/skills/buildcrew-review ]] \
         && [[ -d .claude/skills/buildcrew-build ]] \
         && [[ -d .claude/skills/buildcrew-codereview ]] \
-        && [[ -d .claude/skills/buildcrew-test ]] \
         && [[ -d .claude/skills/buildcrew-verify ]]; then
         return 0
     fi
@@ -3039,7 +3035,7 @@ Context is your most important resource. Proactively use subagents (Task tool) t
                 return 2
             fi
             # Heuristic: both attempts failed on a heavy phase = likely max-turns
-            if [[ "$phase" == "build" || "$phase" == "test" ]]; then
+            if [[ "$phase" == "build" ]]; then
                 print_warning "Phase $phase failed both attempts -- treating as likely max-turns"
                 update_workflow_state "$phase" "max_turns"
                 return 2
@@ -3133,54 +3129,6 @@ run_chunked_build() {
     return 0
 }
 
-# Execute test phase in two sub-phases: write tests, then run+fix tests.
-# Args: $1=task $2=spec_context (optional)
-# Returns: 0=success (phase-result.json from phase 2 intact), 1=failure, 2=max-turns
-run_chunked_test() {
-    local task="$1"
-    local spec_context="${2:-}"
-
-    print_info "Chunked test: splitting into plan+write and execute+fix"
-
-    # Check ceiling before first sub-phase
-    if (( __INVOCATION_COUNT >= MAX_INVOCATIONS )); then
-        print_error "Global invocation ceiling reached before chunked test ($__INVOCATION_COUNT/$MAX_INVOCATIONS)"
-        return 1
-    fi
-
-    # Sub-phase 1: Plan and write tests
-    local chunk1_context="CHUNKED TEST PHASE 1 of 2: Create test plan and write test files ONLY. Do NOT run tests yet."
-    if [[ -n "$spec_context" ]]; then
-        chunk1_context="$chunk1_context | $spec_context"
-    fi
-    if [[ -f ".claude/tdd-manifest.json" ]]; then
-        chunk1_context="$chunk1_context TDD tests already exist in tests/tdd/ — do NOT rewrite them. Only write ADDITIONAL test files for adversarial/edge cases."
-    fi
-
-    local result1=0
-    run_phase_group "test" "$task" "$chunk1_context" || result1=$?
-    if [[ $result1 -ne 0 ]]; then
-        return $result1
-    fi
-    rm -f "$PHASE_RESULT_FILE"
-
-    # Check ceiling before second sub-phase
-    if (( __INVOCATION_COUNT >= MAX_INVOCATIONS )); then
-        print_error "Global invocation ceiling reached between chunked test phases ($__INVOCATION_COUNT/$MAX_INVOCATIONS)"
-        return 1
-    fi
-
-    # Sub-phase 2: Run and fix tests
-    local chunk2_context="CHUNKED TEST PHASE 2 of 2: Test files already exist. Run all tests and fix failures. Write test report and phase-result.json with appropriate verdict."
-    if [[ -n "$spec_context" ]]; then
-        chunk2_context="$chunk2_context | $spec_context"
-    fi
-
-    local result2=0
-    run_phase_group "test" "$task" "$chunk2_context" || result2=$?
-    return $result2
-}
-
 # ─────────────────────────────────────────────────────────────────────────────────
 # Verify-failure rebuild context builder
 # ─────────────────────────────────────────────────────────────────────────────────
@@ -3198,7 +3146,7 @@ build_verify_failure_context() {
 
     case "$failing" in
         tests)
-            context="$context | Read .claude/test-report.md and .claude/verify-report.md for failure details before fixing."
+            context="$context | Read .claude/verify-report.md for failure details before fixing."
             ;;
         security)
             context="$context | Read .claude/security-audit.md and .claude/verify-report.md for vulnerability details before fixing."
@@ -3227,7 +3175,7 @@ _bridge_manifest_to_uat() {
     __UAT_README_HASH="$__MANIFEST_README_HASH"
 }
 
-# Run the rebuild pipeline (build -> simplify -> codereview -> test -> verify)
+# Run the rebuild pipeline (build -> simplify -> codereview -> verify)
 # during an inline UAT retry. Returns non-zero on failure.
 # Args: $1=task $2=task_complexity $3=rebuild_context
 _uat_rebuild_pipeline() {
@@ -3246,7 +3194,6 @@ _uat_rebuild_pipeline() {
             run_phase_group "build" "$task" "$rebuild_context" || return 1
         fi
     fi
-    run_phase_group "test" "$task" "" || return 1
     run_phase_group "verify" "$task" "" || return 1
     local verify_verdict
     verify_verdict=$(jq -r '.verdict' "$PHASE_RESULT_FILE")
@@ -3846,9 +3793,9 @@ process_task_isolated() {
         update_workflow_state "tdd-scaffold" "skipped"
     fi
 
-    # --- build → codereview → test (with rebuild loop, circuit breaker) ---
+    # --- build → codereview (with rebuild loop, circuit breaker) ---
     if phase_completed "build"; then
-        print_info "Skipping phase: build+codereview+test (completed in previous run)"
+        print_info "Skipping phase: build+codereview (completed in previous run)"
         update_workflow_state "build" "skipped"
     else
         local consecutive_build_failures=0
@@ -3911,7 +3858,8 @@ process_task_isolated() {
             fi
             case "$cr_verdict" in
                 approved)
-                    : # fall through to test
+                    consecutive_build_failures=0
+                    break
                     ;;
                 needs_rebuild)
                     ((consecutive_build_failures++))
@@ -3941,91 +3889,6 @@ process_task_isolated() {
                     mark_task_blocked "$task" "Unexpected codereview verdict: $cr_verdict"
                     clear_task_progress
                     return 1 ;;
-            esac
-
-            if [[ "$task_complexity" == "trivial" ]]; then
-                print_info "Skipping phase: test (complexity: trivial)"
-                update_workflow_state "test" "skipped"
-                consecutive_build_failures=0
-                break
-            fi
-
-            local test_extra="${__spec_context}"
-            local test_result=0
-            run_phase_group "test" "$task" "$test_extra" || test_result=$?
-
-            if [[ $test_result -eq 2 ]]; then
-                print_info "Test hit max-turns. Switching to chunked test."
-                local chunked_test_result=0
-                run_chunked_test "$task" "$__spec_context" || chunked_test_result=$?
-                if [[ $chunked_test_result -eq 2 ]]; then
-                    mark_task_blocked "$task" "Test too large even for chunked execution"
-                    clear_task_progress; return 1
-                elif [[ $chunked_test_result -ne 0 ]]; then
-                    mark_task_blocked "$task" "Chunked test failed to produce a valid result"
-                    clear_task_progress; return 1
-                fi
-                # chunked_test_result == 0: phase-result.json from phase 2 is intact, fall through
-            elif [[ $test_result -ne 0 ]]; then
-                mark_task_blocked "$task" "test phase failed to produce a valid result"
-                clear_task_progress; return 1
-            fi
-
-            local verdict
-            verdict=$(jq -r '.verdict' "$PHASE_RESULT_FILE")
-            case "$verdict" in
-                approved)
-                    consecutive_build_failures=0
-                    break ;;
-                test_failure)
-                    ((consecutive_build_failures++))
-                    if (( consecutive_build_failures >= 2 )); then
-                        local failure_summary
-                        failure_summary=$(jq -r '.details // "Build/test failed twice"' "$PHASE_RESULT_FILE")
-                        print_warning "[CIRCUIT BREAKER] Approach failed twice at Build/Test phase. Re-planning from scratch with failure context."
-                        print_debug "Circuit breaker: consecutive_failures=$consecutive_build_failures, replan_count=$__replan_count"
-                        append_lesson "build" \
-                            "Build/test failed after $build_attempt attempts: $failure_summary" \
-                            "Triggered circuit breaker and re-planned from scratch" \
-                            "When build fails twice on the same approach, the plan itself is likely flawed — re-plan rather than retry"
-                        if ! __check_replan_limit "$task" "Circuit breaker: build/test failed twice even after re-planning"; then
-                            return 1
-                        fi
-                        __trigger_replan "CIRCUIT BREAKER: Build/test failed twice. Previous failure: $failure_summary. Knowing everything you know now, scrap this and implement the elegant solution."
-                        break
-                    fi
-                    local first_fail_details
-                    first_fail_details=$(jq -r '.details // "Build/test failed"' "$PHASE_RESULT_FILE")
-                    append_lesson "build" \
-                        "Build/test failed on attempt $build_attempt: $first_fail_details" \
-                        "Retrying build with revised approach" \
-                        "Read test output carefully before retrying — the error usually indicates a misunderstanding of the existing codebase"
-                    continue ;;
-                needs_rebuild)
-                    ((consecutive_build_failures++))
-                    if (( consecutive_build_failures >= 2 )); then
-                        local failure_summary
-                        failure_summary=$(jq -r '.details // "Smoke test failure twice"' "$PHASE_RESULT_FILE")
-                        print_warning "[CIRCUIT BREAKER] Approach failed twice at Build/Test phase (smoke). Re-planning."
-                        print_debug "Circuit breaker: consecutive_failures=$consecutive_build_failures, replan_count=$__replan_count"
-                        append_lesson "build" \
-                            "Smoke test NEEDS_REBUILD after $build_attempt attempts: $failure_summary" \
-                            "Triggered circuit breaker and re-planned from scratch" \
-                            "Smoke test failure means the app cannot start or run — re-plan with a different approach"
-                        if ! __check_replan_limit "$task" "Circuit breaker: smoke test failed twice even after re-planning"; then
-                            return 1
-                        fi
-                        __trigger_replan "CIRCUIT BREAKER: Smoke test NEEDS_REBUILD twice. Failure: $failure_summary. Knowing everything you know now, scrap this and implement the elegant solution."
-                        break
-                    fi
-                    local smoke_fail_details
-                    smoke_fail_details=$(jq -r '.details // "Smoke test NEEDS_REBUILD"' "$PHASE_RESULT_FILE")
-                    append_lesson "build" \
-                        "Smoke test NEEDS_REBUILD on attempt $build_attempt: $smoke_fail_details" \
-                        "Retrying build with fix for smoke failure" \
-                        "Smoke failures mean the app cannot start/run correctly — fix the entry point, dependency wiring, or startup logic"
-                    continue ;;
-                *) mark_task_blocked "$task" "Unexpected test verdict: $verdict"; clear_task_progress; return 1 ;;
             esac
         done
 
@@ -4094,7 +3957,6 @@ process_task_isolated() {
                             mark_task_blocked "$task" "Code review rejected rebuild at verify stage"
                             clear_task_progress; return 1
                         fi
-                        run_phase_group "test" "$task" "$verify_extra" || { mark_task_blocked "$task" "test phase failed during verify fix"; clear_task_progress; return 1; }
                         ;;
                     *)
                         mark_task_blocked "$task" "Verification blocked: $failing"
@@ -4354,9 +4216,9 @@ main() {
     fi
 
     if [[ "$COMPLEXITY_AWARE" == "true" ]] && [[ "$FULL_PIPELINE" != "true" ]]; then
-        print_info "Mode: Phase-isolated (complexity-aware: 2-9 invocations per task, TDD enabled)"
+        print_info "Mode: Phase-isolated (complexity-aware: 2-8 invocations per task, TDD enabled)"
     else
-        local _phase_count=6
+        local _phase_count=5
         [[ "$SKIP_SPEC" != "true" ]] && [[ -d ".claude/skills/buildcrew-spec" ]] && _phase_count=$((_phase_count + 1))
         [[ -d ".claude/skills/buildcrew-outcome" ]] && _phase_count=$((_phase_count + 1))
         [[ -d ".claude/skills/buildcrew-simplify" ]] && _phase_count=$((_phase_count + 1))
@@ -4494,15 +4356,15 @@ main() {
                         phase_list="build verify"
                         ;;
                     simple)
-                        phase_list="research build test verify"
+                        phase_list="research build verify"
                         ;;
                     *)
-                        phase_list="research review build codereview test verify"
+                        phase_list="research review build codereview verify"
                         if [[ "$SKIP_SPEC" != "true" ]] && [[ -d ".claude/skills/buildcrew-spec" ]]; then
                             phase_list="spec $phase_list"
                         fi
                         if [[ -d ".claude/skills/buildcrew-outcome" ]]; then
-                            phase_list="${phase_list/test verify/test outcome verify}"
+                            phase_list="${phase_list/verify/outcome verify}"
                         fi
                         if [[ -d ".claude/skills/buildcrew-tdd-scaffold" ]]; then
                             phase_list="${phase_list/review build/review tdd-scaffold build}"

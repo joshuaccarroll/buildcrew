@@ -82,16 +82,6 @@ teardown() {
     [[ "$result" == *"Do NOT modify TDD test files"* ]]
 }
 
-@test "__inject_tdd_prompt: appends TDD context for test phase" {
-    mkdir -p .claude
-    echo '{"test_count": 3}' > .claude/tdd-manifest.json
-    local result
-    result=$(__inject_tdd_prompt "test" "original prompt")
-    [[ "$result" == "original prompt"* ]]
-    [[ "$result" == *"TDD VALIDATION MODE"* ]]
-    [[ "$result" == *"openssl dgst -sha256"* ]]
-}
-
 @test "__inject_tdd_prompt: appends TDD context for codereview phase" {
     mkdir -p .claude
     echo '{"test_count": 4}' > .claude/tdd-manifest.json
