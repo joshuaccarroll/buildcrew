@@ -41,6 +41,9 @@ set -euo pipefail
 
 __WORKFLOW_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$__WORKFLOW_DIR/common.sh"
+source "$__WORKFLOW_DIR/uat.sh"
+source "$__WORKFLOW_DIR/artifact.sh"
+source "$__WORKFLOW_DIR/uat_signal.sh"
 
 # Load project config safely (key=value only, no shell execution)
 load_buildcrew_config() {
@@ -131,7 +134,7 @@ COMPLEXITY_AWARE=${COMPLEXITY_AWARE:-true}
 AUTO_MODE=${AUTO_MODE:-true}
 MAX_PARALLEL=${MAX_PARALLEL:-5}
 TARGET_DIR=${TARGET_DIR:-}
-_BATCH_BUILD_ONLY=${_BATCH_BUILD_ONLY:-false}
+NO_UAT=${NO_UAT:-false}
 __INVOCATION_COUNT=0
 __RESUME_PHASES=""
 __DISCOVERY_HEARTBEAT_PID=""
@@ -175,7 +178,6 @@ FULL_PIPELINE=false
 SEQUENTIAL_MODE=false
 BATCH_MAX_TURNS=200
 PLAN_MODE=false
-UAT_MODE=false
 INTERACTIVE_FLAG=""
 DEPRECATED_AUTO_USED=""
 
@@ -263,17 +265,16 @@ parse_args() {
                 AUTO_MODE=false
                 shift
                 ;;
-            --uat)
-                UAT_MODE=true
-                AUTO_MODE=true  # --uat requires auto mode (enforced)
-                shift
-                ;;
             --batch)
                 print_warning "--batch is deprecated (batch mode is now the default). Use --sequential to opt out."
                 shift
                 ;;
             --sequential)
                 SEQUENTIAL_MODE=true
+                shift
+                ;;
+            --no-uat)
+                NO_UAT=true
                 shift
                 ;;
             --keep-logs)
@@ -313,8 +314,8 @@ parse_args() {
                 echo "  --full-pipeline  Force all phases regardless of complexity assessment"
                 echo "  --auto       (deprecated) Auto mode is now the default. Use --interactive to opt out"
                 echo "  --interactive Restore interactive pauses (spec review, plan review, human review)"
-                echo "  --uat        After build completes, enter watch mode for UAT verdicts (implies --auto)"
                 echo "  --sequential Run tasks one at a time (opt out of parallel batch mode)"
+                echo "  --no-uat     Skip inline UAT after verify (with 'run')"
                 echo "  --batch      (deprecated) Batch mode is now the default"
                 echo "  --max-parallel N  Max concurrent tasks in parallel mode (default: 5)"
                 echo "  --verbose    Show orchestrator decisions, phase verdicts, and invocation counts"
@@ -369,27 +370,24 @@ __inject_tdd_prompt() {
     esac
 }
 
-# Lock TDD test files to read-only during the build phase.
-# Prevents accidental modification — tamper detection via checksums remains
-# the canonical gate, but chmod provides a first line of defence.
-# Args: none (reads .claude/tdd-manifest.json)
-__lock_tdd_files() {
+# Apply a command to each TDD test file listed in the manifest.
+# Usage: __for_each_tdd_file chmod a-w
+__for_each_tdd_file() {
     [[ -f ".claude/tdd-manifest.json" ]] || return 0
     local _f
     for _f in $(jq -r '.test_files[]? // empty' ".claude/tdd-manifest.json" 2>/dev/null); do
-        [[ -f "$_f" ]] && chmod a-w "$_f" 2>/dev/null || true
+        [[ -f "$_f" ]] && "$@" "$_f" 2>/dev/null || true
     done
 }
 
+# Lock TDD test files to read-only during the build phase.
+# Prevents accidental modification — tamper detection via checksums remains
+# the canonical gate, but chmod provides a first line of defence.
+__lock_tdd_files() { __for_each_tdd_file chmod a-w; }
+
 # Restore write permissions on TDD test files after the build phase.
 # Must be called even if the build fails (use __with_tdd_lock for safety).
-__unlock_tdd_files() {
-    [[ -f ".claude/tdd-manifest.json" ]] || return 0
-    local _f
-    for _f in $(jq -r '.test_files[]? // empty' ".claude/tdd-manifest.json" 2>/dev/null); do
-        [[ -f "$_f" ]] && chmod u+w "$_f" 2>/dev/null || true
-    done
-}
+__unlock_tdd_files() { __for_each_tdd_file chmod u+w; }
 
 # Run a command with TDD files locked (read-only) for the duration.
 # Ensures unlock happens even if the command fails.
@@ -455,6 +453,34 @@ __cleanup_tdd_artifacts() {
         [[ -f "$_f" ]] && rm -f "$_f"
     done
     rm -f .claude/tdd-manifest.json
+}
+
+# Check if the replan limit has been reached. Returns 1 (and marks task blocked)
+# if already replanned once — caller must then `return 1`.
+# Args: $1=task  $2=block_reason
+__check_replan_limit() {
+    local task="$1" block_reason="$2"
+    if (( __replan_count >= 1 )); then
+        print_error "Circuit breaker triggered again after re-planning. Stopping task."
+        mark_task_blocked "$task" "$block_reason"
+        clear_task_progress
+        return 1
+    fi
+    return 0
+}
+
+# Trigger a full re-plan from research. Caller must `break` after calling this.
+# Args: $1=context_message
+__trigger_replan() {
+    local context_msg="$1"
+    ((__replan_count++))
+    __replan_context="$context_msg"
+    print_debug "Re-plan context: $__replan_context"
+    __need_replan=true
+    __completed_phases=""
+    __cleanup_tdd_artifacts
+    clear_task_progress
+    update_workflow_state "replanning" "running"
 }
 
 # Run the simplify phase if the skill is installed. Always non-blocking (|| true).
@@ -823,12 +849,6 @@ _batch_launch_task() {
         export BUILDCREW_BATCH_NONCE="${slug}-${idx}"
         export BUILDCREW_HOME
         export AUTO_MODE=true  # Batch workers must run unattended
-        # UAT mode needs full pipeline; otherwise stop after build (merge+test centrally)
-        if [[ "$UAT_MODE" == "true" ]]; then
-            export _BATCH_BUILD_ONLY=false
-        else
-            export _BATCH_BUILD_ONLY=true
-        fi
 
         # When target_dir is set, export absolute BACKLOG_FILE path back to parent
         if [[ -n "$target_dir" ]]; then
@@ -840,8 +860,8 @@ _batch_launch_task() {
             --max-invocations "$MAX_INVOCATIONS" \
             $( [[ "$SKIP_SPEC" == "true" ]] && echo "--skip-spec" ) \
             $( [[ "$FULL_PIPELINE" == "true" ]] && echo "--full-pipeline" ) \
-            $( [[ "$UAT_MODE" == "true" ]] && echo "--uat" ) \
             $( [[ "$VERBOSE" == "true" ]] && echo "--verbose" ) \
+            $( [[ "$NO_UAT" == "true" ]] && echo "--no-uat" ) \
             > ".buildcrew/logs/batch-${slug}.log" 2>&1
     ) &
     _batch_pids[$idx]=$!
@@ -3189,272 +3209,264 @@ build_verify_failure_context() {
 }
 
 # ═════════════════════════════════════════════════════════════════════════════════
-# UAT Watch Mode (--uat flag on buildcrew run)
-# ═════════════════════════════════════════════════════════════════════════════════
-#
-# After the standard build pipeline completes (build through verify), this
-# function publishes the artifact and enters a polling loop that watches for
-# UAT verdict files. On failure/error verdicts, it re-enters the build pipeline
-# with the verdict context, then republishes the artifact.
-#
-# Called from the end of process_task_isolated() when UAT_MODE=true.
+# Inline UAT — run UAT phases inside the main pipeline (after verify).
+# Args: project_name task task_complexity
+# Returns: 0 on all-pass, 1 on max retries/fatal, 2 on only-disputed
 # ═════════════════════════════════════════════════════════════════════════════════
 
-# enter_uat_watch_mode — poll for UAT verdicts and retry on failure.
-# Args: project_name task task_complexity
-# Returns: 0 on all-pass, 1 on max retries/timeout, 2 on only-disputed
-enter_uat_watch_mode() {
+# Bridge __MANIFEST_* globals to __UAT_* globals (required by UAT phase functions).
+# Call after every publish_artifact + read_manifest.
+_bridge_manifest_to_uat() {
+    __UAT_ARTIFACT_TYPE="$__MANIFEST_ARTIFACT_TYPE"
+    __UAT_ARTIFACT_PATH="$__MANIFEST_ARTIFACT_PATH"
+    __UAT_RUN_COMMAND="$__MANIFEST_RUN_COMMAND"
+    __UAT_INSTALL_COMMAND="$__MANIFEST_INSTALL_COMMAND"
+    __UAT_HEALTH_CHECK="$__MANIFEST_HEALTH_CHECK"
+    __UAT_STOP_COMMAND="$__MANIFEST_STOP_COMMAND"
+    __UAT_BUILD_ITERATION="$__MANIFEST_BUILD_ITERATION"
+    __UAT_README_HASH="$__MANIFEST_README_HASH"
+}
+
+# Run the rebuild pipeline (build -> simplify -> codereview -> test -> verify)
+# during an inline UAT retry. Returns non-zero on failure.
+# Args: $1=task $2=task_complexity $3=rebuild_context
+_uat_rebuild_pipeline() {
+    local task="$1"
+    local task_complexity="$2"
+    local rebuild_context="$3"
+
+    run_phase_group "build" "$task" "$rebuild_context" || return 1
+    if [[ "$task_complexity" != "trivial" && "$task_complexity" != "simple" ]]; then
+        run_optional_simplify "$task" ""
+        run_phase_group "codereview" "$task" "" || return 1
+        local cr_verdict
+        cr_verdict=$(jq -r '.verdict' "$PHASE_RESULT_FILE")
+        if [[ "$cr_verdict" == "needs_rebuild" ]]; then
+            print_warning "Code review rejected UAT rebuild — running another build pass"
+            run_phase_group "build" "$task" "$rebuild_context" || return 1
+        fi
+    fi
+    run_phase_group "test" "$task" "" || return 1
+    run_phase_group "verify" "$task" "" || return 1
+    local verify_verdict
+    verify_verdict=$(jq -r '.verdict' "$PHASE_RESULT_FILE")
+    if [[ "$verify_verdict" != "complete" ]]; then
+        print_error "Verify phase blocked during UAT rebuild"
+        return 1
+    fi
+}
+
+run_inline_uat() {
     local project_name="$1"
     local task="$2"
     local task_complexity="${3:-standard}"
 
-    # Source artifact.sh and uat_signal.sh (idempotent via source guards)
-    local __wf_lib_dir
-    __wf_lib_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-    source "$__wf_lib_dir/artifact.sh"
-    source "$__wf_lib_dir/uat_signal.sh"
-
-    # Read config defaults
-    local max_retries="${UAT_MAX_RETRIES:-5}"
-    local watch_timeout="${BUILD_UAT_WATCH_TIMEOUT:-600}"
-    local poll_interval=5
-
-    # Load from .buildcrew/config if available (config overrides defaults)
-    local cfg_val
-    cfg_val=$(read_config_key "UAT_MAX_RETRIES")
-    [[ -n "$cfg_val" ]] && max_retries="$cfg_val"
-    cfg_val=$(read_config_key "BUILD_UAT_WATCH_TIMEOUT")
-    [[ -n "$cfg_val" ]] && watch_timeout="$cfg_val"
-
-    print_header "UAT Watch Mode"
-    print_info "Project: $project_name"
-    print_info "Max retries: $max_retries | Timeout: ${watch_timeout}s"
+    local project_dir
+    project_dir="$(pwd)"
 
     # 1. Publish artifact
     publish_artifact "$project_name" || {
         print_error "Failed to publish artifact for UAT"
+        cd "$project_dir"
         return 1
     }
 
-    local current_iteration="$__MANIFEST_BUILD_ITERATION"
-    if [[ -z "$current_iteration" ]]; then
-        # Re-read manifest to get the iteration
-        local manifest_path="$HOME/.buildcrew/artifacts/$project_name/manifest.json"
-        current_iteration=$(jq -r '.build_iteration // 1' "$manifest_path" 2>/dev/null) || current_iteration=1
+    # 2. Read manifest and bridge globals
+    local manifest_path="$HOME/.buildcrew/artifacts/$project_name/manifest.json"
+    read_manifest "$manifest_path" || {
+        print_error "Failed to read artifact manifest"
+        cd "$project_dir"
+        return 1
+    }
+    _bridge_manifest_to_uat
+
+    # 3. Create isolated UAT working directory
+    local uat_dir="$HOME/.buildcrew/uat-workdirs/$project_name"
+    # Clean up any stale directory from prior interrupted run
+    if [[ -d "$uat_dir" ]]; then
+        rm -rf "$uat_dir"
     fi
+    mkdir -p "$uat_dir"
+    cd "$uat_dir" || { print_error "Failed to cd to UAT directory"; cd "$project_dir"; return 1; }
 
-    # 2. Create signal directory
-    create_signal_dir "$project_name" || {
-        print_error "Failed to create signal directory"
+    # Set up cleanup trap
+    local __inline_uat_cleaned=false
+    _inline_uat_cleanup() {
+        [[ "$__inline_uat_cleaned" == "true" ]] && return
+        __inline_uat_cleaned=true
+        uat_stop_server 2>/dev/null || true
+        cd "$project_dir" 2>/dev/null || true
+    }
+    trap '_inline_uat_cleanup; exit 130' INT TERM
+
+    # 4. Initialize UAT working directory
+    __uat_cleaned=false  # Reset uat_cleanup guard for this run
+    uat_init "$project_dir/README.md" "$project_name" || {
+        print_error "UAT init failed"
+        _inline_uat_cleanup
         return 1
     }
 
+    # 5. Load UAT config
+    load_uat_config
+
+    local run_start_time
+    run_start_time=$(date +%s)
     local signal_dir="$HOME/.buildcrew/uat-signals/$project_name"
 
-    # Read last processed iteration (crash-safe resume)
-    local last_processed
-    last_processed=$(read_last_processed_iteration ".buildcrew")
+    # 6. Run Phases 1-3: stories, scenarios, harness
+    print_header "Inline UAT — Phases 1-3"
+    uat_phase_stories || { print_error "UAT stories phase failed"; _inline_uat_cleanup; return 1; }
+    uat_phase_scenarios || { print_error "UAT scenarios phase failed"; _inline_uat_cleanup; return 1; }
+    _uat_list_scenarios
+    uat_phase_harness || { print_error "UAT harness phase failed"; _inline_uat_cleanup; return 1; }
 
-    # Track UAT retry count
-    local uat_retry_count=0
-    local watch_start_time
-    watch_start_time=$(date +%s)
+    # 7. Retry loop: setup → execute → verdict
+    local retry_count=0
+    local max_retries="${UAT_MAX_RETRIES:-3}"
+    local failing_scenarios=""
+    local build_iteration="$__UAT_BUILD_ITERATION"
 
-    # Trap for cleanup on Ctrl-C during watch mode
-    local __uat_watch_running=true
-    trap '__uat_watch_running=false' INT TERM
+    while true; do
+        cd "$uat_dir" || { print_error "Failed to cd to UAT dir"; cd "$project_dir"; return 1; }
 
-    print_info "Watching for UAT verdict at: $signal_dir/verdict.json"
-    print_info "Published artifact iteration: $current_iteration"
-
-    # 3. Enter polling loop
-    while [[ "$__uat_watch_running" == "true" ]]; do
-        # Check timeout
-        local now
-        now=$(date +%s)
-        local elapsed=$((now - watch_start_time))
-        if (( elapsed >= watch_timeout )); then
-            print_warning "UAT watch mode timed out after ${watch_timeout}s without receiving a matching verdict"
-            trap - INT TERM
+        # Phase 4.5: Setup artifact environment
+        local artifact_context=""
+        uat_phase_setup_env \
+            "$__UAT_ARTIFACT_TYPE" \
+            "$__UAT_ARTIFACT_PATH" \
+            "$__UAT_RUN_COMMAND" \
+            "$__UAT_INSTALL_COMMAND" \
+            "$__UAT_HEALTH_CHECK" || {
+            local setup_rc=$?
+            if [[ $setup_rc -eq 2 ]]; then
+                # Install failure — write error verdict and retry
+                local error_json
+                error_json=$(jq -n '[{"scenario":"artifact_setup","status":"error","summary":"Artifact install or setup failed","expected":"Artifact installs successfully","actual":"Install command exited non-zero"}]')
+                write_verdict "$signal_dir" "$error_json" "$build_iteration"
+                write_last_tested_iteration ".buildcrew" "$build_iteration"
+                retry_count=$((retry_count + 1))
+                if [[ $retry_count -ge $max_retries ]]; then
+                    print_error "UAT max retries ($max_retries) exhausted after setup failure"
+                    _uat_print_report "$signal_dir" "$run_start_time"
+                    _inline_uat_cleanup
+                    return 1
+                fi
+                print_warning "Artifact setup failed — rebuilding (retry $retry_count/$max_retries)"
+                cd "$project_dir" || { _inline_uat_cleanup; return 1; }
+                local uat_rebuild_context="UAT failure context: Artifact setup/install failed. Check .buildcrew/uat-context.md for details. Do NOT access the UAT directory or scenarios."
+                _uat_rebuild_pipeline "$task" "$task_complexity" "$uat_rebuild_context" || { _inline_uat_cleanup; return 1; }
+                publish_artifact "$project_name" || { _inline_uat_cleanup; return 1; }
+                read_manifest "$manifest_path" || { _inline_uat_cleanup; return 1; }
+                _bridge_manifest_to_uat
+                build_iteration="$__UAT_BUILD_ITERATION"
+                cd "$uat_dir" || { _inline_uat_cleanup; return 1; }
+                uat_phase_harness || { _inline_uat_cleanup; return 1; }
+                continue
+            fi
+            # Fatal setup error
+            _inline_uat_cleanup
             return 1
-        fi
+        }
+        artifact_context="$__UAT_ARTIFACT_CONTEXT"
 
-        # Check for stop signal
-        if [[ -f "$STOP_FILE" ]]; then
-            print_info "Stop signal received — exiting watch mode"
-            trap - INT TERM
+        # Clean up partial results from a previous crash
+        local results_dir="results/iteration-${build_iteration}"
+        if [[ -d "$results_dir" ]] && [[ ! -f "${results_dir}/scenario-results.json" ]]; then
+            rm -rf "$results_dir"
+        fi
+        mkdir -p "$results_dir"
+
+        # Phase 5: Execute scenarios
+        uat_phase_execute "$build_iteration" "$artifact_context" "$failing_scenarios" || {
+            local error_json
+            error_json=$(jq -n '[{"scenario":"harness_execution","status":"error","summary":"Phase 5 execution failed","expected":"Test harness runs successfully","actual":"Claude agent crashed or timed out"}]')
+            write_verdict "$signal_dir" "$error_json" "$build_iteration"
+            write_last_tested_iteration ".buildcrew" "$build_iteration"
+            uat_stop_server
+            retry_count=$((retry_count + 1))
+            if [[ $retry_count -ge $max_retries ]]; then
+                print_error "UAT max retries ($max_retries) exhausted"
+                _uat_print_report "$signal_dir" "$run_start_time"
+                _inline_uat_cleanup
+                return 1
+            fi
+            continue
+        }
+
+        # Stop server after execute (for api-type artifacts)
+        uat_stop_server
+
+        # Phase 6: Write verdict
+        uat_phase_verdict "$signal_dir" "$build_iteration" || {
+            retry_count=$((retry_count + 1))
+            if [[ $retry_count -ge $max_retries ]]; then
+                print_error "UAT max retries ($max_retries) exhausted"
+                _inline_uat_cleanup
+                return 1
+            fi
+            continue
+        }
+        write_last_tested_iteration ".buildcrew" "$build_iteration"
+
+        # Read verdict
+        read_verdict "$signal_dir" || {
+            print_error "Failed to read verdict after writing"
+            _inline_uat_cleanup
+            return 1
+        }
+
+        # Process verdict
+        if [[ "$__VERDICT_STATUS" == "pass" ]]; then
+            print_success "Inline UAT: All $__VERDICT_TOTAL scenarios passed!"
+            _uat_print_report "$signal_dir" "$run_start_time"
+            _inline_uat_cleanup
             return 0
         fi
 
-        # Poll for verdict
-        if ! read_verdict "$signal_dir"; then
-            sleep "$poll_interval"
-            continue
+        # Check for only disputes remaining
+        if [[ "$__VERDICT_FAILED" -eq 0 ]] && [[ "$__VERDICT_ERRORED" -eq 0 ]] && [[ "$__VERDICT_DISPUTED" -gt 0 ]]; then
+            print_info "Only disputed scenarios remain — exiting with code 2"
+            _uat_print_report "$signal_dir" "$run_start_time"
+            _inline_uat_cleanup
+            return 2
         fi
 
-        # Check if this verdict matches our current published iteration
-        if [[ "$__VERDICT_BUILD_ITERATION" != "$current_iteration" ]]; then
-            print_debug "Verdict iteration ($__VERDICT_BUILD_ITERATION) does not match published iteration ($current_iteration) — skipping"
-            sleep "$poll_interval"
-            continue
+        # Failures/errors — extract failing scenarios for retry
+        failing_scenarios=$(echo "$__VERDICT_SCENARIOS_JSON" | jq -r '.[] | select(.status == "fail" or .status == "error") | .scenario' 2>/dev/null | tr '\n' '|')
+        failing_scenarios="${failing_scenarios%|}"
+
+        retry_count=$((retry_count + 1))
+        if [[ $retry_count -ge $max_retries ]]; then
+            print_error "UAT max retries ($max_retries) exhausted — $__VERDICT_FAILED failures, $__VERDICT_ERRORED errors remain"
+            _uat_print_report "$signal_dir" "$run_start_time"
+            _inline_uat_cleanup
+            return 1
         fi
 
-        # Check if we already processed this iteration
-        if [[ "$__VERDICT_BUILD_ITERATION" -le "$last_processed" ]]; then
-            print_debug "Verdict iteration ($__VERDICT_BUILD_ITERATION) already processed — skipping"
-            sleep "$poll_interval"
-            continue
-        fi
+        print_warning "Inline UAT: ${__VERDICT_FAILED} failures, ${__VERDICT_ERRORED} errors (retry $retry_count/$max_retries)"
+        _uat_print_retry_context "$__VERDICT_SCENARIOS_JSON"
 
-        # ── Process verdict ──────────────────────────────────────────────────
-        print_info "Verdict received: status=$__VERDICT_STATUS passed=$__VERDICT_PASSED failed=$__VERDICT_FAILED errored=$__VERDICT_ERRORED disputed=$__VERDICT_DISPUTED"
+        # Write context for rebuild
+        write_uat_context "$signal_dir/verdict.json" "$retry_count" "$max_retries" || true
 
-        case "$__VERDICT_STATUS" in
-            pass)
-                print_success "UAT: All $__VERDICT_TOTAL scenarios passed!"
-                trap - INT TERM
-                return 0
-                ;;
+        # cd back to project for rebuild
+        cd "$project_dir" || { _inline_uat_cleanup; return 1; }
 
-            fail|error)
-                ((uat_retry_count++))
+        # Rebuild pipeline: build → simplify → codereview → test → verify
+        local uat_rebuild_context="UAT failure context is in .buildcrew/uat-context.md — read it and fix the issues. Do NOT access the UAT directory or scenarios."
+        _uat_rebuild_pipeline "$task" "$task_complexity" "$uat_rebuild_context" || { _inline_uat_cleanup; return 1; }
 
-                if (( uat_retry_count > max_retries )); then
-                    print_error "UAT: Max retries ($max_retries) exhausted"
-                    print_info "Remaining failures: $__VERDICT_FAILED, errors: $__VERDICT_ERRORED"
-                    trap - INT TERM
-                    return 1
-                fi
+        # Republish artifact and re-bridge globals
+        publish_artifact "$project_name" || { _inline_uat_cleanup; return 1; }
+        read_manifest "$manifest_path" || { _inline_uat_cleanup; return 1; }
+        _bridge_manifest_to_uat
+        build_iteration="$__UAT_BUILD_ITERATION"
 
-                print_warning "UAT: ${__VERDICT_FAILED} failures, ${__VERDICT_ERRORED} errors (retry $uat_retry_count/$max_retries)"
-
-                # Write uat-context.md for the build agent
-                local verdict_file="$signal_dir/verdict.json"
-                write_uat_context "$verdict_file" "$uat_retry_count" "$max_retries" || {
-                    print_error "Failed to write UAT context"
-                }
-
-                # Persist last processed iteration (crash-safe)
-                write_last_processed_iteration ".buildcrew" "$__VERDICT_BUILD_ITERATION"
-                last_processed="$__VERDICT_BUILD_ITERATION"
-
-                # Re-enter build-through-verify pipeline with UAT context
-                print_header "UAT Rebuild (iteration $uat_retry_count/$max_retries)"
-
-                local uat_rebuild_context="UAT failure context is in .buildcrew/uat-context.md — read it and fix the issues. Do NOT access the UAT directory or scenarios."
-                run_phase_group "build" "$task" "$uat_rebuild_context" || {
-                    print_error "Build phase failed during UAT rebuild"
-                    trap - INT TERM
-                    return 1
-                }
-
-                # Run simplify for non-trivial tasks
-                if [[ "$task_complexity" != "trivial" && "$task_complexity" != "simple" ]]; then
-                    run_optional_simplify "$task" ""
-                fi
-
-                # Code review
-                if [[ "$task_complexity" != "trivial" && "$task_complexity" != "simple" ]]; then
-                    run_phase_group "codereview" "$task" "" || {
-                        print_error "Code review failed during UAT rebuild"
-                        trap - INT TERM
-                        return 1
-                    }
-                    local cr_verdict
-                    cr_verdict=$(jq -r '.verdict' "$PHASE_RESULT_FILE")
-                    if [[ "$cr_verdict" == "needs_rebuild" ]]; then
-                        print_warning "Code review rejected UAT rebuild — running another build pass"
-                        run_phase_group "build" "$task" "$uat_rebuild_context" || {
-                            print_error "Second build pass failed during UAT rebuild"
-                            trap - INT TERM
-                            return 1
-                        }
-                    fi
-                fi
-
-                # Test
-                run_phase_group "test" "$task" "" || {
-                    print_error "Test phase failed during UAT rebuild"
-                    trap - INT TERM
-                    return 1
-                }
-
-                # Verify
-                run_phase_group "verify" "$task" "" || {
-                    print_error "Verify phase failed during UAT rebuild"
-                    trap - INT TERM
-                    return 1
-                }
-                local verify_verdict
-                verify_verdict=$(jq -r '.verdict' "$PHASE_RESULT_FILE")
-                if [[ "$verify_verdict" != "complete" ]]; then
-                    print_error "Verify phase blocked during UAT rebuild"
-                    trap - INT TERM
-                    return 1
-                fi
-
-                # Republish artifact with incremented iteration
-                publish_artifact "$project_name" || {
-                    print_error "Failed to republish artifact after UAT rebuild"
-                    trap - INT TERM
-                    return 1
-                }
-
-                # Update current iteration
-                local manifest_path="$HOME/.buildcrew/artifacts/$project_name/manifest.json"
-                current_iteration=$(jq -r '.build_iteration // 1' "$manifest_path" 2>/dev/null) || current_iteration=$((current_iteration + 1))
-
-                # Reset watch timeout for the new iteration
-                watch_start_time=$(date +%s)
-
-                print_info "Republished artifact (iteration $current_iteration) — watching for new verdict"
-                ;;
-
-            disputed)
-                print_warning "UAT: Only disputed scenarios remain ($__VERDICT_DISPUTED disputed)"
-
-                # Log disputes
-                local disputed_scenarios
-                disputed_scenarios=$(echo "$__VERDICT_SCENARIOS_JSON" | jq -r '.[] | select(.status == "disputed") | "  - " + .scenario + ": " + .summary')
-                if [[ -n "$disputed_scenarios" ]]; then
-                    echo ""
-                    echo -e "${YELLOW}Disputed scenarios:${NC}"
-                    echo "$disputed_scenarios"
-                    echo ""
-                fi
-
-                if [[ "$AUTO_MODE" == "true" ]]; then
-                    print_info "Auto mode — exiting with code 2 (disputed scenarios require manual resolution)"
-                    trap - INT TERM
-                    return 2
-                else
-                    # Interactive mode — prompt user
-                    echo -e "${YELLOW}${BOLD}Disputed scenarios require manual resolution.${NC}"
-                    echo "Review disputes.md in the UAT directory and either:"
-                    echo "  (a) Update the README to clarify disputed behavior, then re-run"
-                    echo "  (b) Accept the disputed behavior as correct"
-                    echo ""
-                    read -r -p "Continue watching? (y/n) " answer
-                    if [[ "$answer" != "y" && "$answer" != "Y" ]]; then
-                        trap - INT TERM
-                        return 2
-                    fi
-                    # Continue watching (user may have resolved disputes)
-                fi
-                ;;
-
-            *)
-                print_warning "Unknown verdict status: $__VERDICT_STATUS — skipping"
-                ;;
-        esac
-
-        sleep "$poll_interval"
+        # Regen harness for rebuilt artifact
+        cd "$uat_dir" || { _inline_uat_cleanup; return 1; }
+        uat_phase_harness || { _inline_uat_cleanup; return 1; }
     done
-
-    # Reached here via Ctrl-C trap
-    print_info "Watch mode interrupted"
-    trap - INT TERM
-    return 0
 }
 
 # ─────────────────────────────────────────────────────────────────────────────────
@@ -3666,7 +3678,9 @@ process_task_isolated() {
         if [[ -n "$__replan_context" ]]; then
             research_extra="${research_extra:+$research_extra | }REPLAN: $__replan_context"
         fi
-        research_extra="${research_extra:+$research_extra | }TDD MODE: Tests will be written BEFORE implementation. Your plan MUST include a section documenting public interface contracts (function signatures, CLI commands, API endpoints) with enough detail that tests can be written against them before any code exists. Mark any areas that cannot be tested before implementation (visual, perf) as TDD-exempt."
+        if [[ "$task_complexity" == "standard" ]]; then
+            research_extra="${research_extra:+$research_extra | }TDD MODE: Tests will be written BEFORE implementation. Your plan MUST include a section documenting public interface contracts (function signatures, CLI commands, API endpoints) with enough detail that tests can be written against them before any code exists. Mark any areas that cannot be tested before implementation (visual, perf) as TDD-exempt."
+        fi
         run_phase_group "research" "$task" "$research_extra" || { mark_task_blocked "$task" "research phase failed to produce a valid result"; clear_task_progress; return 1; }
         __completed_phases="${__completed_phases:+$__completed_phases }research"
         save_task_progress "$task" "$__completed_phases" "$__INVOCATION_COUNT"
@@ -3765,21 +3779,11 @@ process_task_isolated() {
                             "Plan failed to converge after $plan_review_cycle cycles: $failure_summary" \
                             "Triggered circuit breaker and re-planned from scratch" \
                             "Start from a different architectural approach when plan review rejects the same issues twice"
-                        if (( __replan_count >= 1 )); then
-                            print_error "Circuit breaker triggered again after re-planning. Stopping task."
-                            mark_task_blocked "$task" "Circuit breaker: plan failed twice even after re-planning"
-                            clear_task_progress
+                        if ! __check_replan_limit "$task" "Circuit breaker: plan failed twice even after re-planning"; then
                             rm -f .claude/plan-review-prev.md .claude/review-pass1-pe-prev.md .claude/review-pass2-pm-prev.md
                             return 1
                         fi
-                        ((__replan_count++))
-                        __replan_context="CIRCUIT BREAKER: Plan review failed twice. Previous approach: $failure_summary. Knowing everything you know now, scrap this and implement the elegant solution."
-                        print_debug "Re-plan context: $__replan_context"
-                        __need_replan=true
-                        __completed_phases=""
-                        __cleanup_tdd_artifacts
-                        clear_task_progress
-                        update_workflow_state "replanning" "running"
+                        __trigger_replan "CIRCUIT BREAKER: Plan review failed twice. Previous approach: $failure_summary. Knowing everything you know now, scrap this and implement the elegant solution."
                         rm -f .claude/plan-review-prev.md .claude/review-pass1-pe-prev.md .claude/review-pass2-pm-prev.md
                         break
                     fi
@@ -3912,20 +3916,10 @@ process_task_isolated() {
                             "Code review NEEDS_REBUILD after $build_attempt attempts: $failure_summary" \
                             "Triggered circuit breaker and re-planned from scratch" \
                             "When code review rejects twice on the same approach, the plan itself is likely flawed — re-plan rather than retry"
-                        if (( __replan_count >= 1 )); then
-                            print_error "Circuit breaker triggered again after re-planning. Stopping task."
-                            mark_task_blocked "$task" "Circuit breaker: code review failed twice even after re-planning"
-                            clear_task_progress
+                        if ! __check_replan_limit "$task" "Circuit breaker: code review failed twice even after re-planning"; then
                             return 1
                         fi
-                        ((__replan_count++))
-                        __replan_context="CIRCUIT BREAKER: Code review NEEDS_REBUILD twice. Previous failure: $failure_summary. Knowing everything you know now, scrap this and implement the elegant solution."
-                        print_debug "Re-plan context: $__replan_context"
-                        __need_replan=true
-                        __completed_phases=""
-                        __cleanup_tdd_artifacts
-                        clear_task_progress
-                        update_workflow_state "replanning" "running"
+                        __trigger_replan "CIRCUIT BREAKER: Code review NEEDS_REBUILD twice. Previous failure: $failure_summary. Knowing everything you know now, scrap this and implement the elegant solution."
                         break
                     fi
                     local cr_fail_details
@@ -3986,20 +3980,10 @@ process_task_isolated() {
                             "Build/test failed after $build_attempt attempts: $failure_summary" \
                             "Triggered circuit breaker and re-planned from scratch" \
                             "When build fails twice on the same approach, the plan itself is likely flawed — re-plan rather than retry"
-                        if (( __replan_count >= 1 )); then
-                            print_error "Circuit breaker triggered again after re-planning. Stopping task."
-                            mark_task_blocked "$task" "Circuit breaker: build/test failed twice even after re-planning"
-                            clear_task_progress
+                        if ! __check_replan_limit "$task" "Circuit breaker: build/test failed twice even after re-planning"; then
                             return 1
                         fi
-                        ((__replan_count++))
-                        __replan_context="CIRCUIT BREAKER: Build/test failed twice. Previous failure: $failure_summary. Knowing everything you know now, scrap this and implement the elegant solution."
-                        print_debug "Re-plan context: $__replan_context"
-                        __need_replan=true
-                        __completed_phases=""
-                        __cleanup_tdd_artifacts
-                        clear_task_progress
-                        update_workflow_state "replanning" "running"
+                        __trigger_replan "CIRCUIT BREAKER: Build/test failed twice. Previous failure: $failure_summary. Knowing everything you know now, scrap this and implement the elegant solution."
                         break
                     fi
                     local first_fail_details
@@ -4020,19 +4004,10 @@ process_task_isolated() {
                             "Smoke test NEEDS_REBUILD after $build_attempt attempts: $failure_summary" \
                             "Triggered circuit breaker and re-planned from scratch" \
                             "Smoke test failure means the app cannot start or run — re-plan with a different approach"
-                        if (( __replan_count >= 1 )); then
-                            print_error "Circuit breaker triggered again after re-planning. Stopping task."
-                            mark_task_blocked "$task" "Circuit breaker: smoke test failed twice even after re-planning"
-                            clear_task_progress
+                        if ! __check_replan_limit "$task" "Circuit breaker: smoke test failed twice even after re-planning"; then
                             return 1
                         fi
-                        ((__replan_count++))
-                        __replan_context="CIRCUIT BREAKER: Smoke test NEEDS_REBUILD twice. Failure: $failure_summary. Knowing everything you know now, scrap this and implement the elegant solution."
-                        __need_replan=true
-                        __completed_phases=""
-                        __cleanup_tdd_artifacts
-                        clear_task_progress
-                        update_workflow_state "replanning" "running"
+                        __trigger_replan "CIRCUIT BREAKER: Smoke test NEEDS_REBUILD twice. Failure: $failure_summary. Knowing everything you know now, scrap this and implement the elegant solution."
                         break
                     fi
                     local smoke_fail_details
@@ -4052,17 +4027,6 @@ process_task_isolated() {
 
         __completed_phases="${__completed_phases:+$__completed_phases }build"
         save_task_progress "$task" "$__completed_phases" "$__INVOCATION_COUNT"
-    fi
-
-    # --- batch build-only early exit ---
-    if [[ "$_BATCH_BUILD_ONLY" == "true" ]]; then
-        git add -A 2>/dev/null
-        git commit -m "buildcrew(batch-build): $task" --allow-empty 2>/dev/null || true
-        print_info "Stopping after build phase (batch mode)"
-        clear_task_progress
-        rm -f "$CURRENT_TASK_FILE"
-        mark_task_complete "$task"
-        break
     fi
 
     # --- verify + commit (never skipped — always re-verify) ---
@@ -4094,20 +4058,10 @@ process_task_isolated() {
                         "Verification blocked twice on '$failing': $failure_details" \
                         "Triggered circuit breaker and re-planned from scratch" \
                         "When verification fails twice on the same check, the build approach itself is wrong — re-plan"
-                    if (( __replan_count >= 1 )); then
-                        print_error "Circuit breaker triggered again after re-planning. Stopping task."
-                        mark_task_blocked "$task" "Circuit breaker: verification failed twice even after re-planning"
-                        clear_task_progress
+                    if ! __check_replan_limit "$task" "Circuit breaker: verification failed twice even after re-planning"; then
                         return 1
                     fi
-                    ((__replan_count++))
-                    __replan_context="CIRCUIT BREAKER: Verification failed twice on '$failing': $failure_details. Knowing everything you know now, scrap this and implement the elegant solution."
-                    print_debug "Re-plan context: $__replan_context"
-                    __need_replan=true
-                    __completed_phases=""
-                    __cleanup_tdd_artifacts
-                    clear_task_progress
-                    update_workflow_state "replanning" "running"
+                    __trigger_replan "CIRCUIT BREAKER: Verification failed twice on '$failing': $failure_details. Knowing everything you know now, scrap this and implement the elegant solution."
                     break
                 fi
 
@@ -4154,6 +4108,32 @@ process_task_isolated() {
 
     done  # end of outer re-planning while loop
 
+    # ── Inline UAT ──────────────────────────────────────────────────────────
+    if [[ "$NO_UAT" != "true" && "$task_complexity" != "trivial" ]]; then
+        if [[ -f "README.md" ]]; then
+            local project_name
+            project_name=$(extract_task_dir "$task")
+            if [[ -z "$project_name" ]]; then
+                project_name="$(basename "$(pwd)")"
+            fi
+            local task_for_uat
+            task_for_uat=$(strip_task_dir "$task")
+
+            local uat_result=0
+            run_inline_uat "$project_name" "$task_for_uat" "$task_complexity" || uat_result=$?
+            if [[ $uat_result -eq 2 ]]; then
+                print_warning "UAT completed with disputed scenarios (exit 2)"
+                exit 2
+            elif [[ $uat_result -ne 0 ]]; then
+                print_error "Inline UAT failed"
+                return 1
+            fi
+        else
+            print_info "No README.md found — skipping inline UAT"
+        fi
+    fi
+    # ── End Inline UAT ──────────────────────────────────────────────────────
+
     # Task succeeded
     clear_task_progress
     rm -f "$CURRENT_TASK_FILE"
@@ -4162,29 +4142,6 @@ process_task_isolated() {
     summary=$(jq -r '.summary // "Completed"' "$STATUS_FILE" 2>/dev/null || echo "Completed")
     print_success "Completed: $task"
     print_info "Summary: $summary"
-
-    # ── UAT Watch Mode integration ──────────────────────────────────────────
-    # After verify succeeds, if --uat flag was set, enter watch mode.
-    # The project_name is derived from the current directory name.
-    if [[ "${UAT_MODE:-}" == "true" ]]; then
-        local project_name
-        project_name=$(extract_task_dir "$task")
-        if [[ -z "$project_name" ]]; then
-            project_name="$(basename "$(pwd)")"
-        fi
-        local task_for_uat
-        task_for_uat=$(strip_task_dir "$task")
-        local uat_result=0
-        enter_uat_watch_mode "$project_name" "$task_for_uat" "$task_complexity" || uat_result=$?
-        if [[ $uat_result -eq 2 ]]; then
-            print_warning "UAT completed with disputed scenarios (exit 2)"
-            exit 2
-        elif [[ $uat_result -ne 0 ]]; then
-            print_error "UAT watch mode failed (exit $uat_result)"
-            return 1
-        fi
-    fi
-    # ── End UAT Watch Mode integration ──────────────────────────────────────
 }
 
 # ─────────────────────────────────────────────────────────────────────────────────
@@ -4235,11 +4192,6 @@ main() {
         fi
         enter_discovery_mode "$plan_prompt"
         # enter_discovery_mode calls exit 0, never returns
-    fi
-
-    if [[ "$UAT_MODE" == "true" && "$INTERACTIVE_FLAG" == "true" ]]; then
-        print_error "--interactive cannot be combined with --uat (UAT requires unattended operation)"
-        exit 1
     fi
 
     if [[ "$SEQUENTIAL_MODE" != "true" ]]; then
@@ -4543,6 +4495,9 @@ main() {
                         fi
                         if [[ -d ".claude/skills/buildcrew-outcome" ]]; then
                             phase_list="${phase_list/test verify/test outcome verify}"
+                        fi
+                        if [[ -d ".claude/skills/buildcrew-tdd-scaffold" ]]; then
+                            phase_list="${phase_list/review build/review tdd-scaffold build}"
                         fi
                         if [[ -d ".claude/skills/buildcrew-simplify" ]]; then
                             phase_list="${phase_list/build codereview/build simplify codereview}"

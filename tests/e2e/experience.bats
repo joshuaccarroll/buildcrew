@@ -626,13 +626,6 @@ UAT_SH="$BUILDCREW_ROOT/lib/uat.sh"
     [ "$SEQUENTIAL_MODE" = "true" ]
 }
 
-# Happy path: --uat implicitly sets SEQUENTIAL_MODE=true (UAT requires sequential).
-@test "experience: --uat implies sequential mode" {
-    parse_args --uat
-    [ "$UAT_MODE" = "true" ]
-    [ "$SEQUENTIAL_MODE" = "true" ]
-}
-
 # Happy path: --batch prints deprecation warning (no longer needed, batch is default).
 @test "experience: --batch prints deprecation warning about being default now" {
     run bash -c "source '$BUILDCREW_ROOT/lib/workflow.sh' 2>/dev/null; parse_args --batch"

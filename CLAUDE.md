@@ -100,6 +100,7 @@ When context is compacted, always preserve:
 7. **test** — QA Engineer writes and runs tests
 8. **outcome** — Verify implementation against spec acceptance criteria
 9. **verify** — Security audit + commit
+10. **inline UAT** — Blind scenario-based acceptance testing against README.md (runs for non-trivial tasks with a README.md; skip with `--no-uat`)
 
 ## Modes
 
@@ -109,5 +110,7 @@ BuildCrew has two runtime modes:
 - **Execution mode** — Autonomous pipeline that processes pending BACKLOG.md tasks through the phase sequence above.
 
 - **TDD** — Always active for `standard` complexity tasks. Inserts a tdd-scaffold phase between plan-review and build. Tests are written before implementation and verified to fail, then the build phase must make them pass. Trivial/simple tasks skip tdd-scaffold.
+
+- **Inline UAT** — Runs automatically after verify for all non-trivial tasks that have a `README.md`. The UAT subsystem publishes an artifact, generates user stories and scenarios from the README, then executes them in an isolated working directory. On failure, it triggers a rebuild loop (build -> simplify -> codereview -> test -> verify) and retries. Disable with `--no-uat`.
 
 Note: "Chunked Build Mode" is a separate concept (sub-mode within the build phase for large builds). It is unrelated to the modes above.
