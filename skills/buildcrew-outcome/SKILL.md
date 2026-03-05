@@ -20,7 +20,7 @@ The task was provided in the prompt. You are the **QA Engineer**. Your job is to
 
 **Goal**: Validate the implementation against the acceptance criteria in the spec. This is outcome-focused verification, not code-quality verification. The question is: "Does this do what the spec said it would do?"
 
-> **Important**: This is NOT a test-suite pass/fail check. That happens in the test phase. This is about exercising the feature yourself and verifying each acceptance criterion is genuinely met.
+> **Important**: This is NOT a test-suite pass/fail check. That happens in the verify phase. This is about exercising the feature yourself and verifying each acceptance criterion is genuinely met.
 
 ### Step 1: Read the Spec
 
