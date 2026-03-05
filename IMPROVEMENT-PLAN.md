@@ -15,10 +15,8 @@ Replace all numbered phase references (Phase 1, Phase 2, etc.) with named phases
 - plan
 - plan-review
 - build
-- outcome
 - code-review
 - refactor
-- test
 - verify
 - commit
 

@@ -15,7 +15,6 @@
 #   build
 #   simplify (non-blocking — review and apply targeted simplifications)
 #   codereview (adversarial PE review — independent phase)
-#   outcome (validates against spec acceptance criteria)
 #   verify + security audit + commit + signal
 #
 # Usage:
@@ -2479,7 +2478,7 @@ Use this exact format:
 
 ## Lesson: [date]
 
-**Phase**: [the current phase, e.g. build, verify, outcome]
+**Phase**: [the current phase, e.g. build, verify]
 **What went wrong**: [specific description of what failed]
 **What fixed it**: [specific description of what you changed]
 **Rule**: [one-sentence rule to prevent this in future]
@@ -3439,7 +3438,7 @@ process_task_isolated() {
     local __replan_count=0           # circuit breaker: how many times we've re-planned
     local __need_replan=false        # circuit breaker: set true to restart from research
     local __replan_context=""        # circuit breaker: failure context for re-plan prompt
-    local build_attempt=0            # tracks total build attempts across build and outcome phases
+    local build_attempt=0            # tracks total build attempts across build phases
     local __lesson_instruction
     __lesson_instruction="$(_lesson_writing_instruction)"
 
@@ -3901,7 +3900,6 @@ process_task_isolated() {
     fi
 
     # --- verify + commit (never skipped — always re-verify) ---
-    # NOTE: Outcome verification (AC checks) is now absorbed into the verify phase.
     # The verify SKILL runs 3 parallel sub-agents: security audit, test suite, AC verification.
     local verify_attempt=0
     local consecutive_verify_failures=0
@@ -4220,7 +4218,6 @@ main() {
     else
         local _phase_count=5
         [[ "$SKIP_SPEC" != "true" ]] && [[ -d ".claude/skills/buildcrew-spec" ]] && _phase_count=$((_phase_count + 1))
-        [[ -d ".claude/skills/buildcrew-outcome" ]] && _phase_count=$((_phase_count + 1))
         [[ -d ".claude/skills/buildcrew-simplify" ]] && _phase_count=$((_phase_count + 1))
         [[ -d ".claude/skills/buildcrew-tdd-scaffold" ]] && _phase_count=$((_phase_count + 1))
         print_info "Mode: Phase-isolated ($_phase_count invocations per task)"
@@ -4363,9 +4360,6 @@ main() {
                         if [[ "$SKIP_SPEC" != "true" ]] && [[ -d ".claude/skills/buildcrew-spec" ]]; then
                             phase_list="spec $phase_list"
                         fi
-                        if [[ -d ".claude/skills/buildcrew-outcome" ]]; then
-                            phase_list="${phase_list/verify/outcome verify}"
-                        fi
                         if [[ -d ".claude/skills/buildcrew-tdd-scaffold" ]]; then
                             phase_list="${phase_list/review build/review tdd-scaffold build}"
                         fi
@@ -4480,8 +4474,5 @@ main() {
 
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
     parse_args "$@"
-    if [[ "$STRICT_EXPLICIT" == "true" ]] && [[ "$STRICT_MODE" == "true" ]] && [[ "$SKIP_SPEC" == "true" ]]; then
-        print_warning "--strict has no effect with --skip-spec (outcome phase requires a spec)"
-    fi
     main
 fi

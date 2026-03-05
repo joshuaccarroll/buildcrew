@@ -727,17 +727,12 @@ teardown() {
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
-# New phase turns (spec, outcome, codereview)
+# New phase turns (spec, codereview)
 # ─────────────────────────────────────────────────────────────────────────────
 
 @test "get_phase_max_turns: spec returns 50" {
     run get_phase_max_turns "spec"
     [ "$output" = "50" ]
-}
-
-@test "get_phase_max_turns: outcome falls through to default (30)" {
-    run get_phase_max_turns "outcome"
-    [ "$output" = "30" ]
 }
 
 @test "get_phase_max_turns: codereview returns 40" {
@@ -1002,45 +997,6 @@ EOF
     ac_count_after=$(grep -c '^- \[ \] AC-' .claude/spec.md 2>/dev/null || echo 0)
     [ "$ac_count_after" -ge 2 ]
     rm -f "$spec_rerun_file"
-}
-
-@test "outcome strict mode: marks task blocked after two consecutive partial failures" {
-    mkdir -p .buildcrew ".claude/skills/buildcrew-outcome"
-    echo "# Spec" > .claude/spec.md
-    echo "- [ ] test task" > BACKLOG.md
-    SKIP_SPEC=false
-    STRICT_MODE=true
-    HUMAN_REVIEW=false
-    # Skip research, review, and build — go directly to the outcome phase
-    __RESUME_PHASES="research review build"
-
-    local blocked_file
-    blocked_file=$(mktemp)
-
-    archive_task_artifacts() { :; }
-    clear_task_progress()    { :; }
-    save_task_progress()     { :; }
-    append_lesson()          { :; }
-    handle_human_review()    { return 0; }
-    handle_plan_review()     { return 0; }
-    mark_task_blocked()      { echo "$*" > "$blocked_file"; }
-    # Outcome always returns partial; rebuild calls (build/test) return approved
-    run_phase_group() {
-        local phase="$1"
-        mkdir -p .claude
-        case "$phase" in
-            outcome)
-                echo '{"verdict":"partial","details":"stub partial"}' > "$PHASE_RESULT_FILE" ;;
-            *)
-                echo '{"verdict":"approved","details":"stub approved"}' > "$PHASE_RESULT_FILE" ;;
-        esac
-        return 0
-    }
-
-    run process_task_isolated "test task"
-    [ "$status" -eq 1 ]
-    [ -s "$blocked_file" ]
-    rm -f "$blocked_file"
 }
 
 # ─────────────────────────────────────────────────────────────────────────────

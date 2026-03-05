@@ -231,13 +231,6 @@ agent: principal-engineer
 description: Adversarial code review + elegance check
 output: .claude/code-review.md
 
-### OUTCOME
-agent: qa-engineer
-description: Validate each acceptance criterion from the spec against the actual implementation
-output: .claude/outcome-report.md
-note: Only runs if .claude/spec.md exists (i.e., spec phase was not skipped)
-strict mode: buildcrew run --strict (blocks commit if any criteria fail)
-
 ### VERIFY + COMMIT
 agents: security-engineer, none
 description: Security audit + final gate + git commit
@@ -277,7 +270,7 @@ description: Create git commit
 - principal-engineer: Architecture & adversarial code review
 - feature-engineer: Pragmatic implementation
 - security-engineer: Security audits
-- qa-engineer: Testing and outcome verification
+- qa-engineer: Testing and acceptance verification
 - product-manager: Discovery, spec writing, plan review
 - ux-designer: Design specs
 
