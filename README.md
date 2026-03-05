@@ -43,7 +43,7 @@ BuildCrew has two modes:
 
 ## The Pipeline
 
-Each task runs through up to 9 phases (each a separate Claude invocation). Total invocations are bounded by `MAX_INVOCATIONS` (default: 15).
+Each task runs through up to 8 phases (each a separate Claude invocation). Total invocations are bounded by `MAX_INVOCATIONS` (default: 15).
 
 | # | Phase | Persona | What happens |
 |---|-------|---------|--------------|
@@ -54,8 +54,7 @@ Each task runs through up to 9 phases (each a separate Claude invocation). Total
 | 4 | Build | Feature Engineer | Implements the plan; TDD test files are locked read-only |
 | 5 | Simplify | Principal Engineer | Non-blocking targeted simplifications |
 | 6 | Code Review | Principal Engineer | Adversarial review + elegance check; may request rebuild |
-| 7 | Outcome | QA Engineer | Validates each acceptance criterion from the spec |
-| 8 | Verify + Commit | Security Engineer | Security audit; blocks commit on vulnerabilities |
+| 7 | Verify + Commit | Security Engineer | Security audit + AC cross-reference; blocks commit on vulnerabilities |
 
 **Key behaviors:**
 - **Adversarial reviews** — reviewers are asked to find flaws, not approve quickly
@@ -76,7 +75,7 @@ Each task runs through up to 9 phases (each a separate Claude invocation). Total
 | **UX Designer** | Design specs, HTML mockups, accessibility review | Discovery mode, `/buildcrew ux-designer:<task>` |
 | **Feature Engineer** | Pragmatic implementation following codebase patterns | Build phase, `/buildcrew feature-engineer:<task>` |
 | **Principal Engineer** | Plan review, code review, blocks over-engineering | Review phases, `/buildcrew principal-engineer:<task>` |
-| **QA Engineer** | Tests that fail meaningfully, outcome verification | Outcome/verify phases, `/buildcrew qa-engineer:<task>` |
+| **QA Engineer** | Tests that fail meaningfully, AC cross-reference in verify | Verify phase, `/buildcrew qa-engineer:<task>` |
 | **Security Engineer** | OWASP audits, secrets detection, blocks vulnerabilities | Verify phase, `/buildcrew security-engineer:<task>` |
 
 ---
@@ -219,6 +218,16 @@ buildcrew lessons lint         # Flag vague rules (e.g., "Always...", "Never..."
 ```
 
 Capped at 25 entries. When exceeded, the oldest 10 are condensed into a "Patterns" summary. Duplicate rules are automatically skipped.
+
+---
+
+## Bonus Tools
+
+Standalone skills that work inside or outside the BuildCrew pipeline. Invoke them directly in Claude Code.
+
+| Skill | Description |
+|-------|-------------|
+| `/simplify-all [paths]` | Review and clean up an entire codebase (or targeted paths) for reuse, quality, and efficiency. Spawns 3 parallel analysts (Reuse, Quality, Efficiency) and auto-fixes HIGH-severity findings. |
 
 ---
 
