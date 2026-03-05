@@ -15,12 +15,12 @@ Replace all numbered phase references (Phase 1, Phase 2, etc.) with named phases
 - plan
 - plan-review
 - build
-- outcome
 - code-review
 - refactor
-- test
 - verify
 - commit
+
+Note: The `outcome` and `test` phases have been absorbed into `verify`.
 
 ### 4. Refactor adversarial review into reusable skill
 Extract the review logic from buildcrew-review into a proper reusable skill with fresh-context subagents (PE + PM independently, then convergence synthesis). Remove the Phase 2 self-review loops — they are redundant with Phase 3. Update `/review-plan` command to be a thin wrapper around the same skill.

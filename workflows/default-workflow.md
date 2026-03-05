@@ -136,30 +136,6 @@ Auto-escalation: if iteration 2 shows no improvement in blocking issue count →
 
 ---
 
-### OUTCOME (optional, requires spec)
-**agent**: qa-engineer
-**description**: Validate each acceptance criterion from the spec against the actual implementation
-**input**: .claude/spec.md (acceptance criteria), built code
-**output**: .claude/outcome-report.md
-**gate**: all verifiable criteria pass (STRICT_MODE) or warn on partial (default)
-**circuit breaker**: 2 consecutive outcome failures → re-plan from scratch
-
-Note: This phase only runs if `.claude/spec.md` exists (i.e., spec phase was not skipped).
-
-The QA Engineer:
-1. Reads each acceptance criterion from the spec
-2. Exercises the feature against each criterion (runs it, checks output, tests edge cases)
-3. Not just "do tests pass" but "does this do what the spec said it would do"
-4. Produces a pass/fail report keyed to each acceptance criterion
-5. Attempts autonomous fix for mechanically failing criteria (one attempt)
-
-On failure: loops back to build with specific failing criteria feedback.
-
-**--strict mode** (`buildcrew run --strict`): ALL criteria must pass before commit is allowed.
-Without `--strict`: warn but allow commit with unmet criteria.
-
----
-
 ### VERIFY
 **agent**: security-engineer
 **description**: Security audit and final verification
