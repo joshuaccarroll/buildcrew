@@ -226,10 +226,10 @@ agent: none
 description: Review and apply targeted simplifications before formal code review
 output: .claude/simplify-report.md
 
-### CODE-REVIEW + REFACTOR + TEST
-agents: principal-engineer, qa-engineer
-description: Adversarial code review + elegance check + test suite
-output: .claude/code-review.md, .claude/test-report.md
+### CODE-REVIEW + REFACTOR
+agent: principal-engineer
+description: Adversarial code review + elegance check
+output: .claude/code-review.md
 
 ### OUTCOME
 agent: qa-engineer
@@ -261,9 +261,9 @@ description: Create implementation plan
 agent: feature-engineer
 description: Implement the feature
 
-### TEST
-agent: qa-engineer
-description: Write and run tests
+### VERIFY
+agent: security-engineer
+description: Security audit and final verification
 
 ### COMMIT
 agent: none
@@ -1202,8 +1202,8 @@ cmd_reset() {
     # 2. Clean .claude/ artifacts
     local artifact_files=(
         .claude/research.md .claude/current-plan.md .claude/plan-review.md
-        .claude/code-review.md .claude/test-report.md .claude/security-audit.md
-        .claude/verify-report.md .claude/current-test-plan.md
+        .claude/code-review.md .claude/security-audit.md
+        .claude/verify-report.md
         .claude/phase-result.json .claude/workflow-status.json
     )
     local cleaned=0
@@ -1653,8 +1653,8 @@ cmd_repair() {
         local artifact_files=(
             .claude/spec.md .claude/research.md .claude/current-plan.md .claude/plan-review.md
             .claude/review-pass1-pe.md .claude/review-pass2-pm.md
-            .claude/code-review.md .claude/test-report.md .claude/outcome-report.md
-            .claude/security-audit.md .claude/verify-report.md .claude/current-test-plan.md
+            .claude/code-review.md .claude/outcome-report.md
+            .claude/security-audit.md .claude/verify-report.md
             .claude/phase-result.json .claude/workflow-status.json
         )
         local any_artifacts=false

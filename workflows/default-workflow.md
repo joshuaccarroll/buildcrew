@@ -119,7 +119,7 @@ The Principal Engineer:
 Verdicts: APPROVED, NEEDS_REFACTOR, or NEEDS_REBUILD
 - If NEEDS_REFACTOR: Continue to refactor + re-review (max 3 cycles)
 - If NEEDS_REBUILD: Return to build with rejection context
-- If APPROVED: Proceed to test
+- If APPROVED: Proceed to verify
 
 ---
 
@@ -132,22 +132,7 @@ Verdicts: APPROVED, NEEDS_REFACTOR, or NEEDS_REBUILD
 Auto-escalation: if iteration 2 shows no improvement in blocking issue count → NEEDS_REBUILD.
 
 **NEEDS_REBUILD**: Discard implementation, preserve approved plan, restart build with rejection context.
-**circuit breaker**: if build/test fails 2 consecutive times → re-plan from scratch
-
----
-
-### TEST
-**agent**: qa-engineer
-**description**: Create test plan, write tests, run test suite
-**output**: .claude/test-report.md
-**circuit breaker**: 2 consecutive test_failure → re-plan from scratch
-
-The QA Engineer:
-1. Creates test plan for the implementation
-2. Writes tests (unit, integration as needed)
-3. Creates/extends the cumulative experience harness
-4. Runs the test suite
-5. Attempts autonomous fixes for localized test failures (one attempt) before escalating
+**circuit breaker**: if build/codereview fails 2 consecutive times → re-plan from scratch
 
 ---
 
@@ -261,9 +246,9 @@ To customize this workflow for your project:
 agent: feature-engineer
 description: Build the feature
 
-### TEST
-agent: qa-engineer
-description: Test it
+### VERIFY
+agent: security-engineer
+description: Security audit and final verification
 
 ### COMMIT
 agent: none
