@@ -47,55 +47,7 @@ __MANIFEST_BUILD_TIMESTAMP=""
 __MANIFEST_BUILD_ITERATION=""
 __MANIFEST_README_HASH=""
 
-# ─────────────────────────────────────────────────────────────────────────────────
-# sha256_hash — portable SHA-256 hash of a file
-# ─────────────────────────────────────────────────────────────────────────────────
-# Uses sha256sum on Linux, falls back to shasum -a 256 on macOS.
-# Outputs only the hash (no filename).
-sha256_hash() {
-    local file="$1"
-    local hash
-    if command -v sha256sum >/dev/null 2>&1; then
-        hash=$(sha256sum "$file" | cut -d' ' -f1)
-    elif command -v shasum >/dev/null 2>&1; then
-        hash=$(shasum -a 256 "$file" | cut -d' ' -f1)
-    else
-        print_error "Neither sha256sum nor shasum found"
-        return 1
-    fi
-    printf '%s' "$hash"
-}
-
-# ─────────────────────────────────────────────────────────────────────────────────
-# read_config_key — read a single key from .buildcrew/config
-# ─────────────────────────────────────────────────────────────────────────────────
-# Reads the value for a given UPPERCASE key from .buildcrew/config.
-# Returns the value via stdout. Returns empty string if key not found.
-read_config_key() {
-    local key="$1"
-    local config_file=".buildcrew/config"
-    [[ -f "$config_file" ]] || return 0
-
-    local line k v
-    while IFS= read -r line || [[ -n "$line" ]]; do
-        # Skip comments and blank lines
-        [[ "$line" =~ ^[[:space:]]*# ]] && continue
-        [[ "$line" =~ ^[[:space:]]*$ ]] && continue
-        if [[ "$line" =~ ^([A-Z_][A-Z0-9_]*)=(.*)$ ]]; then
-            k="${BASH_REMATCH[1]}"
-            v="${BASH_REMATCH[2]}"
-            # Strip surrounding quotes if present
-            v="${v#\"}"
-            v="${v%\"}"
-            v="${v#\'}"
-            v="${v%\'}"
-            if [[ "$k" == "$key" ]]; then
-                printf '%s' "$v"
-                return 0
-            fi
-        fi
-    done < "$config_file"
-}
+# sha256_hash and read_config_key are now in common.sh (sourced above)
 
 # ─────────────────────────────────────────────────────────────────────────────────
 # read_artifact_hints — read .buildcrew/artifact-hints.json

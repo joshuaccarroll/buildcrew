@@ -114,23 +114,18 @@ load_uat_config() {
     done < "$config_file"
 }
 
-# ─────────────────────────────────────────────────────────────────────────────────
-# sha256_hash — portable SHA-256 hash of a file (duplicated from artifact.sh
-# to avoid sourcing artifact.sh on the UAT side)
-# ─────────────────────────────────────────────────────────────────────────────────
+# sha256_hash and read_config_key are now in common.sh (sourced above)
 
-_uat_sha256_hash() {
-    local file="$1"
-    local hash
-    if command -v sha256sum >/dev/null 2>&1; then
-        hash=$(sha256sum "$file" | cut -d' ' -f1)
-    elif command -v shasum >/dev/null 2>&1; then
-        hash=$(shasum -a 256 "$file" | cut -d' ' -f1)
-    else
-        print_error "Neither sha256sum nor shasum found"
-        return 1
-    fi
-    printf '%s' "$hash"
+# ─────────────────────────────────────────────────────────────────────────────────
+# _uat_make_error_verdict — construct a synthetic error verdict JSON array
+# ─────────────────────────────────────────────────────────────────────────────────
+# Args: scenario, summary, expected, actual
+# Outputs: JSON array with a single error entry
+
+_uat_make_error_verdict() {
+    local scenario="$1" summary="$2" expected="$3" actual="$4"
+    jq -n --arg s "$scenario" --arg sum "$summary" --arg exp "$expected" --arg act "$actual" \
+        '[{"scenario":$s,"status":"error","summary":$sum,"expected":$exp,"actual":$act}]'
 }
 
 # ─────────────────────────────────────────────────────────────────────────────────
@@ -284,11 +279,13 @@ _uat_print_report() {
     local signal_dir="$1"
     local run_start_time="${2:-}"
 
-    # Refresh verdict globals from disk
-    read_verdict "$signal_dir" || {
-        print_warning "Could not read verdict for report"
-        return 0
-    }
+    # Only read verdict from disk if globals are not already populated
+    if [[ -z "${__VERDICT_STATUS:-}" ]]; then
+        read_verdict "$signal_dir" || {
+            print_warning "Could not read verdict for report"
+            return 0
+        }
+    fi
 
     # Status label
     local status_label="$__VERDICT_STATUS"
@@ -372,7 +369,7 @@ ISOLATION_EOF
 
     # 5. Compute and store README hash
     local readme_hash
-    readme_hash=$(_uat_sha256_hash README.md) || {
+    readme_hash=$(sha256_hash README.md) || {
         print_error "uat_init: failed to compute README hash"
         return 1
     }
@@ -428,31 +425,13 @@ _uat_regress_set_artifact() {
     # Set artifact path
     __UAT_ARTIFACT_PATH="$regress_path"
 
-    # Read config overrides from .buildcrew/config
-    local config_file=".buildcrew/config"
-    if [[ -f "$config_file" ]]; then
-        local line key value
-        while IFS= read -r line || [[ -n "$line" ]]; do
-            [[ "$line" =~ ^[[:space:]]*# ]] && continue
-            [[ "$line" =~ ^[[:space:]]*$ ]] && continue
-            if [[ "$line" =~ ^([A-Z_][A-Z0-9_]*)=(.*)$ ]]; then
-                key="${BASH_REMATCH[1]}"
-                value="${BASH_REMATCH[2]}"
-                # Strip surrounding quotes
-                value="${value#\"}"
-                value="${value%\"}"
-                value="${value#\'}"
-                value="${value%\'}"
-                case "$key" in
-                    UAT_ARTIFACT_TYPE)   __UAT_ARTIFACT_TYPE="$value" ;;
-                    UAT_RUN_COMMAND)     __UAT_RUN_COMMAND="$value" ;;
-                    UAT_INSTALL_COMMAND) __UAT_INSTALL_COMMAND="$value" ;;
-                    UAT_HEALTH_CHECK)    __UAT_HEALTH_CHECK="$value" ;;
-                    UAT_STOP_COMMAND)    __UAT_STOP_COMMAND="$value" ;;
-                esac
-            fi
-        done < "$config_file"
-    fi
+    # Read config overrides from .buildcrew/config via read_config_key (common.sh)
+    local v
+    v=$(read_config_key "UAT_ARTIFACT_TYPE");   [[ -n "$v" ]] && __UAT_ARTIFACT_TYPE="$v"
+    v=$(read_config_key "UAT_RUN_COMMAND");     [[ -n "$v" ]] && __UAT_RUN_COMMAND="$v"
+    v=$(read_config_key "UAT_INSTALL_COMMAND"); [[ -n "$v" ]] && __UAT_INSTALL_COMMAND="$v"
+    v=$(read_config_key "UAT_HEALTH_CHECK");    [[ -n "$v" ]] && __UAT_HEALTH_CHECK="$v"
+    v=$(read_config_key "UAT_STOP_COMMAND");    [[ -n "$v" ]] && __UAT_STOP_COMMAND="$v"
 
     # Default artifact type to "cli" if not set
     if [[ -z "$__UAT_ARTIFACT_TYPE" ]]; then
@@ -466,7 +445,7 @@ _uat_regress_set_artifact() {
 
     # Compute README hash
     if [[ -n "$readme_path" ]] && [[ -f "$readme_path" ]]; then
-        __UAT_README_HASH=$(_uat_sha256_hash "$readme_path") || __UAT_README_HASH=""
+        __UAT_README_HASH=$(sha256_hash "$readme_path") || __UAT_README_HASH=""
     fi
 
     return 0
@@ -523,7 +502,7 @@ uat_run_regress() {
     fi
 
     local current_hash
-    current_hash=$(_uat_sha256_hash "$readme_path") || {
+    current_hash=$(sha256_hash "$readme_path") || {
         print_error "uat_run_regress: failed to compute README hash"
         return 1
     }
@@ -1076,7 +1055,7 @@ uat_phase_verdict() {
         print_error "Scenario results not found: $results_file"
         # Write error verdict for harness failure
         local error_json
-        error_json=$(jq -n '[{"scenario":"harness_failure","status":"error","summary":"scenario-results.json not found after Phase 5 execution","expected":"Valid scenario results file","actual":"File missing"}]')
+        error_json=$(_uat_make_error_verdict "harness_failure" "scenario-results.json not found after Phase 5 execution" "Valid scenario results file" "File missing")
         write_verdict "$signal_dir" "$error_json" "$build_iteration"
         write_last_tested_iteration ".buildcrew" "$build_iteration"
         return 1
@@ -1086,7 +1065,7 @@ uat_phase_verdict() {
     if ! validate_scenario_results "$results_file"; then
         print_error "Invalid scenario results: $results_file"
         local error_json
-        error_json=$(jq -n '[{"scenario":"harness_failure","status":"error","summary":"scenario-results.json is malformed or contains invalid entries","expected":"Valid JSON array with required fields","actual":"Validation failed"}]')
+        error_json=$(_uat_make_error_verdict "harness_failure" "scenario-results.json is malformed or contains invalid entries" "Valid JSON array with required fields" "Validation failed")
         write_verdict "$signal_dir" "$error_json" "$build_iteration"
         write_last_tested_iteration ".buildcrew" "$build_iteration"
         return 1

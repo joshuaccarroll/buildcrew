@@ -124,33 +124,33 @@ EOF
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
-# _uat_sha256_hash tests
+# sha256_hash tests (function now lives in common.sh, available via uat.sh sourcing)
 # ─────────────────────────────────────────────────────────────────────────────
 
-@test "_uat_sha256_hash: computes hash for a file" {
+@test "sha256_hash (via uat): computes hash for a file" {
     echo "hello world" > test.txt
-    run _uat_sha256_hash test.txt
+    run sha256_hash test.txt
     [ "$status" -eq 0 ]
     [ -n "$output" ]
     # SHA-256 hash is 64 hex characters
     [[ ${#output} -eq 64 ]]
 }
 
-@test "_uat_sha256_hash: same content produces same hash" {
+@test "sha256_hash (via uat): same content produces same hash" {
     echo "test content" > file1.txt
     echo "test content" > file2.txt
     local hash1 hash2
-    hash1=$(_uat_sha256_hash file1.txt)
-    hash2=$(_uat_sha256_hash file2.txt)
+    hash1=$(sha256_hash file1.txt)
+    hash2=$(sha256_hash file2.txt)
     [ "$hash1" = "$hash2" ]
 }
 
-@test "_uat_sha256_hash: different content produces different hash" {
+@test "sha256_hash (via uat): different content produces different hash" {
     echo "content A" > file1.txt
     echo "content B" > file2.txt
     local hash1 hash2
-    hash1=$(_uat_sha256_hash file1.txt)
-    hash2=$(_uat_sha256_hash file2.txt)
+    hash1=$(sha256_hash file1.txt)
+    hash2=$(sha256_hash file2.txt)
     [ "$hash1" != "$hash2" ]
 }
 
