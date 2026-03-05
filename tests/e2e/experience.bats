@@ -1288,3 +1288,35 @@ MOCKEOF
     [[ "$summary" == *"✗"*"conventions.md"*"missing"* ]]
     export HOME="$ORIGINAL_HOME"
 }
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Task: Runtime Context Health Check — check_context_health()
+# ─────────────────────────────────────────────────────────────────────────────
+
+# EXP-01: A user runs buildcrew with no context files at all.
+# They should see a single warning listing all missing files and how to create them.
+@test "experience: context health warning lists all missing files with suggested commands" {
+    # Empty tmpdir — no .buildcrew/ at all
+    run check_context_health
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Missing context files"* ]]
+    [[ "$output" == *".buildcrew/context/users.md"* ]]
+    [[ "$output" == *".buildcrew/context/principles.md"* ]]
+    [[ "$output" == *".buildcrew/context/domain.md"* ]]
+    [[ "$output" == *".buildcrew/lessons.md"* ]]
+    [[ "$output" == *"touch .buildcrew/lessons.md"* ]]
+}
+
+# EXP-02: A user has properly set up all context files.
+# No warning should appear — the function should be silent.
+@test "experience: context health is silent when all files present" {
+    mkdir -p .buildcrew/context
+    echo "users" > .buildcrew/context/users.md
+    echo "principles" > .buildcrew/context/principles.md
+    echo "domain" > .buildcrew/context/domain.md
+    echo "lessons" > .buildcrew/lessons.md
+
+    run check_context_health
+    [ "$status" -eq 0 ]
+    [ -z "$output" ]
+}

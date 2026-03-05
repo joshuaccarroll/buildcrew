@@ -166,6 +166,25 @@ load_project_context() {
     echo "$project_context"
 }
 
+# check_context_health — warn about missing context files (once per invocation).
+# Checks the 4 files read by load_project_context() and prints a single
+# consolidated warning listing any that are absent, with suggested commands.
+# Always returns 0 — informational only, never blocks execution.
+check_context_health() {
+    local -a paths=( ".buildcrew/context/users.md" ".buildcrew/context/principles.md" ".buildcrew/context/domain.md" ".buildcrew/lessons.md" )
+    local -a cmds=( "cp .buildcrew/context/users.md.example .buildcrew/context/users.md" "cp .buildcrew/context/principles.md.example .buildcrew/context/principles.md" "cp .buildcrew/context/domain.md.example .buildcrew/context/domain.md" "touch .buildcrew/lessons.md" )
+    local msg="" i
+    for i in 0 1 2 3; do
+        if [[ ! -f "${paths[$i]}" ]]; then
+            msg+="  ${paths[$i]}  →  ${cmds[$i]}\n"
+        fi
+    done
+    if [[ -n "$msg" ]]; then
+        print_warning "Missing context files:\n${msg}Create them to enrich BuildCrew prompts."
+    fi
+    return 0
+}
+
 # ─────────────────────────────────────────────────────────────────────────────────
 # Status file parser (pure data, no side effects)
 # ─────────────────────────────────────────────────────────────────────────────────

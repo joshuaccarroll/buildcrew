@@ -4210,6 +4210,7 @@ main() {
     fi
 
     check_prerequisites
+    check_context_health
 
     # Clear any previous stop signal
     clear_stop_signal
