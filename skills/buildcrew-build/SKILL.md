@@ -138,18 +138,3 @@ If this project produces a runnable artifact (CLI tool, API server, library), wr
 
 If `.buildcrew/uat-context.md` exists, read it first. It contains feedback from blind user acceptance testing — scenarios that failed or errored when tested against the built artifact. Fix the described issues. Do NOT access the UAT directory or test scenarios.
 
----
-
-## Phase Result Protocol
-
-When the build is complete, write `.claude/phase-result.json`:
-
-```json
-{
-  "phase": "build",
-  "verdict": "complete",
-  "details": "Implementation complete per plan"
-}
-```
-
-Then exit.

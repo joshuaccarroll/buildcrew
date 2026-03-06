@@ -163,18 +163,3 @@ Write `.claude/simplify-report.md`:
 - [findings skipped because they exceeded surgical scope, or "None"]
 ```
 
----
-
-## Phase Result Protocol
-
-When done (with or without changes), write `.claude/phase-result.json`:
-
-```json
-{
-  "phase": "simplify",
-  "verdict": "complete",
-  "details": "Simplify pass complete — [brief summary or 'no changes needed']"
-}
-```
-
-This phase is **non-blocking**. Always write `complete`.

@@ -380,6 +380,33 @@ parse_args() {
 # Augment a prompt string with TDD context for build/test/codereview phases.
 # Args: $1=phase_name $2=prompt_string
 # Echoes: augmented prompt (or original if TDD inactive/inapplicable)
+# Generates a compact phase result protocol block for the given phase.
+# Replaces verbose per-SKILL.md protocol sections with a centralized injection.
+__inject_phase_result_protocol() {
+    local phase="$1"
+    local verdicts extra=""
+    case "$phase" in
+        spec)          verdicts="complete, needs_probing, vague"
+                       extra=$'\nFor needs_probing, include "questions": ["..."] array.' ;;
+        research)      verdicts="complete"
+                       extra=$'\nInclude "human_review": true and "human_review_reason": "..." when objective criteria are met.' ;;
+        review)        verdicts="approved, needs_revision, rejected" ;;
+        tdd-scaffold)  verdicts="complete, blocked" ;;
+        build)         verdicts="complete" ;;
+        simplify)      verdicts="complete" ;;
+        codereview)    verdicts="approved, needs_rebuild" ;;
+        verify)        verdicts="complete, blocked"
+                       extra=$'\nFor blocked, include "failing_check": "tests|quality|security|architecture|acceptance".' ;;
+        uat-stories)   verdicts="pass, fail" ;;
+        uat-scenarios) verdicts="pass, fail" ;;
+        uat-harness)   verdicts="pass, fail, disputed" ;;
+        uat-execute)   verdicts="pass, fail, error, disputed" ;;
+        *)             verdicts="complete" ;;
+    esac
+    printf '## Phase Result\nWrite `.claude/phase-result.json` when done: { "phase": "%s", "verdict": "<verdict>", "details": "<summary>" }\nValid verdicts: %s%s\nWriting this file is mandatory. Do not end your response without writing it. Then exit.' \
+        "$phase" "$verdicts" "$extra"
+}
+
 __inject_tdd_prompt() {
     local phase="$1" prompt="$2"
     if [[ ! -f ".claude/tdd-manifest.json" ]]; then
@@ -2955,34 +2982,43 @@ __run_phase_group_impl() {
         prompt="$prompt"$'\n\nProject Context:\n'"$project_context"
     fi
 
-    # Inject skill catalog
-    local skill_catalog
-    skill_catalog=$(build_skill_catalog)
-    if [[ -n "$skill_catalog" ]]; then
-        prompt="$prompt"$'\n\nSkill Catalog:\n'"$skill_catalog"
+    # Inject skill catalog only for phases that use the Skill tool
+    if [[ "$allowed_tools" == *"Skill"* ]]; then
+        local skill_catalog
+        skill_catalog=$(build_skill_catalog)
+        if [[ -n "$skill_catalog" ]]; then
+            prompt="$prompt"$'\n\nSkill Catalog:\n'"$skill_catalog"
+        fi
     fi
 
     # Inject TDD context for build/test/codereview phases
     prompt=$(__inject_tdd_prompt "$phase" "$prompt")
 
-    # Inject context management guidance — encourage subagent use for complex work
+    # Inject context management guidance (compressed)
     prompt="$prompt"$'\n\n'"## Context Management
+Use Task subagents for: reading 3+ files, research, code review/analysis, any investigation where only the summary matters. Stay in main context for: direct file edits, short reads (1-2 files), back-and-forth conversations."
 
-Context is your most important resource. Proactively use subagents (Task tool) to keep exploration, research, and verbose operations out of the main conversation.
+    # Inject phase-filtered lessons (only lessons relevant to this phase)
+    local phase_lessons
+    phase_lessons=$(load_phase_lessons "$phase")
+    if [[ -n "$phase_lessons" ]]; then
+        prompt="$prompt"$'\n\n'"# Lessons Learned"$'\n'"$phase_lessons"
+    fi
 
-**Default to spawning agents for:**
-- Codebase exploration (reading 3+ files to answer a question)
-- Research tasks (web searches, doc lookups, investigating how something works)
-- Code review or analysis (produces verbose output)
-- Any investigation where only the summary matters
+    # Inject phase result protocol (centralized, replaces per-SKILL.md sections)
+    local result_protocol
+    result_protocol=$(__inject_phase_result_protocol "$phase")
+    prompt="$prompt"$'\n\n'"$result_protocol"
 
-**Stay in main context for:**
-- Direct file edits the user requested
-- Short, targeted reads (1-2 files)
-- Conversations requiring back-and-forth
-- Tasks where user needs intermediate steps
-
-**Rule of thumb:** If a task will read more than ~3 files or produce output the user doesn't need to see verbatim, delegate it to a subagent and return a summary."
+    # Inject concision directives for phases where verbose output is wasteful
+    case "$phase" in
+        research|simplify|tdd-scaffold)
+            prompt="$prompt"$'\n\n'"Be extremely concise. Sacrifice grammar for concision. No preamble, no summaries of what you will do — execute directly."
+            ;;
+        review|codereview)
+            prompt="$prompt"$'\n\n'"Be direct and terse in analysis. No preamble. State findings, not your review process."
+            ;;
+    esac
 
     # Build --allowedTools flag if declared in skill frontmatter
     local allowed_tools_flag=""

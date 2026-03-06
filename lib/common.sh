@@ -192,10 +192,7 @@ load_project_context() {
             project_context+="$(cat "$ctx_file")"$'\n\n'
         fi
     done
-    # Load lessons (Change 2: Self-Improvement Loop)
-    if [[ -f ".buildcrew/lessons.md" ]]; then
-        project_context+="$(cat ".buildcrew/lessons.md")"$'\n\n'
-    fi
+    # Lessons are now injected separately via load_phase_lessons() for phase-filtered delivery
     if [[ -n "$project_context" ]]; then
         local ctx_size=${#project_context}
         if (( ctx_size > 10240 )); then
@@ -214,6 +211,44 @@ load_project_context() {
         fi
     fi
     echo "$project_context"
+}
+
+# Loads lessons filtered by phase name. Extracts only lesson blocks whose
+# "Applies to" line matches the given phase. Lessons are ---delimited blocks.
+# Usage: load_phase_lessons "build"
+load_phase_lessons() {
+    local phase="$1"
+    local lessons_file=".buildcrew/lessons.md"
+    [[ -f "$lessons_file" ]] || return 0
+
+    # Map phase names to patterns that match "Applies to" lines
+    local pattern="$phase"
+    case "$phase" in
+        research) pattern="research" ;;
+        review)   pattern="review" ;;
+        build)    pattern="build" ;;
+        simplify) pattern="simplify" ;;
+        codereview) pattern="codereview|code.review" ;;
+        verify)   pattern="verify" ;;
+        spec)     pattern="spec" ;;
+        tdd-scaffold) pattern="tdd" ;;
+        outcome)  pattern="outcome" ;;
+        *)        pattern="$phase" ;;
+    esac
+
+    # Extract blocks whose "Applies to" line matches. Blocks are ---delimited.
+    awk -v pat="$pattern" '
+        /^---$/ {
+            if (block != "" && dominated) print block "---\n"
+            block = ""; dominated = 0; next
+        }
+        { block = block $0 "\n" }
+        /^\*\*Applies to\*\*/ {
+            line = tolower($0)
+            if (match(line, pat)) dominated = 1
+        }
+        END { if (block != "" && dominated) print block "---\n" }
+    ' "$lessons_file"
 }
 
 # check_context_health — warn about missing context files (once per invocation).

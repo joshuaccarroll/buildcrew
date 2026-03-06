@@ -260,37 +260,3 @@ Write the combined review to `.claude/plan-review.md`:
 
 Source Pass 1 findings from `.claude/review-pass1-pe.md` and Pass 2 findings from `.claude/review-pass2-pm.md`.
 
----
-
-## Phase Result Protocol
-
-When the plan review is complete, write `.claude/phase-result.json`:
-
-**If approved:**
-```json
-{
-  "phase": "plan_review",
-  "verdict": "approved",
-  "details": "3-pass review complete, plan approved"
-}
-```
-
-**If needs revision (plan updated, needs another review cycle from orchestrator):**
-```json
-{
-  "phase": "plan_review",
-  "verdict": "needs_revision",
-  "details": "Plan updated with revisions, needs re-review"
-}
-```
-
-**If rejected:**
-```json
-{
-  "phase": "plan_review",
-  "verdict": "rejected",
-  "details": "Plan fundamentally flawed: [reason]"
-}
-```
-
-Then exit.

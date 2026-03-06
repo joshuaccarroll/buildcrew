@@ -213,28 +213,3 @@ If Code Review verdict was "NEEDS_REBUILD" or auto-escalated from refactor, writ
 
 After completing any refactor or rebuild, if user-facing behavior or setup steps changed, update `README.md` accordingly.
 
----
-
-## Phase Result Protocol
-
-When the code review is complete, write `.claude/phase-result.json` using the Write tool:
-
-**If approved (code review passed, refactor complete if needed):**
-```json
-{
-  "phase": "codereview",
-  "verdict": "approved",
-  "details": "Code review approved"
-}
-```
-
-**If needs rebuild (code review issued NEEDS_REBUILD or refactor didn't converge):**
-```json
-{
-  "phase": "codereview",
-  "verdict": "needs_rebuild",
-  "details": "Code review: NEEDS_REBUILD — [reason]"
-}
-```
-
-Writing `.claude/phase-result.json` is mandatory. Do not end your response without writing it using the Write tool.

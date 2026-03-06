@@ -305,29 +305,3 @@ If failures were resolved during this task and no lesson has been recorded for t
 
 **IMPORTANT**: Write any lessons to `.buildcrew/lessons.md` BEFORE writing `.claude/phase-result.json`. Writing phase-result.json triggers process termination. Any file writes after phase-result.json may be lost.
 
----
-
-## Phase Result Protocol
-
-When all verification, commit, and signal phases are complete, write `.claude/phase-result.json`:
-
-**If everything passed and committed:**
-```json
-{
-  "phase": "verify_and_commit",
-  "verdict": "complete",
-  "details": "All checks passed, committed successfully"
-}
-```
-
-**If blocked:**
-```json
-{
-  "phase": "verify_and_commit",
-  "verdict": "blocked",
-  "failing_check": "tests|quality|security|architecture|acceptance",
-  "details": "[Description of what failed]"
-}
-```
-
-Then exit.

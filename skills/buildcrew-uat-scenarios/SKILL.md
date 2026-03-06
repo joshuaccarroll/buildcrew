@@ -112,30 +112,3 @@ Use `---` (horizontal rule) between scenarios within a file for clear visual sep
 
 **Naming convention**: Use lowercase-hyphenated filenames that describe the feature area (e.g., `file-management.md`, `api-endpoints.md`, `cli-commands.md`).
 
----
-
-## Phase Result Protocol
-
-Write `.claude/phase-result.json` using the Write tool before ending your response.
-
-**If scenarios were generated successfully:**
-```json
-{
-  "phase": "uat-scenarios",
-  "verdict": "pass",
-  "details": "Generated N scenarios across M feature areas"
-}
-```
-
-**If scenarios could not be generated:**
-```json
-{
-  "phase": "uat-scenarios",
-  "verdict": "fail",
-  "details": "Could not generate meaningful scenarios: [reason]"
-}
-```
-
-Writing `.claude/phase-result.json` is mandatory. Do not end your response without writing it.
-
-Then exit.
