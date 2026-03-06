@@ -709,6 +709,10 @@ _uat_run_agent_phase() {
         prompt="$prompt"$'\n\nProject Context:\n'"$project_context"
     fi
 
+    local model_effort_flags=""
+    [[ -n "${CLAUDE_MODEL:-}" ]] && model_effort_flags+=" --model $CLAUDE_MODEL"
+    [[ -n "${CLAUDE_EFFORT:-}" ]] && model_effort_flags+=" --effort $CLAUDE_EFFORT"
+
     # Save terminal state
     local __saved_stty=""
     if [[ -t 0 ]]; then
@@ -724,10 +728,10 @@ _uat_run_agent_phase() {
     # Invoke Claude agent
     if [[ -n "${__LOG_FILE:-}" ]]; then
         log_msg "--- claude output start: $phase_name ---"
-        claude -p "$prompt" --max-turns "$max_turns" $allowed_tools_flag 2>&1 | tee -a "$__LOG_FILE" || true
+        claude -p "$prompt" --max-turns "$max_turns" $allowed_tools_flag $model_effort_flags 2>&1 | tee -a "$__LOG_FILE" || true
         log_msg "--- claude output end: $phase_name ---"
     else
-        claude -p "$prompt" --max-turns "$max_turns" $allowed_tools_flag || true
+        claude -p "$prompt" --max-turns "$max_turns" $allowed_tools_flag $model_effort_flags || true
     fi
 
     stop_file_monitor
@@ -744,10 +748,10 @@ _uat_run_agent_phase() {
         log_msg "=== UAT PHASE: $phase_name retry ==="
         if [[ -n "${__LOG_FILE:-}" ]]; then
             log_msg "--- claude output start: $phase_name ---"
-            claude -p "$prompt" --max-turns "$max_turns" $allowed_tools_flag 2>&1 | tee -a "$__LOG_FILE" || true
+            claude -p "$prompt" --max-turns "$max_turns" $allowed_tools_flag $model_effort_flags 2>&1 | tee -a "$__LOG_FILE" || true
             log_msg "--- claude output end: $phase_name ---"
         else
-            claude -p "$prompt" --max-turns "$max_turns" $allowed_tools_flag || true
+            claude -p "$prompt" --max-turns "$max_turns" $allowed_tools_flag $model_effort_flags || true
         fi
 
         stop_file_monitor

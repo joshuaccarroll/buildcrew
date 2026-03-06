@@ -110,6 +110,20 @@ load_buildcrew_config() {
                         TARGET_DIR="$value"
                     fi
                     ;;
+                CLAUDE_MODEL)
+                    if [[ -z "${CLAUDE_MODEL+x}" ]]; then
+                        CLAUDE_MODEL="$value"
+                    fi
+                    ;;
+                CLAUDE_EFFORT)
+                    if [[ -z "${CLAUDE_EFFORT+x}" ]]; then
+                        if [[ "$value" == "low" || "$value" == "medium" || "$value" == "high" ]]; then
+                            CLAUDE_EFFORT="$value"
+                        else
+                            echo "Warning: invalid CLAUDE_EFFORT in .buildcrew/config: $value (ignored, must be low/medium/high)" >&2
+                        fi
+                    fi
+                    ;;
                 # Add future config keys here
             esac
         fi
@@ -134,6 +148,8 @@ AUTO_MODE=${AUTO_MODE:-true}
 MAX_PARALLEL=${MAX_PARALLEL:-5}
 TARGET_DIR=${TARGET_DIR:-}
 NO_UAT=${NO_UAT:-false}
+CLAUDE_MODEL=${CLAUDE_MODEL:-opus}
+CLAUDE_EFFORT=${CLAUDE_EFFORT:-medium}
 __INVOCATION_COUNT=0
 __RESUME_PHASES=""
 __DISCOVERY_HEARTBEAT_PID=""
@@ -295,6 +311,22 @@ parse_args() {
                 MAX_PARALLEL="$2"
                 shift 2
                 ;;
+            --model)
+                if [[ -z "${2:-}" ]]; then
+                    echo "Error: --model requires a value (e.g. opus, sonnet, claude-sonnet-4-6)"
+                    exit 1
+                fi
+                CLAUDE_MODEL="$2"
+                shift 2
+                ;;
+            --effort)
+                if [[ -z "${2:-}" ]] || ! [[ "$2" =~ ^(low|medium|high)$ ]]; then
+                    echo "Error: --effort requires a value: low, medium, or high"
+                    exit 1
+                fi
+                CLAUDE_EFFORT="$2"
+                shift 2
+                ;;
             --help|-h)
                 echo "Usage: $0 [OPTIONS]"
                 echo ""
@@ -316,6 +348,8 @@ parse_args() {
                 echo "  --no-uat     Skip inline UAT after verify (with 'run')"
                 echo "  --batch      (deprecated) Batch mode is now the default"
                 echo "  --max-parallel N  Max concurrent tasks in parallel mode (default: 5)"
+                echo "  --model MODEL  Claude model to use (default: opus)"
+                echo "  --effort LEVEL Effort level: low, medium, high (default: medium)"
                 echo "  --verbose    Show orchestrator decisions, phase verdicts, and invocation counts"
                 echo "  --debug      Alias for --verbose"
                 echo "  --help, -h   Show this help message"
@@ -2956,6 +2990,10 @@ Context is your most important resource. Proactively use subagents (Task tool) t
         allowed_tools_flag="--allowedTools $allowed_tools"
     fi
 
+    local model_effort_flags=""
+    [[ -n "${CLAUDE_MODEL:-}" ]] && model_effort_flags+=" --model $CLAUDE_MODEL"
+    [[ -n "${CLAUDE_EFFORT:-}" ]] && model_effort_flags+=" --effort $CLAUDE_EFFORT"
+
     # Save terminal state — claude may leave terminal in raw/no-echo mode when
     # killed by SIGINT (from the file monitor), breaking subsequent read prompts.
     local __saved_stty=""
@@ -2977,16 +3015,16 @@ Context is your most important resource. Proactively use subagents (Task tool) t
     if [[ -n "$__LOG_FILE" ]]; then
         log_msg "--- claude output start: $phase ---"
         if [[ "$__ACTIVITY_TRACKING" == "true" ]]; then
-            claude -p "$prompt" --max-turns "$max_turns" $allowed_tools_flag --output-format stream-json --verbose 2>&1 | python3 "$BUILDCREW_HOME/lib/stream_processor.py" --activity-file ".buildcrew/.agent-activity" --max-turns "$max_turns" | tee -a "$__LOG_FILE" || true
+            claude -p "$prompt" --max-turns "$max_turns" $allowed_tools_flag $model_effort_flags --output-format stream-json --verbose 2>&1 | python3 "$BUILDCREW_HOME/lib/stream_processor.py" --activity-file ".buildcrew/.agent-activity" --max-turns "$max_turns" | tee -a "$__LOG_FILE" || true
         else
-            claude -p "$prompt" --max-turns "$max_turns" $allowed_tools_flag 2>&1 | tee -a "$__LOG_FILE" || true
+            claude -p "$prompt" --max-turns "$max_turns" $allowed_tools_flag $model_effort_flags 2>&1 | tee -a "$__LOG_FILE" || true
         fi
         log_msg "--- claude output end: $phase ---"
     else
         if [[ "$__ACTIVITY_TRACKING" == "true" ]]; then
-            claude -p "$prompt" --max-turns "$max_turns" $allowed_tools_flag --output-format stream-json --verbose 2>&1 | python3 "$BUILDCREW_HOME/lib/stream_processor.py" --activity-file ".buildcrew/.agent-activity" --max-turns "$max_turns" || true
+            claude -p "$prompt" --max-turns "$max_turns" $allowed_tools_flag $model_effort_flags --output-format stream-json --verbose 2>&1 | python3 "$BUILDCREW_HOME/lib/stream_processor.py" --activity-file ".buildcrew/.agent-activity" --max-turns "$max_turns" || true
         else
-            claude -p "$prompt" --max-turns "$max_turns" $allowed_tools_flag || true
+            claude -p "$prompt" --max-turns "$max_turns" $allowed_tools_flag $model_effort_flags || true
         fi
     fi
 
@@ -3034,16 +3072,16 @@ Context is your most important resource. Proactively use subagents (Task tool) t
         if [[ -n "$__LOG_FILE" ]]; then
             log_msg "--- claude output start: $phase ---"
             if [[ "$__ACTIVITY_TRACKING" == "true" ]]; then
-                claude -p "$prompt" --max-turns "$max_turns" $allowed_tools_flag --output-format stream-json --verbose 2>&1 | python3 "$BUILDCREW_HOME/lib/stream_processor.py" --activity-file ".buildcrew/.agent-activity" --max-turns "$max_turns" | tee -a "$__LOG_FILE" || true
+                claude -p "$prompt" --max-turns "$max_turns" $allowed_tools_flag $model_effort_flags --output-format stream-json --verbose 2>&1 | python3 "$BUILDCREW_HOME/lib/stream_processor.py" --activity-file ".buildcrew/.agent-activity" --max-turns "$max_turns" | tee -a "$__LOG_FILE" || true
             else
-                claude -p "$prompt" --max-turns "$max_turns" $allowed_tools_flag 2>&1 | tee -a "$__LOG_FILE" || true
+                claude -p "$prompt" --max-turns "$max_turns" $allowed_tools_flag $model_effort_flags 2>&1 | tee -a "$__LOG_FILE" || true
             fi
             log_msg "--- claude output end: $phase ---"
         else
             if [[ "$__ACTIVITY_TRACKING" == "true" ]]; then
-                claude -p "$prompt" --max-turns "$max_turns" $allowed_tools_flag --output-format stream-json --verbose 2>&1 | python3 "$BUILDCREW_HOME/lib/stream_processor.py" --activity-file ".buildcrew/.agent-activity" --max-turns "$max_turns" || true
+                claude -p "$prompt" --max-turns "$max_turns" $allowed_tools_flag $model_effort_flags --output-format stream-json --verbose 2>&1 | python3 "$BUILDCREW_HOME/lib/stream_processor.py" --activity-file ".buildcrew/.agent-activity" --max-turns "$max_turns" || true
             else
-                claude -p "$prompt" --max-turns "$max_turns" $allowed_tools_flag || true
+                claude -p "$prompt" --max-turns "$max_turns" $allowed_tools_flag $model_effort_flags || true
             fi
         fi
 
@@ -4526,5 +4564,6 @@ main() {
 
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
     parse_args "$@"
+    print_debug "Claude model=$CLAUDE_MODEL effort=$CLAUDE_EFFORT"
     main
 fi
