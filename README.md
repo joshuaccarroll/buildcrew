@@ -112,6 +112,8 @@ buildcrew reset              # Clear blocked tasks and clean up artifacts
 | `--max-parallel N` | Max concurrent tasks in parallel mode (default: 5) |
 | `--no-uat` | Skip inline UAT after verify (UAT is automatic for non-trivial tasks) |
 | `--max-invocations N` | Max Claude invocations per run (default: 15) |
+| `--model M` | Claude model alias or full name (default: opus) |
+| `--effort L` | Effort level: `low`, `medium`, `high` (default: medium) |
 | `--verbose` / `--debug` | Show orchestrator decisions, phase verdicts, invocation counts |
 
 Flags combine freely: `buildcrew run --single --review --branch`
@@ -197,7 +199,7 @@ cp .buildcrew/context/domain.md.example .buildcrew/context/domain.md
 
 When present, these are injected into every phase's prompt automatically.
 
-**Context truncation:** Combined project context (all three context files plus `lessons.md`) is capped at 10KB per phase invocation. When the combined content exceeds 10KB, it is truncated at the nearest section boundary (`---` or `## ` header) and a `[truncated]` marker is appended. To stay under the limit, keep context files focused — each file should cover one domain clearly rather than exhaustively.
+**Context truncation:** Combined project context (all three context files) is capped at 10KB per phase invocation. When the combined content exceeds 10KB, it is truncated at the nearest section boundary (`---` or `## ` header) and a `[truncated]` marker is appended. To stay under the limit, keep context files focused — each file should cover one domain clearly rather than exhaustively.
 
 ---
 
@@ -217,7 +219,7 @@ When present, these are injected into every phase's prompt automatically.
 
 ## Lessons System
 
-BuildCrew learns from failures. After any failed iteration, it records a structured lesson in `.buildcrew/lessons.md` — what went wrong, what fixed it, and a rule to prevent it next time. Lessons are injected into every phase's context automatically. Capped at 25 entries; when exceeded, the oldest 10 are condensed into a "Patterns" summary.
+BuildCrew learns from failures. After any failed iteration, it records a structured lesson in `.buildcrew/lessons.md` — what went wrong, what fixed it, and a rule to prevent it next time. Lessons are filtered by phase — each phase only receives lessons whose `Applies to` field matches, keeping context lean. After each completed task, a nudge notification shows how many new lessons were recorded. Capped at 25 entries; when exceeded, the oldest 10 are condensed into a "Patterns" summary.
 
 ---
 
@@ -261,7 +263,7 @@ buildcrew dash          # Launch (prompts to install if not present)
 buildcrew dash install  # Install separately
 ```
 
-Shows current phase, agent activity, and workflow state in real time. Requires Python 3 for activity tracking (degrades gracefully without it).
+Shows current phase, agent activity, workflow state, and UAT progress in real time. UAT state is written to `.buildcrew/.uat-state.json` for dashboard consumption. Requires Python 3 for activity tracking (degrades gracefully without it).
 
 ---
 
