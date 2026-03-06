@@ -386,6 +386,76 @@ write_last_processed_iteration() {
 }
 
 # ─────────────────────────────────────────────────────────────────────────────────
+# UAT State File (for dashboard visibility)
+# ─────────────────────────────────────────────────────────────────────────────────
+
+# Module-level globals for UAT state — set by init_uat_state()
+__UAT_STATE_DIR=""
+__UAT_STATE_PROJECT_NAME=""
+
+# init_uat_state — Set module globals for UAT state writing.
+# Args: project_dir project_name
+#   project_dir  — Path to the project directory (contains .buildcrew/)
+#   project_name — Project name for signal dir lookup (stored in state file)
+init_uat_state() {
+    __UAT_STATE_DIR="$1/.buildcrew"
+    __UAT_STATE_PROJECT_NAME="$2"
+}
+
+# write_uat_state — Write .buildcrew/.uat-state for dashboard visibility.
+# Args: phase iteration status
+#   phase     — stories|scenarios|harness|setup|execute|verdict|rebuild|complete|failed
+#   iteration — current build iteration number
+#   status    — running|pass|fail|error
+#
+# Reads __UAT_STATE_DIR and __UAT_STATE_PROJECT_NAME globals.
+# Atomic write: .uat-state.tmp then mv.
+# Returns 0 on success, 1 on failure.
+write_uat_state() {
+    local phase="$1"
+    local iteration="$2"
+    local status="$3"
+
+    if [[ -z "$__UAT_STATE_DIR" || -z "$phase" || -z "$iteration" || -z "$status" ]]; then
+        return 1
+    fi
+
+    if [[ ! -d "$__UAT_STATE_DIR" ]]; then
+        return 1
+    fi
+
+    local state_file="$__UAT_STATE_DIR/.uat-state"
+    local tmp_file="${state_file}.tmp"
+    local timestamp
+    timestamp=$(date +%s)
+
+    cat > "$tmp_file" <<EOF
+UAT_PHASE=$phase
+UAT_ITERATION=$iteration
+UAT_STATUS=$status
+UAT_TIMESTAMP=$timestamp
+UAT_PROJECT_NAME=$__UAT_STATE_PROJECT_NAME
+EOF
+
+    if ! mv "$tmp_file" "$state_file"; then
+        rm -f "$tmp_file"
+        return 1
+    fi
+
+    return 0
+}
+
+# clean_uat_state — Remove .buildcrew/.uat-state file.
+# No error if already missing. Clears module globals.
+clean_uat_state() {
+    if [[ -n "$__UAT_STATE_DIR" ]]; then
+        rm -f "$__UAT_STATE_DIR/.uat-state"
+    fi
+    __UAT_STATE_DIR=""
+    __UAT_STATE_PROJECT_NAME=""
+}
+
+# ─────────────────────────────────────────────────────────────────────────────────
 # Scenario Results Validation
 # ─────────────────────────────────────────────────────────────────────────────────
 

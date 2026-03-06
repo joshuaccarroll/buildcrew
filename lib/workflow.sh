@@ -2558,6 +2558,12 @@ EOF
     print_info "Lesson recorded in $LESSONS_FILE"
 }
 
+# Check if new lessons were recorded during a task and print a nudge.
+# Usage: _check_lessons_nudge <lessons_before_count>
+_check_lessons_nudge() {
+    echo "STUB"
+}
+
 # Summarize oldest LESSONS_SUMMARIZE_COUNT entries into a Patterns section.
 _summarize_old_lessons() {
     local tmp_file
@@ -3210,6 +3216,9 @@ run_inline_uat() {
     local project_dir
     project_dir="$(pwd)"
 
+    # Initialize UAT state for dashboard visibility
+    init_uat_state "$project_dir" "$project_name"
+
     # 1. Publish artifact
     publish_artifact "$project_name" || {
         print_error "Failed to publish artifact for UAT"
@@ -3242,6 +3251,7 @@ run_inline_uat() {
     _inline_uat_cleanup() {
         [[ "$__inline_uat_cleaned" == "true" ]] && return
         __inline_uat_cleaned=true
+        clean_uat_state
         uat_stop_server 2>/dev/null || true
         rm -rf "$uat_dir" 2>/dev/null || true
         cd "$project_dir" 2>/dev/null || true
@@ -3268,9 +3278,12 @@ run_inline_uat() {
 
     # 6. Run Phases 1-3: stories, scenarios, harness
     print_header "Inline UAT — Phases 1-3"
+    write_uat_state "stories" "$__UAT_BUILD_ITERATION" "running"
     uat_phase_stories || { print_error "UAT stories phase failed"; _inline_uat_cleanup; return 1; }
+    write_uat_state "scenarios" "$__UAT_BUILD_ITERATION" "running"
     uat_phase_scenarios || { print_error "UAT scenarios phase failed"; _inline_uat_cleanup; return 1; }
     _uat_list_scenarios
+    write_uat_state "harness" "$__UAT_BUILD_ITERATION" "running"
     uat_phase_harness || { print_error "UAT harness phase failed"; _inline_uat_cleanup; return 1; }
 
     # 7. Retry loop: setup → execute → verdict
@@ -3298,6 +3311,7 @@ run_inline_uat() {
         cd "$uat_dir" || { print_error "Failed to cd to UAT dir"; cd "$project_dir"; return 1; }
 
         # Phase 4.5: Setup artifact environment
+        write_uat_state "setup" "$build_iteration" "running"
         local artifact_context=""
         uat_phase_setup_env \
             "$__UAT_ARTIFACT_TYPE" \
@@ -3340,6 +3354,7 @@ run_inline_uat() {
         mkdir -p "$results_dir"
 
         # Phase 5: Execute scenarios
+        write_uat_state "execute" "$build_iteration" "running"
         uat_phase_execute "$build_iteration" "$artifact_context" "$failing_scenarios" || {
             local error_json
             error_json=$(jq -n '[{"scenario":"harness_execution","status":"error","summary":"Phase 5 execution failed","expected":"Test harness runs successfully","actual":"Claude agent crashed or timed out"}]')
@@ -3361,6 +3376,7 @@ run_inline_uat() {
         uat_stop_server
 
         # Phase 6: Write verdict
+        write_uat_state "verdict" "$build_iteration" "running"
         uat_phase_verdict "$signal_dir" "$build_iteration" || {
             retry_count=$((retry_count + 1))
             if [[ $retry_count -ge $max_retries ]]; then
@@ -3380,6 +3396,7 @@ run_inline_uat() {
 
         # Process verdict
         if [[ "$__VERDICT_STATUS" == "pass" ]]; then
+            write_uat_state "complete" "$build_iteration" "pass"
             print_success "Inline UAT: All $__VERDICT_TOTAL scenarios passed!"
             _uat_print_report "$signal_dir" "$run_start_time"
             _inline_uat_cleanup
@@ -3388,6 +3405,7 @@ run_inline_uat() {
 
         # Check for only disputes remaining
         if [[ "$__VERDICT_FAILED" -eq 0 ]] && [[ "$__VERDICT_ERRORED" -eq 0 ]] && [[ "$__VERDICT_DISPUTED" -gt 0 ]]; then
+            write_uat_state "complete" "$build_iteration" "pass"
             print_info "Only disputed scenarios remain — exiting with code 2"
             _uat_print_report "$signal_dir" "$run_start_time"
             _inline_uat_cleanup
@@ -3400,6 +3418,7 @@ run_inline_uat() {
 
         retry_count=$((retry_count + 1))
         if [[ $retry_count -ge $max_retries ]]; then
+            write_uat_state "failed" "$build_iteration" "fail"
             print_error "UAT max retries ($max_retries) exhausted — $__VERDICT_FAILED failures, $__VERDICT_ERRORED errors remain"
             _uat_print_report "$signal_dir" "$run_start_time"
             _inline_uat_cleanup
@@ -3417,6 +3436,7 @@ run_inline_uat() {
         write_uat_context "$signal_dir/verdict.json" "$retry_count" "$max_retries" || true
 
         # Republish, re-bridge, regen harness
+        write_uat_state "rebuild" "$build_iteration" "running"
         _uat_republish_and_regen "$task" "$task_complexity" \
             "UAT failure context is in .buildcrew/uat-context.md — read it and fix the issues. Do NOT access the UAT directory or scenarios." \
             || { _inline_uat_cleanup; return 1; }
