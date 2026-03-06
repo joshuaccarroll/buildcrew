@@ -1157,3 +1157,115 @@ EOF
     _batch_mark_task 1 "merge_conflict"
     [ "$(jq -r '.tasks[0].status' "$BATCH_MANIFEST")" = "merge_conflict" ]
 }
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Batch BACKLOG.md sync (mark_task_complete from parent)
+# ─────────────────────────────────────────────────────────────────────────────
+
+@test "_batch_poll_tasks: completed task marks BACKLOG.md" {
+    cat > BACKLOG.md << 'EOF'
+- [ ] Fix the bug
+EOF
+    BACKLOG_FILE="BACKLOG.md"
+    __BATCH_CWD="$(pwd)"
+    _batch_init_manifest "main" "abc123"
+    _batch_add_task 1 "Fix the bug" "fix-the-bug"
+
+    # Launch a process that succeeds
+    true &
+    local pid=$!
+    wait "$pid" 2>/dev/null || true
+    _batch_pids=()
+    _batch_pids[0]="$pid"
+    _batch_tasks[0]="Fix the bug"
+    _batch_slugs[0]="fix-the-bug"
+    _batch_running=1
+    _batch_completed=0
+    _batch_failed=0
+
+    _batch_poll_tasks
+
+    grep -q '^\- \[x\] Fix the bug' BACKLOG.md
+}
+
+@test "_batch_poll_tasks: failed task does NOT mark BACKLOG.md" {
+    cat > BACKLOG.md << 'EOF'
+- [ ] Fix the bug
+EOF
+    BACKLOG_FILE="BACKLOG.md"
+    __BATCH_CWD="$(pwd)"
+    _batch_init_manifest "main" "abc123"
+    _batch_add_task 1 "Fix the bug" "fix-the-bug"
+
+    # Launch a process that fails
+    false &
+    local pid=$!
+    wait "$pid" 2>/dev/null || true
+    _batch_pids=()
+    _batch_pids[0]="$pid"
+    _batch_tasks[0]="Fix the bug"
+    _batch_slugs[0]="fix-the-bug"
+    _batch_running=1
+    _batch_completed=0
+    _batch_failed=0
+
+    _batch_poll_tasks
+
+    grep -q '^\- \[ \] Fix the bug' BACKLOG.md
+}
+
+@test "_batch_poll_tasks: handles prefixes and complexity tags in BACKLOG.md" {
+    cat > BACKLOG.md << 'EOF'
+- [ ] [plan:~/.claude/plans/foo.md] [dir:project-a] Fix the bug {simple}
+EOF
+    BACKLOG_FILE="BACKLOG.md"
+    __BATCH_CWD="$(pwd)"
+    _batch_init_manifest "main" "abc123"
+    _batch_add_task 1 "Fix the bug" "fix-the-bug"
+
+    true &
+    local pid=$!
+    wait "$pid" 2>/dev/null || true
+    _batch_pids=()
+    _batch_pids[0]="$pid"
+    _batch_tasks[0]="Fix the bug"
+    _batch_slugs[0]="fix-the-bug"
+    _batch_running=1
+    _batch_completed=0
+    _batch_failed=0
+
+    _batch_poll_tasks
+
+    # Prefixes preserved, complexity tag dropped
+    grep -q '^\- \[x\] \[plan:~/.claude/plans/foo.md\] \[dir:project-a\] Fix the bug$' BACKLOG.md
+}
+
+@test "batch resume: reconciles previously-completed tasks in BACKLOG.md" {
+    cat > BACKLOG.md << 'EOF'
+- [ ] First task
+- [ ] Second task
+EOF
+    BACKLOG_FILE="BACKLOG.md"
+    __BATCH_CWD="$(pwd)"
+    _batch_init_manifest "main" "abc123"
+    _batch_add_task 1 "First task" "first-task"
+    _batch_add_task 2 "Second task" "second-task"
+    _batch_mark_task 1 "completed" "0"
+
+    local already_done
+    already_done=$(jq '[.tasks[] | select(.status == "completed")] | length' "$BATCH_MANIFEST")
+
+    # Run the same reconciliation logic from _batch_resume
+    if (( already_done > 0 )); then
+        local _saved_bf="$BACKLOG_FILE"
+        [[ "$BACKLOG_FILE" != /* ]] && BACKLOG_FILE="$__BATCH_CWD/$BACKLOG_FILE"
+        local reconcile_text
+        while IFS= read -r reconcile_text; do
+            [[ -n "$reconcile_text" ]] && mark_task_complete "$reconcile_text"
+        done < <(jq -r '.tasks[] | select(.status == "completed") | .text' "$BATCH_MANIFEST")
+        BACKLOG_FILE="$_saved_bf"
+    fi
+
+    grep -q '^\- \[x\] First task' BACKLOG.md
+    grep -q '^\- \[ \] Second task' BACKLOG.md
+}

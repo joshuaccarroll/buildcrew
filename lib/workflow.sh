@@ -882,6 +882,11 @@ _batch_poll_tasks() {
             if [[ $exit_code -eq 0 ]]; then
                 _batch_mark_task "$manifest_idx" "completed" "0"
                 _batch_completed=$(( _batch_completed + 1 ))
+                # Sync completion to BACKLOG.md (parent-side — child's mark is uncommitted and lost during squash merge)
+                local _saved_bf="$BACKLOG_FILE"
+                [[ "$BACKLOG_FILE" != /* ]] && BACKLOG_FILE="$__BATCH_CWD/$BACKLOG_FILE"
+                mark_task_complete "$task_text"
+                BACKLOG_FILE="$_saved_bf"
                 log_msg "Task $manifest_idx completed: '$task_text'"
             else
                 _batch_mark_task "$manifest_idx" "failed" "$exit_code"
@@ -1464,6 +1469,17 @@ _batch_resume() {
     local total=${#_batch_tasks[@]}
     local already_done
     already_done=$(jq '[.tasks[] | select(.status == "completed")] | length' "$BATCH_MANIFEST")
+
+    # Reconcile: mark previously-completed tasks in BACKLOG.md (idempotent — only matches - [ ] lines)
+    if (( already_done > 0 )); then
+        local _saved_bf="$BACKLOG_FILE"
+        [[ "$BACKLOG_FILE" != /* ]] && BACKLOG_FILE="$__BATCH_CWD/$BACKLOG_FILE"
+        local reconcile_text
+        while IFS= read -r reconcile_text; do
+            [[ -n "$reconcile_text" ]] && mark_task_complete "$reconcile_text"
+        done < <(jq -r '.tasks[] | select(.status == "completed") | .text' "$BATCH_MANIFEST")
+        BACKLOG_FILE="$_saved_bf"
+    fi
 
     # Pool state
     _batch_pids=()
