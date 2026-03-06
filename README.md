@@ -35,7 +35,7 @@ BuildCrew has two modes:
 
 1. **Install once** to `~/.buildcrew/` — persona skill files, default rules, and the workflow orchestrator
 2. **Link any project** with `buildcrew init` — creates `.buildcrew/` (your customizations), symlinks skills into `.claude/`, writes `.claude/settings.json` for autonomous operation
-3. **Rules merge** in order: global defaults → persona rules → your project rules (`.buildcrew/rules/project-rules.md`)
+3. **Rules merge** in order: global defaults → persona rules → your project rules (`.buildcrew/rules/project-rules.md`) → per-persona project rules (`.buildcrew/rules/<slug>-rules.md`)
 4. **Communication is file-based** — orchestrator and Claude invocations share state through files in `.buildcrew/` and `.claude/`. Each phase writes a `phase-result.json` verdict that drives the next decision
 5. **Phases are isolated** — each phase is a fresh `claude -p` invocation with only the context it needs, preventing context bleed between roles
 
@@ -103,7 +103,7 @@ buildcrew reset              # Clear blocked tasks and clean up artifacts
 | `--dry-run` | Preview what would happen without executing |
 | `--review` | Pre-build gate: displays plan inline, opens `$EDITOR`. No effect for `{trivial}` tasks |
 | `--branch` | Create `buildcrew/<slug>` feature branch per task with PR via `gh` |
-| `--resume` | Resume an interrupted task from where it left off |
+| `--resume` | Resume an interrupted task from where it left off. Invocation counts from the interrupted run are preserved and count against the `MAX_INVOCATIONS` ceiling. Use `--max-invocations N` on resume to increase the budget if needed |
 | `--task N` | Target a specific task by name or number |
 | `--skip-spec` | Skip spec phase (task already has acceptance criteria) |
 | `--full-pipeline` | Force all phases regardless of complexity |
@@ -126,6 +126,7 @@ buildcrew lessons prune      # Interactively remove stale lessons
 buildcrew lessons lint       # Check lessons for vague or weak rules
 buildcrew plugins            # Show recommended plugins
 buildcrew dash               # Launch terminal dashboard (installs if needed)
+buildcrew dash status        # Show buildcrew-dash installation status and version
 buildcrew update             # Update BuildCrew
 buildcrew version            # Show installed version
 buildcrew uninstall          # Remove BuildCrew
@@ -175,6 +176,17 @@ cp .buildcrew/rules/project-rules.md.example .buildcrew/rules/project-rules.md
 
 Add your team's linting, naming, and operational standards. See the example file for details.
 
+Use `Override:` to replace a named rule section from the defaults, or `Disable:` to remove it entirely:
+
+```markdown
+## Override: Functions
+- Keep functions under 30 lines (default is 20)
+
+## Disable: YAGNI
+```
+
+**Per-persona rules:** Each persona also checks for `.buildcrew/rules/<slug>-rules.md`. These apply after project-wide rules, letting you customize behavior for individual personas. The supported files are: `product-manager-rules.md`, `ux-designer-rules.md`, `feature-engineer-rules.md`, `principal-engineer-rules.md`, `qa-engineer-rules.md`, `security-engineer-rules.md`.
+
 ### Project Context (Optional)
 
 ```bash
@@ -184,6 +196,8 @@ cp .buildcrew/context/domain.md.example .buildcrew/context/domain.md
 ```
 
 When present, these are injected into every phase's prompt automatically.
+
+**Context truncation:** Combined project context (all three context files plus `lessons.md`) is capped at 10KB per phase invocation. When the combined content exceeds 10KB, it is truncated at the nearest section boundary (`---` or `## ` header) and a `[truncated]` marker is appended. To stay under the limit, keep context files focused — each file should cover one domain clearly rather than exhaustively.
 
 ---
 
@@ -233,6 +247,9 @@ buildcrew uat --preview                      # List scenarios without running ag
 | `UAT_MAX_RETRIES` | `5` | Max build-fix-test iterations |
 | `UAT_ARTIFACT_TYPE` | (auto) | Override artifact type: `cli`, `api`, `library`, `tui` |
 | `UAT_RUN_COMMAND` | (auto) | Override how to run/start the artifact |
+| `UAT_INSTALL_COMMAND` | (none) | Shell command run once to install/set up the artifact before UAT test execution (e.g. `npm install`) |
+| `UAT_HEALTH_CHECK` | (none) | Shell command polled after artifact start to confirm readiness before scenarios run (e.g. `curl -sf http://localhost:3000/health`). Times out after `UAT_HEALTH_CHECK_TIMEOUT` seconds (default: 30) |
+| `UAT_HEALTH_CHECK_TIMEOUT` | `30` | Seconds to wait for `UAT_HEALTH_CHECK` to succeed before aborting |
 | `BUILD_UAT_WATCH_TIMEOUT` | `600` | Seconds to wait for UAT verdict |
 
 ---
