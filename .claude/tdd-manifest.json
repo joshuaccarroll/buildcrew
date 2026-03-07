@@ -1,57 +1,70 @@
 {
   "test_files": [
-    "buildcrew/tests/tdd/convergence_loop.bats"
+    "tests/tdd/ac01_docs_skill_structure.bats",
+    "tests/tdd/ac02_docs_git_diff_detection.bats",
+    "tests/tdd/ac03_docs_readme_update.bats",
+    "tests/tdd/ac04_docs_no_changes.bats",
+    "tests/tdd/ac05_docs_phase_result.bats",
+    "tests/tdd/ac06_docs_git_diff_usage.bats"
   ],
   "stub_files": [
-    "buildcrew/lib/convergence.sh"
+    "skills/buildcrew-docs/SKILL.md"
   ],
-  "test_dir": "buildcrew/tests/tdd",
-  "test_count": 21,
-  "all_failing": true,
-  "framework": "bats",
-  "run_command": "cd buildcrew && bats tests/tdd/convergence_loop.bats",
+  "test_dir": "tests/tdd",
+  "test_count": 30,
+  "all_failing": false,
+  "framework": "test.sh",
+  "run_command": "bats tests/tdd/ac0[1-6]_docs*.bats",
   "ac_coverage": {
     "AC-01": [
-      "AC-01: convergence_loop initializes iteration counter to 0",
-      "AC-01: convergence_loop increments iteration counter",
-      "AC-01: convergence_loop stops after 3 iterations"
+      "AC-01a: skills/buildcrew-docs/SKILL.md file exists",
+      "AC-01b: SKILL.md has YAML frontmatter with name field",
+      "AC-01c: SKILL.md has description field in frontmatter",
+      "AC-01d: SKILL.md has allowed-tools field in frontmatter",
+      "AC-01e: SKILL.md contains phase header with 'docs' phase name",
+      "AC-01f: SKILL.md contains phase result section mentioning complete verdict"
     ],
     "AC-02": [
-      "AC-02: convergence_check detects CONVERGED signal in response",
-      "AC-02: convergence_check rejects response without CONVERGED",
-      "AC-02: convergence_check case-sensitive for CONVERGED"
+      "AC-02a: Skill detects CLI changes in bin/ directory as user-facing",
+      "AC-02b: Skill detects config file changes (.buildcrew/config) as user-facing",
+      "AC-02c: Skill detects package.json changes as user-facing (dependency change)",
+      "AC-02d: Skill detects schema file changes as user-facing",
+      "AC-02e: Skill detects no changes when git diff is empty"
     ],
     "AC-03": [
-      "AC-03: convergence_handle_failure logs warning for missing output",
-      "AC-03: convergence_handle_failure records which iteration failed"
+      "AC-03a: README.md is updated when CLI file changes",
+      "AC-03b: README.md maintains structure when updated",
+      "AC-03c: README.md is updated when config file changes",
+      "AC-03d: README.md is updated when dependencies change (package.json)"
     ],
     "AC-04": [
-      "AC-04: convergence_loop_finalize prepares state for Pass 3",
-      "AC-04: Pass 3 can read convergence findings"
+      "AC-04a: README.md is NOT modified when only internal lib/ files change",
+      "AC-04b: README.md is NOT modified when only test files change",
+      "AC-04c: README.md is NOT modified when only internal build artifacts change",
+      "AC-04d: README.md is NOT modified when git diff returns empty (no changes)"
     ],
     "AC-05": [
-      "AC-05: convergence_is_revision_cycle returns true when plan-review-prev.md exists",
-      "AC-05: convergence_is_revision_cycle returns false when plan-review-prev.md missing",
-      "AC-05: convergence_get_prompt uses revision variant when in revision cycle",
-      "AC-05: convergence_get_prompt uses fresh variant when not in revision cycle"
+      "AC-05a: Phase result file .claude/phase-result.json is created",
+      "AC-05b: Phase result contains required 'phase' field with value 'docs'",
+      "AC-05c: Phase result contains 'verdict' field with value 'complete'",
+      "AC-05d: Phase result contains 'details' field describing what changed",
+      "AC-05e: Phase result is valid JSON"
     ],
     "AC-06": [
-      "AC-06: convergence_write_review_output creates plan-review.md",
-      "AC-06: plan-review.md includes verdict from synthesis"
-    ],
-    "AC-07": [
-      "AC-07: convergence_map_verdict maps approved correctly",
-      "AC-07: convergence_map_verdict maps needs_revision correctly",
-      "AC-07: convergence_map_verdict maps rejected correctly"
-    ],
-    "AC-08": [
-      "AC-08: workflow.sh can be sourced without modification"
-    ],
-    "AC-09": [
-      "AC-09: convergence loop integrates with review phase"
+      "AC-06a: SKILL.md mentions 'git diff' explicitly",
+      "AC-06b: SKILL.md specifies correct git diff command format",
+      "AC-06c: SKILL.md mentions classifying changes as user-facing",
+      "AC-06d: SKILL.md mentions file pattern classification",
+      "AC-06e: SKILL.md instructs README.md update",
+      "AC-06f: SKILL.md specifies write to .claude/phase-result.json"
     ]
   },
   "checksums": {
-    "buildcrew/tests/tdd/convergence_loop.bats": "bafcc82101e3d16526b595a8c63efa68e5db694e77448ae68285c6bed347b551"
+    "tests/tdd/ac01_docs_skill_structure.bats": "afe493f95e5311a8e0116063b29fa9ba577636a061292813160de0adf82825fe",
+    "tests/tdd/ac02_docs_git_diff_detection.bats": "3bcd9b2349dddfa91486d5ffb9334211c8575bcbcd77f02d580e581180d61b09",
+    "tests/tdd/ac03_docs_readme_update.bats": "1a11a5b821a2be7bbb65ae3f1493ae5fd13036a8f0e8bb556e0482a3fb68dc49",
+    "tests/tdd/ac04_docs_no_changes.bats": "38366fcfa42f9d0965b298e2424c5772521dbd757d4d62a3748421c2c1d872c9",
+    "tests/tdd/ac05_docs_phase_result.bats": "b07f3bbe3f17f61217b0e7864897faf7c8dc54dcd63833dd6e5486c4c5990a31",
+    "tests/tdd/ac06_docs_git_diff_usage.bats": "84f557edea40e6ef6120dd73fd06d8b1c6e397f5219b28186faf22ef44009a54"
   }
 }
