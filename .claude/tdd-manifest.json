@@ -1,44 +1,57 @@
 {
-  "test_files": ["tests/tdd/readme_config_docs.bats"],
-  "stub_files": [],
-  "test_dir": "tests/tdd",
-  "test_count": 16,
+  "test_files": [
+    "buildcrew/tests/tdd/convergence_loop.bats"
+  ],
+  "stub_files": [
+    "buildcrew/lib/convergence.sh"
+  ],
+  "test_dir": "buildcrew/tests/tdd",
+  "test_count": 21,
   "all_failing": true,
   "framework": "bats",
-  "run_command": "bats tests/tdd/readme_config_docs.bats",
+  "run_command": "cd buildcrew && bats tests/tdd/convergence_loop.bats",
   "ac_coverage": {
     "AC-01": [
-      "AC01 README mentions per-persona rules with product-manager slug",
-      "AC01 README mentions per-persona rules with ux-designer slug",
-      "AC01 README mentions per-persona rules with feature-engineer slug",
-      "AC01 README mentions per-persona rules with principal-engineer slug",
-      "AC01 README mentions per-persona rules with qa-engineer slug",
-      "AC01 README mentions per-persona rules with security-engineer slug"
+      "AC-01: convergence_loop initializes iteration counter to 0",
+      "AC-01: convergence_loop increments iteration counter",
+      "AC-01: convergence_loop stops after 3 iterations"
     ],
     "AC-02": [
-      "AC02 README documents Override: syntax",
-      "AC02 README documents Disable: syntax"
+      "AC-02: convergence_check detects CONVERGED signal in response",
+      "AC-02: convergence_check rejects response without CONVERGED",
+      "AC-02: convergence_check case-sensitive for CONVERGED"
     ],
     "AC-03": [
-      "AC03 README documents UAT_INSTALL_COMMAND in configuration",
-      "AC03 README documents UAT_HEALTH_CHECK in configuration",
-      "AC03 README documents UAT_HEALTH_CHECK_TIMEOUT in configuration"
+      "AC-03: convergence_handle_failure logs warning for missing output",
+      "AC-03: convergence_handle_failure records which iteration failed"
     ],
     "AC-04": [
-      "AC04 README explains 10KB context truncation limit",
-      "AC04 README mentions truncation behavior"
+      "AC-04: convergence_loop_finalize prepares state for Pass 3",
+      "AC-04: Pass 3 can read convergence findings"
     ],
     "AC-05": [
-      "AC05 README --resume description mentions invocation count preservation"
+      "AC-05: convergence_is_revision_cycle returns true when plan-review-prev.md exists",
+      "AC-05: convergence_is_revision_cycle returns false when plan-review-prev.md missing",
+      "AC-05: convergence_get_prompt uses revision variant when in revision cycle",
+      "AC-05: convergence_get_prompt uses fresh variant when not in revision cycle"
     ],
     "AC-06": [
-      "AC06 README includes buildcrew dash status command"
+      "AC-06: convergence_write_review_output creates plan-review.md",
+      "AC-06: plan-review.md includes verdict from synthesis"
     ],
     "AC-07": [
-      "AC07 How It Works rules merge mentions per-persona rules layer"
+      "AC-07: convergence_map_verdict maps approved correctly",
+      "AC-07: convergence_map_verdict maps needs_revision correctly",
+      "AC-07: convergence_map_verdict maps rejected correctly"
+    ],
+    "AC-08": [
+      "AC-08: workflow.sh can be sourced without modification"
+    ],
+    "AC-09": [
+      "AC-09: convergence loop integrates with review phase"
     ]
   },
   "checksums": {
-    "tests/tdd/readme_config_docs.bats": "c62f11366aad879f4cca5633e71338e2f8f8ef1b98f1f2155c1bb187a3572204"
+    "buildcrew/tests/tdd/convergence_loop.bats": "bafcc82101e3d16526b595a8c63efa68e5db694e77448ae68285c6bed347b551"
   }
 }
