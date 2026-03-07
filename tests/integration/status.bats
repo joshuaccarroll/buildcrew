@@ -78,7 +78,7 @@ EOF
 }
 
 @test "status: shows (not set) for absent context file" {
-    mkdir -p .buildcrew/context
+    command mkdir -p .buildcrew/context
     printf 'users\n' > .buildcrew/context/users.md
     # principles.md and domain.md absent
 

@@ -148,16 +148,22 @@ EOF
 # ─────────────────────────────────────────────────────────────────────────────
 
 @test "AC-06: convergence_write_review_output creates plan-review.md" {
-    cat > .claude/review-pass1-pe.md <<EOF
-## Pass 1: Technical Review
+    cat > .claude/review-lens1.md <<EOF
+## Lens 1: Technical Soundness
 - Finding 1
 - Finding 2
 VERDICT: PASS
 EOF
 
-    cat > .claude/review-pass2-pm.md <<EOF
-## Pass 2: User Impact Review
-- User impact 1
+    cat > .claude/review-lens2.md <<EOF
+## Lens 2: Completeness & Gaps
+- Gap 1
+VERDICT: PASS
+EOF
+
+    cat > .claude/review-lens3.md <<EOF
+## Lens 3: Simplicity & Over-engineering
+- Simplification 1
 VERDICT: PASS
 EOF
 
@@ -165,13 +171,15 @@ EOF
 
     [ -f .claude/plan-review.md ]
     grep -q "Plan Review" .claude/plan-review.md
-    grep -q "Pass 1" .claude/plan-review.md
-    grep -q "Pass 2" .claude/plan-review.md
+    grep -q "Lens 1" .claude/plan-review.md
+    grep -q "Lens 2" .claude/plan-review.md
+    grep -q "Lens 3" .claude/plan-review.md
 }
 
 @test "AC-06: plan-review.md includes verdict from synthesis" {
-    echo "VERDICT: PASS" > .claude/review-pass1-pe.md
-    echo "VERDICT: PASS" > .claude/review-pass2-pm.md
+    echo "VERDICT: PASS" > .claude/review-lens1.md
+    echo "VERDICT: PASS" > .claude/review-lens2.md
+    echo "VERDICT: PASS" > .claude/review-lens3.md
 
     convergence_write_review_output "approved"
 

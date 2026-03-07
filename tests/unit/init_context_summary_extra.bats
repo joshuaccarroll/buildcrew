@@ -67,8 +67,8 @@ MOCKEOF
 
 @test "ERR-02: empty context file shows ✓ with 0 bytes" {
     _mock_claude_ok
-    mkdir -p .buildcrew/context
-    touch .buildcrew/context/users.md
+    command mkdir -p .buildcrew/context
+    : > .buildcrew/context/users.md
     run "$BUILDCREW_BIN" init --quick
     [ "$status" -eq 0 ]
     local line

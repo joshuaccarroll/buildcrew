@@ -2519,8 +2519,8 @@ CURRENT_TASK_FILE=".buildcrew/.current-task"
 LESSONS_FILE=".buildcrew/lessons.md"
 ARTIFACT_FILES=(
     .claude/spec.md .claude/research.md .claude/current-plan.md .claude/plan-review.md
-    .claude/review-pass1-pe.md .claude/review-pass2-pm.md
-    .claude/plan-review-prev.md .claude/review-pass1-pe-prev.md .claude/review-pass2-pm-prev.md
+    .claude/review-lens1.md .claude/review-lens2.md .claude/review-lens3.md
+    .claude/plan-review-prev.md .claude/review-lens1-prev.md .claude/review-lens2-prev.md .claude/review-lens3-prev.md
     .claude/code-review.md .claude/outcome-report.md
     .claude/security-audit.md .claude/verify-report.md
     .claude/tdd-manifest.json
@@ -3911,17 +3911,18 @@ process_task_isolated() {
                             "Triggered circuit breaker and re-planned from scratch" \
                             "Start from a different architectural approach when plan review rejects the same issues twice"
                         if ! __check_replan_limit "$task" "Circuit breaker: plan failed twice even after re-planning"; then
-                            rm -f .claude/plan-review-prev.md .claude/review-pass1-pe-prev.md .claude/review-pass2-pm-prev.md
+                            rm -f .claude/plan-review-prev.md .claude/review-lens1-prev.md .claude/review-lens2-prev.md .claude/review-lens3-prev.md
                             return 1
                         fi
                         __trigger_replan "CIRCUIT BREAKER: Plan review failed twice. Previous approach: $failure_summary. Knowing everything you know now, scrap this and implement the elegant solution."
-                        rm -f .claude/plan-review-prev.md .claude/review-pass1-pe-prev.md .claude/review-pass2-pm-prev.md
+                        rm -f .claude/plan-review-prev.md .claude/review-lens1-prev.md .claude/review-lens2-prev.md .claude/review-lens3-prev.md
                         break
                     fi
                     prev_review_details=$(jq -r '.details // ""' "$PHASE_RESULT_FILE")
                     [[ -f ".claude/plan-review.md" ]] && cp .claude/plan-review.md .claude/plan-review-prev.md
-                    [[ -f ".claude/review-pass1-pe.md" ]] && cp .claude/review-pass1-pe.md .claude/review-pass1-pe-prev.md
-                    [[ -f ".claude/review-pass2-pm.md" ]] && cp .claude/review-pass2-pm.md .claude/review-pass2-pm-prev.md
+                    [[ -f ".claude/review-lens1.md" ]] && cp .claude/review-lens1.md .claude/review-lens1-prev.md
+                    [[ -f ".claude/review-lens2.md" ]] && cp .claude/review-lens2.md .claude/review-lens2-prev.md
+                    [[ -f ".claude/review-lens3.md" ]] && cp .claude/review-lens3.md .claude/review-lens3-prev.md
                     ;;
                 *) mark_task_blocked "$task" "Unexpected plan review verdict: $verdict"; clear_task_progress; return 1 ;;
             esac

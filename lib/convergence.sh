@@ -98,10 +98,10 @@ convergence_write_review_output() {
     local verdict_upper
     verdict_upper=$(echo "$verdict" | tr '[:lower:]' '[:upper:]')
 
-    local pass1_content=""
-    local pass2_content=""
-    [ -f .claude/review-pass1-pe.md ] && pass1_content=$(cat .claude/review-pass1-pe.md)
-    [ -f .claude/review-pass2-pm.md ] && pass2_content=$(cat .claude/review-pass2-pm.md)
+    local lens1_content="" lens2_content="" lens3_content=""
+    [ -f .claude/review-lens1.md ] && lens1_content=$(cat .claude/review-lens1.md)
+    [ -f .claude/review-lens2.md ] && lens2_content=$(cat .claude/review-lens2.md)
+    [ -f .claude/review-lens3.md ] && lens3_content=$(cat .claude/review-lens3.md)
 
     local approved_line
     if [ "$verdict" = "approved" ]; then
@@ -113,13 +113,16 @@ convergence_write_review_output() {
     cat > .claude/plan-review.md <<EOF
 ## Plan Review (3-Pass)
 
-### Pass 1: Technical Review (Principal Engineer)
-$pass1_content
+### Lens 1: Technical Soundness
+$lens1_content
 
-### Pass 2: Convergence Loop Findings
-$pass2_content
+### Lens 2: Completeness & Gaps
+$lens2_content
 
-### Pass 3: Convergence Review
+### Lens 3: Simplicity & Over-engineering
+$lens3_content
+
+### Pass 3: Convergence Synthesis
 **Verdict**: $verdict_upper
 
 ### Overall Verdict: $verdict_upper
