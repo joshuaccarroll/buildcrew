@@ -57,3 +57,17 @@ teardown() {
     [ "$status" -eq 0 ]
     [ -z "$output" ]
 }
+
+@test "rate_limit_event: stdout contains 'Rate limit reached'" {
+    if ! command -v python3 &>/dev/null; then skip "python3 not available"; fi
+    run bash -c "echo '{\"type\":\"rate_limit_event\"}' | python3 \"$SP\" --activity-file /tmp/sp_test_rate_limit --max-turns 10"
+    [ "$status" -eq 0 ]
+    [ "$output" = "Rate limit reached" ]
+}
+
+@test "error event with rate_limit_error: stdout contains 'Rate limit reached'" {
+    if ! command -v python3 &>/dev/null; then skip "python3 not available"; fi
+    run bash -c "echo '{\"type\":\"error\",\"error\":{\"type\":\"rate_limit_error\"}}' | python3 \"$SP\" --activity-file /tmp/sp_test_rate_error --max-turns 10"
+    [ "$status" -eq 0 ]
+    [ "$output" = "Rate limit reached" ]
+}

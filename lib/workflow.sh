@@ -654,6 +654,7 @@ _batch_pids=()
 _batch_running=0
 _batch_completed=0
 _batch_failed=0
+_batch_rate_limited=0
 _batch_next_idx=0
 _batch_start_time=0
 _batch_dashboard_lines=0
@@ -905,6 +906,7 @@ _batch_launch_task() {
     (
         cd "$worktree" || exit 1
         export BUILDCREW_BATCH_NONCE="${slug}-${idx}"
+        export BUILDCREW_BATCH_PARENT_CWD="${__BATCH_CWD}"
         export BUILDCREW_HOME
         export AUTO_MODE=true  # Batch workers must run unattended
 
@@ -967,6 +969,10 @@ _batch_poll_tasks() {
                     _batch_failed=$(( _batch_failed + 1 ))
                     log_msg "Task $manifest_idx failed (sentinel=${_sentinel:-missing}): '$task_text'"
                 fi
+            elif [[ $exit_code -eq 4 ]]; then
+                _batch_mark_task "$manifest_idx" "rate_limited" "4"
+                _batch_rate_limited=$(( _batch_rate_limited + 1 ))
+                log_msg "Task $manifest_idx rate-limited: '$task_text'"
             else
                 _batch_mark_task "$manifest_idx" "failed" "$exit_code"
                 _batch_failed=$(( _batch_failed + 1 ))
@@ -988,10 +994,14 @@ _batch_refresh_dashboard() {
     elapsed=$(( now - _batch_start_time ))
     elapsed_str=$(printf '%dm%02ds' $((elapsed / 60)) $((elapsed % 60)))
     total=${#_batch_tasks[@]}
-    pending=$(( total - _batch_completed - _batch_failed - _batch_running ))
+    pending=$(( total - _batch_completed - _batch_failed - _batch_rate_limited - _batch_running ))
 
     echo -e "${BLUE}═══ Batch Status ($elapsed_str) ═════════════════════════════════════${NC}"
-    echo -e "  Running: ${GREEN}$_batch_running${NC}/$MAX_PARALLEL  |  Done: ${GREEN}$_batch_completed${NC}  |  Failed: ${RED}$_batch_failed${NC}  |  Pending: $pending  |  Total: $total"
+    if (( _batch_rate_limited > 0 )); then
+        echo -e "  Running: ${GREEN}$_batch_running${NC}/$MAX_PARALLEL  |  Done: ${GREEN}$_batch_completed${NC}  |  Failed: ${RED}$_batch_failed${NC}  |  Rate-Limited: ${YELLOW}$_batch_rate_limited${NC}  |  Pending: $pending  |  Total: $total"
+    else
+        echo -e "  Running: ${GREEN}$_batch_running${NC}/$MAX_PARALLEL  |  Done: ${GREEN}$_batch_completed${NC}  |  Failed: ${RED}$_batch_failed${NC}  |  Pending: $pending  |  Total: $total"
+    fi
 
     local lines=2
     # Show status for each running task
@@ -1465,9 +1475,37 @@ _batch_parse_task_list() {
 _batch_dispatch_loop() {
     local total="$1" base_branch="$2"
     local _batch_stopping=false
+    local _batch_paused=false
+    local _batch_quit=false
+    local _batch_rate_limit_backoff=300  # 5 min initial backoff
 
-    while (( _batch_completed + _batch_failed < total )); do
+    while [[ "$_batch_quit" != "true" ]] && (( _batch_completed + _batch_failed < total )); do
         _batch_poll_tasks || true
+
+        # Rate limit pause: stop launching new tasks, drain, then enter pause UI
+        if [[ "$_batch_paused" != "true" ]] && _check_rate_limit_pause "$__BATCH_CWD"; then
+            _batch_paused=true
+            _clear_rate_limit_pause "$__BATCH_CWD"
+            print_warning "API rate/usage limit detected. Draining $_batch_running running task(s) before pausing..."
+        fi
+
+        if [[ "$_batch_paused" == "true" ]]; then
+            if (( _batch_running == 0 )); then
+                if _batch_handle_rate_limit_pause "$_batch_rate_limit_backoff"; then
+                    _batch_paused=false
+                    # Double backoff for next pause (cap at 60 min)
+                    _batch_rate_limit_backoff=$(( _batch_rate_limit_backoff * 2 > 3600 ? 3600 : _batch_rate_limit_backoff * 2 ))
+                    # Reset index so requeued tasks get picked up from the beginning
+                    _batch_next_idx=0
+                else
+                    _batch_quit=true
+                    break
+                fi
+            fi
+            _batch_refresh_dashboard
+            sleep 3
+            continue
+        fi
 
         # Stop signal: drain running tasks, then exit
         if [[ "$_batch_stopping" != "true" ]] && check_stop_signal; then
@@ -1519,6 +1557,14 @@ _batch_dispatch_loop() {
         _batch_refresh_dashboard
         sleep 3
     done
+
+    if [[ "$_batch_quit" == "true" ]]; then
+        local _batch_skipped=$(( total - _batch_completed - _batch_failed ))
+        if (( _batch_skipped > 0 )); then
+            print_info "$_batch_skipped task(s) pending. Resume with: buildcrew run --batch --resume"
+        fi
+        return 0
+    fi
 
     if [[ "$_batch_stopping" == "true" ]]; then
         local _batch_skipped=$(( total - _batch_completed - _batch_failed ))
@@ -1578,6 +1624,7 @@ _batch_resume() {
     _batch_running=0
     _batch_completed=$already_done
     _batch_failed=0
+    _batch_rate_limited=0
     _batch_next_idx=0
     _batch_start_time=$(date +%s)
     _batch_dashboard_lines=0
@@ -1682,6 +1729,7 @@ enter_batch_mode() {
     # Pool state
     _batch_pids=()
     _batch_running=0
+    _batch_rate_limited=0
     _batch_next_idx=0
     _batch_start_time=$(date +%s)
     _batch_dashboard_lines=0
@@ -2774,6 +2822,24 @@ is_phase_isolation_available() {
 # Phase-Isolated Mode: run_phase_group
 # ─────────────────────────────────────────────────────────────────────────────────
 
+if [[ -z "${RATE_LIMIT_PATTERN+x}" ]]; then
+    readonly RATE_LIMIT_PATTERN='rate.limit.reached|rate.limit.exceeded|rate_limit_error|usage.limit'
+fi
+
+# Helper: Check for rate limit in log and signal pause if detected.
+# Args: $1=phase, $2=log_offset, $3=message (optional, defaults to generic)
+# Returns: 0 if rate limit detected and handled, 1 otherwise
+_check_and_signal_rate_limit() {
+    local phase="$1" offset="$2" msg="${3:-API rate/usage limit detected — signaling pause}"
+    if _check_rate_limit_in_log "$offset"; then
+        print_warning "Phase $phase: $msg"
+        update_workflow_state "$phase" "rate_limited"
+        _signal_rate_limit_pause || true
+        return 0
+    fi
+    return 1
+}
+
 # Check recent log output for max-turns indicator.
 # Args: $1=log_offset (byte offset captured before claude -p call)
 # Returns: 0 if max-turns detected, 1 otherwise
@@ -2823,6 +2889,122 @@ _check_permission_denied_in_log() {
     fi
 
     return 1
+}
+
+# Check recent log output for rate/usage limit indicator.
+# Args: $1=log_offset (byte offset captured before claude -p call)
+# Returns: 0 if rate limit detected, 1 otherwise
+_check_rate_limit_in_log() {
+    local offset="$1"
+    if [[ -z "${__LOG_FILE:-}" || ! -f "$__LOG_FILE" ]]; then
+        return 1
+    fi
+    local recent
+    recent=$(tail -c +"$(( offset + 1 ))" "$__LOG_FILE" 2>/dev/null || true)
+    if [[ -z "$recent" ]]; then
+        return 1
+    fi
+    if echo "$recent" | grep -qiE "$RATE_LIMIT_PATTERN"; then
+        return 0
+    fi
+    return 1
+}
+
+# Signal rate limit pause to parent via sentinel file in batch parent directory.
+# Requires: BUILDCREW_BATCH_PARENT_CWD env var set
+# Returns: 0 on success, 1 on error
+_signal_rate_limit_pause() {
+    local parent_cwd="${BUILDCREW_BATCH_PARENT_CWD:-}"
+    if [[ -z "$parent_cwd" ]]; then
+        return 1
+    fi
+    touch "${parent_cwd}/.buildcrew/.rate-limit-pause" 2>/dev/null || return 1
+    return 0
+}
+
+# Check if rate limit pause signal exists in parent directory.
+# Args: $1=parent_cwd (batch parent directory)
+# Returns: 0 if sentinel exists, 1 otherwise
+_check_rate_limit_pause() {
+    local parent_cwd="$1"
+    [[ -f "${parent_cwd}/.buildcrew/.rate-limit-pause" ]]
+}
+
+# Clear rate limit pause signal from parent directory.
+# Args: $1=parent_cwd (batch parent directory)
+_clear_rate_limit_pause() {
+    local parent_cwd="$1"
+    rm -f "${parent_cwd}/.buildcrew/.rate-limit-pause"
+}
+
+# Requeue all rate-limited tasks back to pending status.
+# Updates .buildcrew/.batch-state with task_status[N]=pending
+_batch_requeue_rate_limited_tasks() {
+    local state_file=".buildcrew/.batch-state"
+    if [[ ! -f "$state_file" ]]; then
+        return 0
+    fi
+    local tmp
+    tmp=$(mktemp)
+    sed 's/task_status\(\[[0-9]*\]\)=rate_limited/task_status\1=pending/g' "$state_file" > "$tmp"
+    mv "$tmp" "$state_file"
+    return 0
+}
+
+
+# Handle rate limit pause: interactive UI with retry/wait/quit options.
+# Args: $1=backoff_seconds (how long [w]ait option waits)
+# Returns: 0 on resume (retry), 1 on quit
+_batch_handle_rate_limit_pause() {
+    local backoff="${1:-300}"
+    local total=${#_batch_tasks[@]}
+    local pending=$(( total - _batch_completed - _batch_failed - _batch_rate_limited ))
+
+    echo ""
+    echo -e "${YELLOW}═══ PAUSED — API Rate/Usage Limit ════════════════════════════════${NC}"
+    echo ""
+    echo -e "  Completed: ${GREEN}$_batch_completed${NC}  |  Rate-limited: ${YELLOW}$_batch_rate_limited${NC}  |  Failed: ${RED}$_batch_failed${NC}  |  Pending: $pending"
+    echo ""
+    echo -e "  [Enter]  Retry now"
+    echo -e "  [w]      Wait $(( backoff / 60 )) minute(s) then auto-retry"
+    echo -e "  [q]      Quit batch (resumable with: buildcrew run --batch --resume)"
+    echo ""
+
+    local choice=""
+    if read -t 30 -r -n 1 choice 2>/dev/null; then
+        echo ""
+        case "$choice" in
+            q|Q)
+                print_info "Batch paused. Resume later with: buildcrew run --batch --resume"
+                return 1
+                ;;
+            w|W)
+                print_info "Waiting $(( backoff / 60 )) minute(s) before retry..."
+                sleep "$backoff"
+                ;;
+            *)
+                print_info "Retrying now..."
+                ;;
+        esac
+    else
+        echo ""
+        print_info "No input received — auto-retrying..."
+    fi
+
+    # Requeue all rate_limited tasks in JSON manifest back to pending
+    local i
+    for i in "${!_batch_tasks[@]}"; do
+        local midx=$(( i + 1 ))
+        local st
+        st=$(_batch_get_task_status "$midx")
+        if [[ "$st" == "rate_limited" ]]; then
+            _batch_mark_task "$midx" "pending"
+        fi
+    done
+    _batch_requeue_rate_limited_tasks  # Also update .batch-state key-value file
+    _batch_rate_limited=0
+    print_info "Rate-limited tasks requeued — resuming batch."
+    return 0
 }
 
 # Convert a tool description string to a permission rule for settings.local.json.
@@ -3106,6 +3288,10 @@ Use Task subagents for: reading 3+ files, research, code review/analysis, any in
 
     # Validate result (with one retry on failure)
     if [[ ! -f "$PHASE_RESULT_FILE" ]] || ! jq -e . "$PHASE_RESULT_FILE" >/dev/null 2>&1; then
+        # Check for rate/usage limit first -- retrying is futile and wastes quota
+        if _check_and_signal_rate_limit "$phase" "$__log_offset"; then
+            return 4
+        fi
         # Check for permission denial first -- this is recoverable
         if _check_permission_denied_in_log "$__log_offset"; then
             if ! _prompt_permission_approval "$__PERM_DENIED_TOOL" "$phase"; then
@@ -3161,6 +3347,10 @@ Use Task subagents for: reading 3+ files, research, code review/analysis, any in
         [[ -n "$__saved_stty" ]] && stty "$__saved_stty" 2>/dev/null || true
 
         if [[ ! -f "$PHASE_RESULT_FILE" ]] || ! jq -e . "$PHASE_RESULT_FILE" >/dev/null 2>&1; then
+            # Check rate limit on retry result before other checks
+            if _check_and_signal_rate_limit "$phase" "$__log_offset" "API rate/usage limit detected on retry — signaling pause"; then
+                return 4
+            fi
             # Permission denial on retry -- return 3 for wrapper to re-invoke
             if _check_permission_denied_in_log "$__log_offset"; then
                 if _prompt_permission_approval "$__PERM_DENIED_TOOL" "$phase"; then
@@ -3253,7 +3443,9 @@ run_chunked_build() {
         local chunk_result=0
         run_phase_group "build" "$task" "$chunk_context" "$task_complexity" || chunk_result=$?
 
-        if [[ $chunk_result -eq 2 ]]; then
+        if [[ $chunk_result -eq 4 ]]; then
+            return 4
+        elif [[ $chunk_result -eq 2 ]]; then
             print_error "Single build step $step_num hit max-turns -- step is too large"
             return 2
         elif [[ $chunk_result -ne 0 ]]; then
@@ -3726,7 +3918,10 @@ process_task_isolated() {
         print_info "Skipping phase: spec (complexity: $task_complexity)"
         update_workflow_state "spec" "skipped"
     elif [[ "$__run_spec" == "true" ]]; then
-        run_phase_group "spec" "$task" "${__replan_context:+Re-planning context: $__replan_context}${plan_context}" "$task_complexity" || { mark_task_blocked "$task" "spec phase failed to produce a valid result"; clear_task_progress; return 1; }
+        local _spec_rc=0
+        run_phase_group "spec" "$task" "${__replan_context:+Re-planning context: $__replan_context}${plan_context}" "$task_complexity" || _spec_rc=$?
+        if [[ $_spec_rc -eq 4 ]]; then return 4; fi
+        if [[ $_spec_rc -ne 0 ]]; then mark_task_blocked "$task" "spec phase failed to produce a valid result"; clear_task_progress; return 1; fi
 
         local spec_verdict
         spec_verdict=$(jq -r '.verdict // "complete"' "$PHASE_RESULT_FILE")
@@ -3751,9 +3946,12 @@ process_task_isolated() {
         fi
         if (( ac_count < 2 )); then
             print_warning "Spec has only $ac_count acceptance criteria (minimum 2). Re-running spec phase."
+            local _spec_ac_rc=0
             run_phase_group "spec" "$task" \
                 "RETRY: Previous spec had only $ac_count acceptance criteria. Minimum is 2 concrete, testable acceptance criteria. Read .claude/spec.md and add more specific ACs.${plan_context}" \
-                "$task_complexity" || { mark_task_blocked "$task" "spec phase failed to produce a valid result on AC retry"; clear_task_progress; return 1; }
+                "$task_complexity" || _spec_ac_rc=$?
+            if [[ $_spec_ac_rc -eq 4 ]]; then return 4; fi
+            if [[ $_spec_ac_rc -ne 0 ]]; then mark_task_blocked "$task" "spec phase failed to produce a valid result on AC retry"; clear_task_progress; return 1; fi
             # Re-validate
             ac_count=$(grep -c '^- \[ \] AC-' ".claude/spec.md" 2>/dev/null) || ac_count=0
             if (( ac_count < 2 )); then
@@ -3812,7 +4010,10 @@ process_task_isolated() {
         if [[ "$task_complexity" == "standard" ]]; then
             research_extra="${research_extra:+$research_extra | }TDD MODE: Tests will be written BEFORE implementation. Your plan MUST include a section documenting public interface contracts (function signatures, CLI commands, API endpoints) with enough detail that tests can be written against them before any code exists. Mark any areas that cannot be tested before implementation (visual, perf) as TDD-exempt."
         fi
-        run_phase_group "research" "$task" "$research_extra" "$task_complexity" || { mark_task_blocked "$task" "research phase failed to produce a valid result"; clear_task_progress; return 1; }
+        local _research_rc=0
+        run_phase_group "research" "$task" "$research_extra" "$task_complexity" || _research_rc=$?
+        if [[ $_research_rc -eq 4 ]]; then return 4; fi
+        if [[ $_research_rc -ne 0 ]]; then mark_task_blocked "$task" "research phase failed to produce a valid result"; clear_task_progress; return 1; fi
         __completed_phases="${__completed_phases:+$__completed_phases }research"
         save_task_progress "$task" "$__completed_phases" "$__INVOCATION_COUNT"
 
@@ -3866,7 +4067,10 @@ process_task_isolated() {
             if (( plan_review_cycle > 1 )) && [[ -f ".claude/plan-review-prev.md" ]]; then
                 review_extra="$review_extra | REVISION CYCLE: Previous review findings are in .claude/plan-review-prev.md — focus on whether those issues were addressed. Previous details: $prev_review_details"
             fi
-            run_phase_group "review" "$task" "$review_extra" "$task_complexity" || { mark_task_blocked "$task" "review phase failed to produce a valid result"; clear_task_progress; return 1; }
+            local _review_rc=0
+            run_phase_group "review" "$task" "$review_extra" "$task_complexity" || _review_rc=$?
+            if [[ $_review_rc -eq 4 ]]; then return 4; fi
+            if [[ $_review_rc -ne 0 ]]; then mark_task_blocked "$task" "review phase failed to produce a valid result"; clear_task_progress; return 1; fi
 
             local verdict
             verdict=$(jq -r '.verdict' "$PHASE_RESULT_FILE")
@@ -3943,10 +4147,10 @@ process_task_isolated() {
             update_workflow_state "tdd-scaffold" "skipped"
         else
             local tdd_context="$__spec_context"
-            run_phase_group "tdd-scaffold" "$task" "$tdd_context" "$task_complexity" || {
-                mark_task_blocked "$task" "tdd-scaffold phase failed"
-                clear_task_progress; return 1
-            }
+            local _tdd_rc=0
+            run_phase_group "tdd-scaffold" "$task" "$tdd_context" "$task_complexity" || _tdd_rc=$?
+            if [[ $_tdd_rc -eq 4 ]]; then return 4; fi
+            if [[ $_tdd_rc -ne 0 ]]; then mark_task_blocked "$task" "tdd-scaffold phase failed"; clear_task_progress; return 1; fi
             local tdd_verdict
             tdd_verdict=$(jq -r '.verdict // "unknown"' "$PHASE_RESULT_FILE")
             case "$tdd_verdict" in
@@ -4003,11 +4207,15 @@ process_task_isolated() {
             local build_result=0
             __with_tdd_lock run_phase_group "build" "$task" "$build_context" "$task_complexity" || build_result=$?
 
-            if [[ $build_result -eq 2 ]]; then
+            if [[ $build_result -eq 4 ]]; then
+                return 4
+            elif [[ $build_result -eq 2 ]]; then
                 print_info "Build hit max-turns. Switching to chunked build."
                 local chunked_result=0
                 __with_tdd_lock run_chunked_build "$task" "$__spec_context" "$task_complexity" || chunked_result=$?
-                if [[ $chunked_result -ne 0 ]]; then
+                if [[ $chunked_result -eq 4 ]]; then
+                    return 4
+                elif [[ $chunked_result -ne 0 ]]; then
                     local block_reason="Chunked build failed"
                     [[ $chunked_result -eq 2 ]] && block_reason="Build step too large even for chunked execution"
                     mark_task_blocked "$task" "$block_reason"
@@ -4030,7 +4238,10 @@ process_task_isolated() {
                 update_workflow_state "codereview" "skipped"
                 cr_verdict="approved"
             else
-                run_phase_group "codereview" "$task" "${__spec_context}" "$task_complexity" || { mark_task_blocked "$task" "codereview phase failed to produce a valid result"; clear_task_progress; return 1; }
+                local _cr_rc=0
+                run_phase_group "codereview" "$task" "${__spec_context}" "$task_complexity" || _cr_rc=$?
+                if [[ $_cr_rc -eq 4 ]]; then return 4; fi
+                if [[ $_cr_rc -ne 0 ]]; then mark_task_blocked "$task" "codereview phase failed to produce a valid result"; clear_task_progress; return 1; fi
                 cr_verdict=$(jq -r '.verdict' "$PHASE_RESULT_FILE")
             fi
             case "$cr_verdict" in
@@ -4085,7 +4296,10 @@ process_task_isolated() {
         ((verify_attempt++))
 
         local verify_extra="${__spec_context}"
-        run_phase_group "verify" "$task" "$verify_extra" "$task_complexity" || { mark_task_blocked "$task" "verify phase failed to produce a valid result"; clear_task_progress; return 1; }
+        local _verify_rc=0
+        run_phase_group "verify" "$task" "$verify_extra" "$task_complexity" || _verify_rc=$?
+        if [[ $_verify_rc -eq 4 ]]; then return 4; fi
+        if [[ $_verify_rc -ne 0 ]]; then mark_task_blocked "$task" "verify phase failed to produce a valid result"; clear_task_progress; return 1; fi
 
         local verdict
         verdict=$(jq -r '.verdict' "$PHASE_RESULT_FILE")
@@ -4121,12 +4335,18 @@ process_task_isolated() {
                             "Verify blocked on '$failing': $failure_details" \
                             "Rebuilt with targeted fix for $failing issues" \
                             "Always run the full verify check before considering a build complete"
-                        run_phase_group "build" "$task" "$rebuild_context"$'\n\n'"$__lesson_instruction" "$task_complexity" || { mark_task_blocked "$task" "build phase failed during verify fix"; clear_task_progress; return 1; }
+                        local _rebuild_rc=0
+                        run_phase_group "build" "$task" "$rebuild_context"$'\n\n'"$__lesson_instruction" "$task_complexity" || _rebuild_rc=$?
+                        if [[ $_rebuild_rc -eq 4 ]]; then return 4; fi
+                        if [[ $_rebuild_rc -ne 0 ]]; then mark_task_blocked "$task" "build phase failed during verify fix"; clear_task_progress; return 1; fi
                         if [[ "$task_complexity" == "trivial" || "$task_complexity" == "simple" ]]; then
                             cr_verdict="approved"
                         else
                             run_optional_simplify "$task" "${__spec_context}"
-                            run_phase_group "codereview" "$task" "${__spec_context}" "$task_complexity" || { mark_task_blocked "$task" "codereview phase failed to produce a valid result"; clear_task_progress; return 1; }
+                            local _rebuild_cr_rc=0
+                            run_phase_group "codereview" "$task" "${__spec_context}" "$task_complexity" || _rebuild_cr_rc=$?
+                            if [[ $_rebuild_cr_rc -eq 4 ]]; then return 4; fi
+                            if [[ $_rebuild_cr_rc -ne 0 ]]; then mark_task_blocked "$task" "codereview phase failed to produce a valid result"; clear_task_progress; return 1; fi
                             cr_verdict=$(jq -r '.verdict' "$PHASE_RESULT_FILE")
                         fi
                         if [[ "$cr_verdict" == "needs_rebuild" ]]; then
@@ -4547,6 +4767,15 @@ main() {
             __WF_TASK_NUM="$task_num"
             local task_result=0
             process_task_isolated "$task" "$task_num" "$total_tasks" "$task_complexity" "$plan_ref" || task_result=$?
+
+            if [[ $task_result -eq 4 ]]; then
+                # Rate/usage limit — pause and retry same task (it remains pending)
+                print_warning "API rate/usage limit hit. Task will be retried."
+                echo "Press Enter to retry now, or wait for the timeout (5 min auto-retry)..."
+                read -t 300 -r || true
+                ((task_num--))  # undo increment so task numbering stays correct on retry
+                continue
+            fi
 
             if [[ $task_result -eq 0 ]]; then
                 ((completed++))

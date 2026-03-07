@@ -1,57 +1,64 @@
 {
   "test_files": [
-    "buildcrew/tests/tdd/convergence_loop.bats"
+    "tests/tdd/rate_limit.bats"
   ],
   "stub_files": [
-    "buildcrew/lib/convergence.sh"
+    "lib/workflow.sh"
   ],
-  "test_dir": "buildcrew/tests/tdd",
-  "test_count": 21,
+  "test_dir": "tests/tdd",
+  "test_count": 15,
   "all_failing": true,
   "framework": "bats",
-  "run_command": "cd buildcrew && bats tests/tdd/convergence_loop.bats",
+  "run_command": "bats tests/tdd/rate_limit.bats",
   "ac_coverage": {
-    "AC-01": [
-      "AC-01: convergence_loop initializes iteration counter to 0",
-      "AC-01: convergence_loop increments iteration counter",
-      "AC-01: convergence_loop stops after 3 iterations"
+    "AC-01a": [
+      "AC-01a: _check_rate_limit_in_log detects 'rate limit reached' pattern"
     ],
-    "AC-02": [
-      "AC-02: convergence_check detects CONVERGED signal in response",
-      "AC-02: convergence_check rejects response without CONVERGED",
-      "AC-02: convergence_check case-sensitive for CONVERGED"
+    "AC-01b": [
+      "AC-01b: _check_rate_limit_in_log detects 'rate_limit_error' pattern"
     ],
-    "AC-03": [
-      "AC-03: convergence_handle_failure logs warning for missing output",
-      "AC-03: convergence_handle_failure records which iteration failed"
+    "AC-01c": [
+      "AC-01c: _check_rate_limit_in_log detects 'usage limit' pattern"
     ],
-    "AC-04": [
-      "AC-04: convergence_loop_finalize prepares state for Pass 3",
-      "AC-04: Pass 3 can read convergence findings"
+    "AC-01d": [
+      "AC-01d: _check_rate_limit_in_log detects 'rate.limit.exceeded' pattern"
     ],
-    "AC-05": [
-      "AC-05: convergence_is_revision_cycle returns true when plan-review-prev.md exists",
-      "AC-05: convergence_is_revision_cycle returns false when plan-review-prev.md missing",
-      "AC-05: convergence_get_prompt uses revision variant when in revision cycle",
-      "AC-05: convergence_get_prompt uses fresh variant when not in revision cycle"
+    "AC-01e": [
+      "AC-01e: _check_rate_limit_in_log rejects normal failures"
     ],
-    "AC-06": [
-      "AC-06: convergence_write_review_output creates plan-review.md",
-      "AC-06: plan-review.md includes verdict from synthesis"
+    "AC-01f": [
+      "AC-01f: _check_rate_limit_in_log returns 1 when log file empty"
     ],
-    "AC-07": [
-      "AC-07: convergence_map_verdict maps approved correctly",
-      "AC-07: convergence_map_verdict maps needs_revision correctly",
-      "AC-07: convergence_map_verdict maps rejected correctly"
+    "AC-01g": [
+      "AC-01g: _check_rate_limit_in_log respects byte offset"
     ],
-    "AC-08": [
-      "AC-08: workflow.sh can be sourced without modification"
+    "AC-02a": [
+      "AC-02a: _signal_rate_limit_pause creates sentinel file"
     ],
-    "AC-09": [
-      "AC-09: convergence loop integrates with review phase"
+    "AC-02b": [
+      "AC-02b: _check_rate_limit_pause detects sentinel file"
+    ],
+    "AC-02c": [
+      "AC-02c: _check_rate_limit_pause returns 1 when no sentinel"
+    ],
+    "AC-02d": [
+      "AC-02d: _clear_rate_limit_pause removes sentinel file"
+    ],
+    "AC-03a": [
+      "AC-03a: _batch_requeue_rate_limited_tasks resets task status to pending"
+    ],
+    "AC-03b": [
+      "AC-03b: _batch_requeue_rate_limited_tasks handles multiple rate-limited tasks"
+    ],
+    "AC-04a": [
+      "AC-04a: Helper rate limit functions are defined"
+    ],
+    "AC-04b": [
+      "AC-04b: Batch requeue function is defined and callable"
     ]
   },
   "checksums": {
-    "buildcrew/tests/tdd/convergence_loop.bats": "bafcc82101e3d16526b595a8c63efa68e5db694e77448ae68285c6bed347b551"
-  }
+    "tests/tdd/rate_limit.bats": "f7f08040fec64da61509851c711fccc4005a9935830b1b9b3f9d91101dd0c034"
+  },
+  "notes": "Acceptance criteria from plan: (1) _check_rate_limit_in_log detects rate limit patterns, rejects normal failures; (2) _signal_rate_limit_pause, _check_rate_limit_pause, _clear_rate_limit_pause sentinel file lifecycle; (3) _batch_requeue_rate_limited_tasks resets task status; (4) stream_processor.py emits 'Rate limit reached' for rate_limit_event and rate_limit_error (tested separately in tests/unit/stream_processor.bats)"
 }
