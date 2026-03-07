@@ -32,8 +32,6 @@ setup() {
     export RESUME_MODE=false
     export TARGET_TASK=""
     export SKIP_SPEC=false
-    export STRICT_MODE=true
-    export STRICT_EXPLICIT=false
     export FULL_PIPELINE=false
     export PLAN_MODE=false
     export NO_UAT=false
