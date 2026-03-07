@@ -40,6 +40,10 @@ If full research is needed, launch a Task sub-agent (general-purpose type).
 Prompt it with the research topics and template. It searches, fetches, and
 returns structured findings. Incorporate into research.md.
 
+### Step 5b: Precomputed Context
+
+Read `.claude/precompute/project-stack.md` and `.claude/precompute/codebase-structure.md` if they exist. These contain pre-detected project metadata (language, dependencies, source directories, directory tree, file statistics). Use this as starting context for the codebase exploration sub-agent — it can skip basic structure discovery and focus on patterns, architecture, and task-specific code paths.
+
 ### Step 6: Codebase Exploration (via Sub-Agent)
 
 Launch a Task sub-agent (Explore type). Prompt it with patterns to search for.
