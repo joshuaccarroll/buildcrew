@@ -148,7 +148,7 @@ AUTO_MODE=${AUTO_MODE:-true}
 MAX_PARALLEL=${MAX_PARALLEL:-5}
 TARGET_DIR=${TARGET_DIR:-}
 NO_UAT=${NO_UAT:-false}
-CLAUDE_MODEL=${CLAUDE_MODEL:-opus}
+CLAUDE_MODEL=${CLAUDE_MODEL:-auto}
 CLAUDE_EFFORT=${CLAUDE_EFFORT:-medium}
 __INVOCATION_COUNT=0
 __RESUME_PHASES=""
@@ -348,7 +348,7 @@ parse_args() {
                 echo "  --no-uat     Skip inline UAT after verify (with 'run')"
                 echo "  --batch      (deprecated) Batch mode is now the default"
                 echo "  --max-parallel N  Max concurrent tasks in parallel mode (default: 5)"
-                echo "  --model MODEL  Claude model to use (default: opus)"
+                echo "  --model MODEL  Claude model: auto (default, per-phase), opus, sonnet, haiku, or full model ID"
                 echo "  --effort LEVEL Effort level: low, medium, high (default: medium)"
                 echo "  --verbose    Show orchestrator decisions, phase verdicts, and invocation counts"
                 echo "  --debug      Alias for --verbose"
@@ -915,6 +915,8 @@ _batch_launch_task() {
         exec "$BUILDCREW_HOME/lib/workflow.sh" \
             --single --task-exact "$task" \
             --max-invocations "$MAX_INVOCATIONS" \
+            --model "$CLAUDE_MODEL" \
+            $( [[ -n "${CLAUDE_EFFORT:-}" ]] && echo "--effort $CLAUDE_EFFORT" ) \
             $( [[ "$SKIP_SPEC" == "true" ]] && echo "--skip-spec" ) \
             $( [[ "$FULL_PIPELINE" == "true" ]] && echo "--full-pipeline" ) \
             $( [[ "$VERBOSE" == "true" ]] && echo "--verbose" ) \
@@ -2929,6 +2931,7 @@ __run_phase_group_impl() {
     local phase="$1"
     local task="$2"
     local extra_context="${3:-}"
+    local task_complexity="${4:-standard}"
     local max_turns
     max_turns=$(get_phase_max_turns "$phase")
 
@@ -3026,9 +3029,12 @@ Use Task subagents for: reading 3+ files, research, code review/analysis, any in
         allowed_tools_flag="--allowedTools $allowed_tools"
     fi
 
+    local resolved_model
+    resolved_model=$(resolve_phase_model "$phase" "$task_complexity")
     local model_effort_flags=""
-    [[ -n "${CLAUDE_MODEL:-}" ]] && model_effort_flags+=" --model $CLAUDE_MODEL"
+    model_effort_flags+=" --model $resolved_model"
     [[ -n "${CLAUDE_EFFORT:-}" ]] && model_effort_flags+=" --effort $CLAUDE_EFFORT"
+    print_debug "Phase $phase: model=$resolved_model effort=${CLAUDE_EFFORT:-medium} (complexity=${task_complexity})"
 
     # Save terminal state — claude may leave terminal in raw/no-echo mode when
     # killed by SIGINT (from the file monitor), breaking subsequent read prompts.
@@ -3180,11 +3186,12 @@ run_phase_group() {
 # ─────────────────────────────────────────────────────────────────────────────────
 
 # Execute build phase one plan step at a time.
-# Args: $1=task $2=spec_context (optional)
+# Args: $1=task $2=spec_context (optional) $3=task_complexity (optional)
 # Returns: 0=all steps complete, 1=step failed, 2=single step hit max-turns
 run_chunked_build() {
     local task="$1"
     local spec_context="${2:-}"
+    local task_complexity="${3:-standard}"
 
     local step_count
     step_count=$(parse_plan_steps) || {
@@ -3215,7 +3222,7 @@ run_chunked_build() {
         fi
 
         local chunk_result=0
-        run_phase_group "build" "$task" "$chunk_context" || chunk_result=$?
+        run_phase_group "build" "$task" "$chunk_context" "$task_complexity" || chunk_result=$?
 
         if [[ $chunk_result -eq 2 ]]; then
             print_error "Single build step $step_num hit max-turns -- step is too large"
@@ -3287,18 +3294,18 @@ _uat_rebuild_pipeline() {
     local task_complexity="$2"
     local rebuild_context="$3"
 
-    run_phase_group "build" "$task" "$rebuild_context" || return 1
+    run_phase_group "build" "$task" "$rebuild_context" "$task_complexity" || return 1
     if [[ "$task_complexity" != "trivial" && "$task_complexity" != "simple" ]]; then
         run_optional_simplify "$task" ""
-        run_phase_group "codereview" "$task" "" || return 1
+        run_phase_group "codereview" "$task" "" "$task_complexity" || return 1
         local cr_verdict
         cr_verdict=$(jq -r '.verdict' "$PHASE_RESULT_FILE")
         if [[ "$cr_verdict" == "needs_rebuild" ]]; then
             print_warning "Code review rejected UAT rebuild — running another build pass"
-            run_phase_group "build" "$task" "$rebuild_context" || return 1
+            run_phase_group "build" "$task" "$rebuild_context" "$task_complexity" || return 1
         fi
     fi
-    run_phase_group "verify" "$task" "" || return 1
+    run_phase_group "verify" "$task" "" "$task_complexity" || return 1
     local verify_verdict
     verify_verdict=$(jq -r '.verdict' "$PHASE_RESULT_FILE")
     if [[ "$verify_verdict" != "complete" ]]; then
@@ -3674,7 +3681,7 @@ process_task_isolated() {
         print_info "Skipping phase: spec (complexity: $task_complexity)"
         update_workflow_state "spec" "skipped"
     elif [[ "$__run_spec" == "true" ]]; then
-        run_phase_group "spec" "$task" "${__replan_context:+Re-planning context: $__replan_context}${plan_context}" || { mark_task_blocked "$task" "spec phase failed to produce a valid result"; clear_task_progress; return 1; }
+        run_phase_group "spec" "$task" "${__replan_context:+Re-planning context: $__replan_context}${plan_context}" "$task_complexity" || { mark_task_blocked "$task" "spec phase failed to produce a valid result"; clear_task_progress; return 1; }
 
         local spec_verdict
         spec_verdict=$(jq -r '.verdict // "complete"' "$PHASE_RESULT_FILE")
@@ -3701,7 +3708,7 @@ process_task_isolated() {
             print_warning "Spec has only $ac_count acceptance criteria (minimum 2). Re-running spec phase."
             run_phase_group "spec" "$task" \
                 "RETRY: Previous spec had only $ac_count acceptance criteria. Minimum is 2 concrete, testable acceptance criteria. Read .claude/spec.md and add more specific ACs.${plan_context}" \
-                || { mark_task_blocked "$task" "spec phase failed to produce a valid result on AC retry"; clear_task_progress; return 1; }
+                "$task_complexity" || { mark_task_blocked "$task" "spec phase failed to produce a valid result on AC retry"; clear_task_progress; return 1; }
             # Re-validate
             ac_count=$(grep -c '^- \[ \] AC-' ".claude/spec.md" 2>/dev/null) || ac_count=0
             if (( ac_count < 2 )); then
@@ -3760,7 +3767,7 @@ process_task_isolated() {
         if [[ "$task_complexity" == "standard" ]]; then
             research_extra="${research_extra:+$research_extra | }TDD MODE: Tests will be written BEFORE implementation. Your plan MUST include a section documenting public interface contracts (function signatures, CLI commands, API endpoints) with enough detail that tests can be written against them before any code exists. Mark any areas that cannot be tested before implementation (visual, perf) as TDD-exempt."
         fi
-        run_phase_group "research" "$task" "$research_extra" || { mark_task_blocked "$task" "research phase failed to produce a valid result"; clear_task_progress; return 1; }
+        run_phase_group "research" "$task" "$research_extra" "$task_complexity" || { mark_task_blocked "$task" "research phase failed to produce a valid result"; clear_task_progress; return 1; }
         __completed_phases="${__completed_phases:+$__completed_phases }research"
         save_task_progress "$task" "$__completed_phases" "$__INVOCATION_COUNT"
 
@@ -3814,7 +3821,7 @@ process_task_isolated() {
             if (( plan_review_cycle > 1 )) && [[ -f ".claude/plan-review-prev.md" ]]; then
                 review_extra="$review_extra | REVISION CYCLE: Previous review findings are in .claude/plan-review-prev.md — focus on whether those issues were addressed. Previous details: $prev_review_details"
             fi
-            run_phase_group "review" "$task" "$review_extra" || { mark_task_blocked "$task" "review phase failed to produce a valid result"; clear_task_progress; return 1; }
+            run_phase_group "review" "$task" "$review_extra" "$task_complexity" || { mark_task_blocked "$task" "review phase failed to produce a valid result"; clear_task_progress; return 1; }
 
             local verdict
             verdict=$(jq -r '.verdict' "$PHASE_RESULT_FILE")
@@ -3890,7 +3897,7 @@ process_task_isolated() {
             update_workflow_state "tdd-scaffold" "skipped"
         else
             local tdd_context="$__spec_context"
-            run_phase_group "tdd-scaffold" "$task" "$tdd_context" || {
+            run_phase_group "tdd-scaffold" "$task" "$tdd_context" "$task_complexity" || {
                 mark_task_blocked "$task" "tdd-scaffold phase failed"
                 clear_task_progress; return 1
             }
@@ -3948,12 +3955,12 @@ process_task_isolated() {
             __unlock_tdd_files
 
             local build_result=0
-            __with_tdd_lock run_phase_group "build" "$task" "$build_context" || build_result=$?
+            __with_tdd_lock run_phase_group "build" "$task" "$build_context" "$task_complexity" || build_result=$?
 
             if [[ $build_result -eq 2 ]]; then
                 print_info "Build hit max-turns. Switching to chunked build."
                 local chunked_result=0
-                __with_tdd_lock run_chunked_build "$task" "$__spec_context" || chunked_result=$?
+                __with_tdd_lock run_chunked_build "$task" "$__spec_context" "$task_complexity" || chunked_result=$?
                 if [[ $chunked_result -ne 0 ]]; then
                     local block_reason="Chunked build failed"
                     [[ $chunked_result -eq 2 ]] && block_reason="Build step too large even for chunked execution"
@@ -3977,7 +3984,7 @@ process_task_isolated() {
                 update_workflow_state "codereview" "skipped"
                 cr_verdict="approved"
             else
-                run_phase_group "codereview" "$task" "${__spec_context}" || { mark_task_blocked "$task" "codereview phase failed to produce a valid result"; clear_task_progress; return 1; }
+                run_phase_group "codereview" "$task" "${__spec_context}" "$task_complexity" || { mark_task_blocked "$task" "codereview phase failed to produce a valid result"; clear_task_progress; return 1; }
                 cr_verdict=$(jq -r '.verdict' "$PHASE_RESULT_FILE")
             fi
             case "$cr_verdict" in
@@ -4032,7 +4039,7 @@ process_task_isolated() {
         ((verify_attempt++))
 
         local verify_extra="${__spec_context}"
-        run_phase_group "verify" "$task" "$verify_extra" || { mark_task_blocked "$task" "verify phase failed to produce a valid result"; clear_task_progress; return 1; }
+        run_phase_group "verify" "$task" "$verify_extra" "$task_complexity" || { mark_task_blocked "$task" "verify phase failed to produce a valid result"; clear_task_progress; return 1; }
 
         local verdict
         verdict=$(jq -r '.verdict' "$PHASE_RESULT_FILE")
@@ -4068,12 +4075,12 @@ process_task_isolated() {
                             "Verify blocked on '$failing': $failure_details" \
                             "Rebuilt with targeted fix for $failing issues" \
                             "Always run the full verify check before considering a build complete"
-                        run_phase_group "build" "$task" "$rebuild_context"$'\n\n'"$__lesson_instruction" || { mark_task_blocked "$task" "build phase failed during verify fix"; clear_task_progress; return 1; }
+                        run_phase_group "build" "$task" "$rebuild_context"$'\n\n'"$__lesson_instruction" "$task_complexity" || { mark_task_blocked "$task" "build phase failed during verify fix"; clear_task_progress; return 1; }
                         if [[ "$task_complexity" == "trivial" || "$task_complexity" == "simple" ]]; then
                             cr_verdict="approved"
                         else
                             run_optional_simplify "$task" "${__spec_context}"
-                            run_phase_group "codereview" "$task" "${__spec_context}" || { mark_task_blocked "$task" "codereview phase failed to produce a valid result"; clear_task_progress; return 1; }
+                            run_phase_group "codereview" "$task" "${__spec_context}" "$task_complexity" || { mark_task_blocked "$task" "codereview phase failed to produce a valid result"; clear_task_progress; return 1; }
                             cr_verdict=$(jq -r '.verdict' "$PHASE_RESULT_FILE")
                         fi
                         if [[ "$cr_verdict" == "needs_rebuild" ]]; then

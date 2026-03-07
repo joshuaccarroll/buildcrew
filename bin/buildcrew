@@ -81,7 +81,7 @@ print_help() {
     echo "    --sequential  Run tasks one at a time (opt out of parallel batch mode, with 'run')"
     echo "    --batch       (deprecated) Batch mode is now the default (with 'run')"
     echo "    --max-parallel N  Max concurrent tasks in parallel mode (default: 5, with 'run')"
-    echo "    --model M     Claude model alias or full name (default: opus, with 'run')"
+    echo "    --model M     Claude model: auto (default, per-phase), opus, sonnet, haiku, or full model ID (with 'run')"
     echo "    --effort L    Effort level: low, medium, high (default: medium, with 'run')"
     echo "    --verbose     Show orchestrator decisions, phase verdicts, and invocation counts"
     echo "    --debug       Alias for --verbose"

@@ -709,8 +709,10 @@ _uat_run_agent_phase() {
         prompt="$prompt"$'\n\nProject Context:\n'"$project_context"
     fi
 
+    local resolved_model
+    resolved_model=$(resolve_phase_model "$phase_name")
     local model_effort_flags=""
-    [[ -n "${CLAUDE_MODEL:-}" ]] && model_effort_flags+=" --model $CLAUDE_MODEL"
+    model_effort_flags+=" --model $resolved_model"
     [[ -n "${CLAUDE_EFFORT:-}" ]] && model_effort_flags+=" --effort $CLAUDE_EFFORT"
 
     # Save terminal state

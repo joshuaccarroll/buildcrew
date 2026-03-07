@@ -72,9 +72,9 @@ teardown() {
 # Defaults
 # ─────────────────────────────────────────────────────────────────────────────
 
-@test "parse_args: CLAUDE_MODEL defaults to opus" {
+@test "parse_args: CLAUDE_MODEL defaults to auto" {
     parse_args
-    [ "$CLAUDE_MODEL" = "opus" ]
+    [ "$CLAUDE_MODEL" = "auto" ]
 }
 
 @test "parse_args: CLAUDE_EFFORT defaults to medium" {
@@ -156,4 +156,62 @@ teardown() {
     CLAUDE_EFFORT=high
     load_buildcrew_config
     [ "$CLAUDE_EFFORT" = "high" ]
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# resolve_phase_model
+# ─────────────────────────────────────────────────────────────────────────────
+
+@test "resolve_phase_model: review -> opus" {
+    CLAUDE_MODEL=auto
+    result=$(resolve_phase_model "review")
+    [ "$result" = "opus" ]
+}
+
+@test "resolve_phase_model: build -> sonnet" {
+    CLAUDE_MODEL=auto
+    result=$(resolve_phase_model "build")
+    [ "$result" = "sonnet" ]
+}
+
+@test "resolve_phase_model: simplify -> haiku" {
+    CLAUDE_MODEL=auto
+    result=$(resolve_phase_model "simplify")
+    [ "$result" = "haiku" ]
+}
+
+@test "resolve_phase_model: unknown phase -> sonnet (fallback)" {
+    CLAUDE_MODEL=auto
+    result=$(resolve_phase_model "unknown-phase")
+    [ "$result" = "sonnet" ]
+}
+
+@test "resolve_phase_model: review + simple -> sonnet (opus downgraded)" {
+    CLAUDE_MODEL=auto
+    result=$(resolve_phase_model "review" "simple")
+    [ "$result" = "sonnet" ]
+}
+
+@test "resolve_phase_model: build + trivial -> haiku (sonnet downgraded)" {
+    CLAUDE_MODEL=auto
+    result=$(resolve_phase_model "build" "trivial")
+    [ "$result" = "haiku" ]
+}
+
+@test "resolve_phase_model: simplify + trivial -> haiku (stays haiku)" {
+    CLAUDE_MODEL=auto
+    result=$(resolve_phase_model "simplify" "trivial")
+    [ "$result" = "haiku" ]
+}
+
+@test "resolve_phase_model: explicit model overrides phase selection" {
+    CLAUDE_MODEL=opus
+    result=$(resolve_phase_model "build")
+    [ "$result" = "opus" ]
+}
+
+@test "resolve_phase_model: explicit model ignores complexity downgrade" {
+    CLAUDE_MODEL=opus
+    result=$(resolve_phase_model "build" "trivial")
+    [ "$result" = "opus" ]
 }

@@ -77,6 +77,49 @@ error() {
 }
 
 # ─────────────────────────────────────────────────────────────────────────────────
+# Model selection
+# ─────────────────────────────────────────────────────────────────────────────────
+
+# resolve_phase_model <phase> [complexity]
+# Returns the appropriate model for a phase, applying complexity downgrade when
+# CLAUDE_MODEL is "auto". When CLAUDE_MODEL is a specific model, returns it unchanged.
+resolve_phase_model() {
+    local phase="$1"
+    local complexity="${2:-standard}"
+
+    # Explicit model override — pass through unchanged
+    if [[ "${CLAUDE_MODEL:-auto}" != "auto" ]]; then
+        echo "$CLAUDE_MODEL"
+        return
+    fi
+
+    # Phase -> base model mapping
+    local base
+    case "$phase" in
+        review|codereview|verify) base="opus" ;;
+        simplify|tdd-scaffold|uat-stories|uat-scenarios) base="haiku" ;;
+        *) base="sonnet" ;;
+    esac
+
+    # Complexity downgrade
+    case "$complexity" in
+        simple)
+            case "$base" in
+                opus) base="sonnet" ;;
+            esac
+            ;;
+        trivial)
+            case "$base" in
+                opus) base="sonnet" ;;
+                sonnet) base="haiku" ;;
+            esac
+            ;;
+    esac
+
+    echo "$base"
+}
+
+# ─────────────────────────────────────────────────────────────────────────────────
 # Activity logging
 # ─────────────────────────────────────────────────────────────────────────────────
 
