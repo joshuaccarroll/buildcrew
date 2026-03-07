@@ -31,13 +31,83 @@ BuildCrew has two modes:
 
 ---
 
-## How It Works
+## How It Works <!-- mermaid -->
 
 1. **Install once** to `~/.buildcrew/` — persona skill files, default rules, and the workflow orchestrator
 2. **Link any project** with `buildcrew init` — creates `.buildcrew/` (your customizations), symlinks skills into `.claude/`, writes `.claude/settings.json` for autonomous operation
 3. **Rules merge** in order: global defaults → persona rules → your project rules (`.buildcrew/rules/project-rules.md`) → per-persona project rules (`.buildcrew/rules/<slug>-rules.md`)
 4. **Communication is file-based** — orchestrator and Claude invocations share state through files in `.buildcrew/` and `.claude/`. Each phase writes a `phase-result.json` verdict that drives the next decision
 5. **Phases are isolated** — each phase is a fresh `claude -p` invocation with only the context it needs, preventing context bleed between roles
+
+_Diagram: complete `buildcrew run` execution path_
+
+```mermaid
+flowchart TD
+    START([buildcrew run]) --> PENDING{Pending tasks?}
+    PENDING -- No --> DISCOVERY([Discovery mode\nPM planning])
+    PENDING -- Yes --> PRECOMPUTE[Precompute]
+
+    PRECOMPUTE -- trivial --> build_t[build (Haiku)]
+    PRECOMPUTE -- simple --> research_s[research (Sonnet)]
+    PRECOMPUTE -- standard --> spec[spec (Sonnet)]
+
+    subgraph Trivial path
+        build_t --> verify_t[verify (Sonnet)]
+        verify_t -- blocked --> build_t
+        verify_t -- "blocked ×2" --> REPLAN_T{Replan\navailable?}
+    end
+    verify_t -- complete --> TASK_DONE{More tasks?}
+    REPLAN_T -- No --> BLOCKED_T([Task blocked])
+    REPLAN_T -- Yes --> research_s
+
+    subgraph Simple path
+        research_s --> build_s[build (Sonnet)]
+        build_s -- max-turns --> chunked_s[chunked build]
+        chunked_s -- complete --> verify_s[verify (Sonnet)]
+        chunked_s -- fail --> BLOCKED_SC([Task blocked])
+        build_s --> verify_s[verify (Sonnet)]
+        verify_s -- blocked --> build_s
+        verify_s -- "blocked ×2" --> REPLAN_SV{Replan\navailable?}
+    end
+    verify_s -- complete --> TASK_DONE
+    REPLAN_SV -- No --> BLOCKED_SV([Task blocked])
+    REPLAN_SV -- Yes --> research_s
+
+    subgraph Standard path
+        spec --> research[research (Sonnet)]
+        research --> review[review (Opus)]
+        review -- "needs_revision (1st - retry)" --> review
+        review -- "needs_revision (2nd consecutive)" --> REPLAN_R{Replan\navailable?}
+        review -- rejected --> BLOCKED_REJ([Task blocked])
+        REPLAN_R -- Yes --> research
+        REPLAN_R -- No --> BLOCKED_R([Task blocked])
+        review -- approved --> tdd[tdd-scaffold (Haiku)]
+        tdd --> build[build (Sonnet)]
+        build -- max-turns --> chunked[chunked build]
+        chunked -- complete --> simplify[simplify (Haiku)]
+        chunked -- fail --> BLOCKED_C([Task blocked])
+        build --> simplify
+        simplify --> codereview[codereview (Opus)]
+        codereview -- needs_rebuild --> build
+        codereview -- "needs_rebuild (2nd consecutive)" --> REPLAN_CR{Replan\navailable?}
+        codereview -- "needs_rebuild (during verify rebuild)" --> BLOCKED_VCR([Task blocked])
+        REPLAN_CR -- Yes --> research
+        REPLAN_CR -- No --> BLOCKED_CR([Task blocked])
+        codereview -- approved --> verify[verify (Opus)]
+        verify -- blocked --> build
+        verify -- "blocked ×2" --> REPLAN_V{Replan\navailable?}
+        REPLAN_V -- Yes --> research
+        REPLAN_V -- No --> BLOCKED_V([Task blocked])
+    end
+    verify -- complete --> TASK_DONE
+
+    TASK_DONE -- Yes --> PRECOMPUTE
+    TASK_DONE -- No --> UAT[UAT]
+    UAT -- pass --> DONE([Done])
+    UAT -- fail --> BUILD_FIX[build fix / retry]
+    BUILD_FIX --> UAT
+    UAT -- "fail, retries exhausted (up to 5x)\nnon-fatal" --> DONE_NF([Done])
+```
 
 ---
 
