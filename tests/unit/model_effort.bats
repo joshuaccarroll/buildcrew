@@ -174,12 +174,6 @@ teardown() {
     [ "$result" = "sonnet" ]
 }
 
-@test "resolve_phase_model: simplify -> haiku" {
-    CLAUDE_MODEL=auto
-    result=$(resolve_phase_model "simplify")
-    [ "$result" = "haiku" ]
-}
-
 @test "resolve_phase_model: unknown phase -> sonnet (fallback)" {
     CLAUDE_MODEL=auto
     result=$(resolve_phase_model "unknown-phase")
@@ -195,12 +189,6 @@ teardown() {
 @test "resolve_phase_model: build + trivial -> haiku (sonnet downgraded)" {
     CLAUDE_MODEL=auto
     result=$(resolve_phase_model "build" "trivial")
-    [ "$result" = "haiku" ]
-}
-
-@test "resolve_phase_model: simplify + trivial -> haiku (stays haiku)" {
-    CLAUDE_MODEL=auto
-    result=$(resolve_phase_model "simplify" "trivial")
     [ "$result" = "haiku" ]
 }
 

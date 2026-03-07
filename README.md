@@ -113,7 +113,7 @@ buildcrew reset              # Clear blocked tasks and clean up artifacts
 | `--max-parallel N` | Max concurrent tasks in parallel mode (default: 5) |
 | `--no-uat` | Skip UAT after backlog completion |
 | `--max-invocations N` | Max Claude invocations per run (default: 15) |
-| `--model M` | Claude model: `auto` (default, per-phase), `opus`, `sonnet`, `haiku`, or full model ID. In `auto` mode, each phase uses the optimal model for its cognitive requirements (e.g., opus for review/verify, sonnet for build/research, haiku for simplify/tdd-scaffold). Complexity downgrades apply automatically. |
+| `--model M` | Claude model: `auto` (default, per-phase), `opus`, `sonnet`, `haiku`, or full model ID. In `auto` mode, each phase uses the optimal model for its cognitive requirements (e.g., opus for review/verify, sonnet for build/research, haiku for tdd-scaffold). Complexity downgrades apply automatically. |
 | `--effort L` | Effort level: `low`, `medium`, `high` (default: medium) |
 | `--verbose` / `--debug` | Show orchestrator decisions, phase verdicts, invocation counts |
 

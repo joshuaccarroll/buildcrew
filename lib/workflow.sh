@@ -13,7 +13,6 @@
 #   plan-review (3-pass)
 #   tdd-scaffold (standard complexity)
 #   build
-#   simplify (non-blocking — review and apply targeted simplifications)
 #   codereview (adversarial PE review — independent phase)
 #   verify + security audit + commit + signal
 #
@@ -164,7 +163,6 @@ get_phase_max_turns() {
         review)     echo 50 ;;
         tdd-scaffold) echo 40 ;;
         build)      echo 50 ;;
-        simplify)   echo 30 ;;
         codereview) echo 40 ;;
         verify)     echo 70 ;;
         *)          echo 30 ;;
@@ -394,7 +392,6 @@ __inject_phase_result_protocol() {
         review)        verdicts="approved, needs_revision, rejected" ;;
         tdd-scaffold)  verdicts="complete, blocked" ;;
         build)         verdicts="complete" ;;
-        simplify)      verdicts="complete" ;;
         codereview)    verdicts="approved, needs_rebuild" ;;
         verify)        verdicts="complete, blocked"
                        extra=$'\nFor blocked, include "failing_check": "tests|quality|security|architecture|acceptance".' ;;
@@ -539,24 +536,6 @@ __trigger_replan() {
     __cleanup_tdd_artifacts
     clear_task_progress
     update_workflow_state "replanning" "running"
-}
-
-# Run the simplify phase if the skill is installed. Always non-blocking (|| true).
-# Must only be called from within complexity-gated else branches (i.e. not for trivial/simple tasks).
-# Optional base_ref parameter (default HEAD) for computing diff size in batch mode.
-run_optional_simplify() {
-    local task="$1" context="$2" base_ref="${3:-HEAD}"
-    [[ -d ".claude/skills/buildcrew-simplify" ]] || return 0
-
-    local diff_lines=0
-    diff_lines=$(git diff --numstat "$base_ref" 2>/dev/null \
-        | awk '{s+=$1+$2}END{print s+0}') || diff_lines=0
-    if (( diff_lines < 50 )); then
-        print_info "Skipping phase: simplify ($diff_lines lines changed, threshold: 50)"
-        return 0
-    fi
-
-    run_phase_group "simplify" "$task" "$context" || true
 }
 
 print_task_start() {
@@ -1226,20 +1205,13 @@ _batch_assemble_combined_context() {
     log_msg "Assembled batch combined context: $context_file"
 }
 
-# Run post-build phases (simplify + verify) on merged code.
+# Run post-build phases (verify) on merged code.
 _batch_run_post_build() {
     local merge_branch="$1"
     local base_branch="$2"
     local task_summary="Batch verification: merged tasks on $merge_branch"
 
     cd "$__BATCH_CWD" || return 1
-
-    # Simplify (gated on >50 lines; pass base_branch for committed diff)
-    if [[ "$COMPLEXITY_AWARE" == "true" ]]; then
-        run_optional_simplify "$task_summary" \
-            "Batch mode: reviewing combined changes. See .claude/batch-combined-context.md" \
-            "$base_branch"
-    fi
 
     # Merged verify (includes AC verification)
     run_phase_group "verify" "$task_summary" \
@@ -3044,7 +3016,7 @@ Use Task subagents for: reading 3+ files, research, code review/analysis, any in
 
     # Inject concision directives for phases where verbose output is wasteful
     case "$phase" in
-        research|simplify|tdd-scaffold)
+        research|tdd-scaffold)
             prompt="$prompt"$'\n\n'"Be extremely concise. Sacrifice grammar for concision. No preamble, no summaries of what you will do — execute directly."
             ;;
         review|codereview)
@@ -3315,7 +3287,7 @@ _bridge_manifest_to_uat() {
     __UAT_README_HASH="$__MANIFEST_README_HASH"
 }
 
-# Run the rebuild pipeline (build -> simplify -> codereview -> verify)
+# Run the rebuild pipeline (build -> codereview -> verify)
 # during an inline UAT retry. Returns non-zero on failure.
 # Args: $1=task $2=task_complexity $3=rebuild_context
 _uat_rebuild_pipeline() {
@@ -3325,7 +3297,6 @@ _uat_rebuild_pipeline() {
 
     run_phase_group "build" "$task" "$rebuild_context" "$task_complexity" || return 1
     if [[ "$task_complexity" != "trivial" && "$task_complexity" != "simple" ]]; then
-        run_optional_simplify "$task" ""
         run_phase_group "codereview" "$task" "" "$task_complexity" || return 1
         local cr_verdict
         cr_verdict=$(jq -r '.verdict' "$PHASE_RESULT_FILE")
@@ -4018,11 +3989,6 @@ process_task_isolated() {
                 clear_task_progress; return 1
             fi
 
-            # --- simplify (non-blocking) ---
-            if [[ "$task_complexity" != "trivial" && "$task_complexity" != "simple" ]]; then
-                run_optional_simplify "$task" "${__spec_context}"
-            fi
-
             # --- code review (independent phase) ---
             local cr_verdict
             if [[ "$task_complexity" == "trivial" || "$task_complexity" == "simple" ]]; then
@@ -4125,7 +4091,6 @@ process_task_isolated() {
                         if [[ "$task_complexity" == "trivial" || "$task_complexity" == "simple" ]]; then
                             cr_verdict="approved"
                         else
-                            run_optional_simplify "$task" "${__spec_context}"
                             run_phase_group "codereview" "$task" "${__spec_context}" "$task_complexity" || { mark_task_blocked "$task" "codereview phase failed to produce a valid result"; clear_task_progress; return 1; }
                             cr_verdict=$(jq -r '.verdict' "$PHASE_RESULT_FILE")
                         fi
@@ -4371,7 +4336,6 @@ main() {
     else
         local _phase_count=5
         [[ "$SKIP_SPEC" != "true" ]] && [[ -d ".claude/skills/buildcrew-spec" ]] && _phase_count=$((_phase_count + 1))
-        [[ -d ".claude/skills/buildcrew-simplify" ]] && _phase_count=$((_phase_count + 1))
         [[ -d ".claude/skills/buildcrew-tdd-scaffold" ]] && _phase_count=$((_phase_count + 1))
         print_info "Mode: Phase-isolated ($_phase_count invocations per task)"
     fi
@@ -4515,9 +4479,6 @@ main() {
                         fi
                         if [[ -d ".claude/skills/buildcrew-tdd-scaffold" ]]; then
                             phase_list="${phase_list/review build/review tdd-scaffold build}"
-                        fi
-                        if [[ -d ".claude/skills/buildcrew-simplify" ]]; then
-                            phase_list="${phase_list/build codereview/build simplify codereview}"
                         fi
                         ;;
                 esac

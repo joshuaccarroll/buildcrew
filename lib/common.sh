@@ -97,7 +97,7 @@ resolve_phase_model() {
     local base
     case "$phase" in
         review|codereview|verify) base="opus" ;;
-        simplify|tdd-scaffold|uat-stories|uat-scenarios) base="haiku" ;;
+        tdd-scaffold|uat-stories|uat-scenarios) base="haiku" ;;
         *) base="sonnet" ;;
     esac
 
@@ -270,7 +270,6 @@ load_phase_lessons() {
         research) pattern="research" ;;
         review)   pattern="review" ;;
         build)    pattern="build" ;;
-        simplify) pattern="simplify" ;;
         codereview) pattern="codereview|code.review" ;;
         verify)   pattern="verify" ;;
         spec)     pattern="spec" ;;
