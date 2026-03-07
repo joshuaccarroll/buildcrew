@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# Unit tests for inline UAT (--no-uat flag, run_inline_uat function)
+# Unit tests for UAT (--no-uat flag, run_inline_uat function, post-completion triggers)
 
 load '../setup.bash'
 
@@ -203,18 +203,50 @@ VEOF
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Inline UAT block appears before mark_task_complete
+# UAT is NOT in process_task_isolated (removed inline UAT)
 # ─────────────────────────────────────────────────────────────────────────────
 
-@test "process_task_isolated: inline UAT block exists before mark_task_complete" {
-    # Find the line numbers of the inline UAT block and mark_task_complete
-    local uat_line mark_line
-    uat_line=$(grep -n 'run_inline_uat' "$BUILDCREW_ROOT/lib/workflow.sh" | grep -v '^[0-9]*:run_inline_uat()' | grep -v '^[0-9]*:#' | head -1 | cut -d: -f1)
-    mark_line=$(grep -n 'mark_task_complete "$task"' "$BUILDCREW_ROOT/lib/workflow.sh" | head -1 | cut -d: -f1)
-    # inline UAT call must come before mark_task_complete
+@test "process_task_isolated: does NOT contain inline UAT block" {
+    # The inline UAT block (delimited by "── Inline UAT ──" / "── End Inline UAT ──") has been removed
+    run grep -n '── Inline UAT ──' "$BUILDCREW_ROOT/lib/workflow.sh"
+    [ "$status" -ne 0 ]
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Post-completion UAT trigger exists in main()
+# ─────────────────────────────────────────────────────────────────────────────
+
+@test "main: post-completion UAT trigger exists after 'All backlog tasks processed'" {
+    local success_line uat_line
+    success_line=$(grep -n 'All backlog tasks processed' "$BUILDCREW_ROOT/lib/workflow.sh" | head -1 | cut -d: -f1)
+    # Find the sequential post-completion UAT (in main(), not _batch_post_completion)
+    uat_line=$(grep -n '# Post-completion UAT$' "$BUILDCREW_ROOT/lib/workflow.sh" | tail -1 | cut -d: -f1)
+    [ -n "$success_line" ]
     [ -n "$uat_line" ]
-    [ -n "$mark_line" ]
-    [ "$uat_line" -lt "$mark_line" ]
+    [ "$uat_line" -gt "$success_line" ]
+}
+
+@test "main: post-completion UAT is guarded by NO_UAT and failed and README and SINGLE_TASK" {
+    run grep 'NO_UAT.*failed.*README.*SINGLE_TASK' "$BUILDCREW_ROOT/lib/workflow.sh"
+    [ "$status" -eq 0 ]
+}
+
+@test "main: post-completion UAT skips when failed > 0 with info message" {
+    run grep 'Skipping UAT.*task(s) failed' "$BUILDCREW_ROOT/lib/workflow.sh"
+    [ "$status" -eq 0 ]
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Parallel post-completion UAT trigger in _batch_post_completion
+# ─────────────────────────────────────────────────────────────────────────────
+
+@test "_batch_post_completion: UAT trigger exists after post-build verification" {
+    local post_build_line uat_line
+    post_build_line=$(grep -n 'Post-build verification passed' "$BUILDCREW_ROOT/lib/workflow.sh" | head -1 | cut -d: -f1)
+    uat_line=$(grep -n 'Post-completion UAT on merged code' "$BUILDCREW_ROOT/lib/workflow.sh" | head -1 | cut -d: -f1)
+    [ -n "$post_build_line" ]
+    [ -n "$uat_line" ]
+    [ "$uat_line" -gt "$post_build_line" ]
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -294,17 +326,27 @@ VEOF
     [ "$before_dir" = "$after_dir" ]
 }
 
-@test "run_inline_uat: skips when README.md not found (via process_task_isolated gating)" {
-    # The README check is in process_task_isolated, not run_inline_uat itself.
-    # Verify the gating logic: when no README.md exists, run_inline_uat is NOT called.
-    rm -f README.md
-    # The code path in process_task_isolated:
-    #   if [[ -f "README.md" ]]; then ... run_inline_uat ... else print_info "No README.md found" fi
-    # Verify this structural property
-    local gate_line
-    gate_line=$(grep -n 'if \[\[ -f "README.md" \]\]' "$BUILDCREW_ROOT/lib/workflow.sh" | head -1)
-    [ -n "$gate_line" ]
-    local skip_line
-    skip_line=$(grep -n 'No README.md found.*skipping inline UAT' "$BUILDCREW_ROOT/lib/workflow.sh" | head -1)
-    [ -n "$skip_line" ]
+# ─────────────────────────────────────────────────────────────────────────────
+# process_task_isolated no longer returns exit code 2
+# ─────────────────────────────────────────────────────────────────────────────
+
+@test "main task loop: no task_result -eq 2 handling" {
+    # With inline UAT removed, process_task_isolated only returns 0 or 1
+    run grep 'task_result -eq 2' "$BUILDCREW_ROOT/lib/workflow.sh"
+    [ "$status" -ne 0 ]
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Standalone buildcrew uat (structural tests)
+# ─────────────────────────────────────────────────────────────────────────────
+
+@test "cmd_uat: standalone mode sources workflow.sh" {
+    run grep 'source.*workflow.sh' "$BUILDCREW_ROOT/bin/buildcrew"
+    [ "$status" -eq 0 ]
+}
+
+@test "cmd_uat: standalone mode exits 1 without README.md" {
+    run grep -A3 'No README.md found' "$BUILDCREW_ROOT/bin/buildcrew"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"exit 1"* ]]
 }

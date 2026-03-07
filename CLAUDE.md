@@ -96,7 +96,7 @@ When context is compacted, always preserve:
 5. **simplify** — Non-blocking review: apply targeted simplifications before formal review
 6. **codereview** — Adversarial code review + elegance check; may request rebuild
 7. **verify** — Security audit + AC cross-reference + commit
-8. **inline UAT** — Blind scenario-based acceptance testing against README.md (runs for non-trivial tasks with a README.md; skip with `--no-uat`)
+8. **UAT** — Blind scenario-based acceptance testing against README.md (runs once after all backlog tasks complete; skip with `--no-uat`)
 
 ## Modes
 
@@ -105,6 +105,6 @@ BuildCrew has two runtime modes:
 - **Discovery mode** — Interactive Product Manager flow for project definition and backlog creation. Triggered when `buildcrew run` finds an empty backlog or all tasks complete. Launches the `/build` command (builder skill).
 - **Execution mode** — Autonomous pipeline that processes pending BACKLOG.md tasks through the phase sequence above.
 
-- **Inline UAT** — Runs after verify for all non-trivial tasks that have a `README.md`. The UAT subsystem publishes an artifact, generates user stories and scenarios from the README, then executes them in an isolated working directory. On failure, it triggers a rebuild loop (build -> simplify -> codereview -> verify) and retries. Opt out with `--no-uat`.
+- **Post-completion UAT** — Runs once after all backlog tasks complete (not per-task). The UAT subsystem publishes an artifact, generates user stories and scenarios from the README, then executes them in an isolated working directory. On failure, it triggers a rebuild loop and retries. UAT failure is non-fatal. Opt out with `--no-uat`. Run manually with `buildcrew uat`.
 
 Note: "Chunked Build Mode" is a separate concept (sub-mode within the build phase for large builds). It is unrelated to the modes above.

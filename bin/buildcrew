@@ -2081,25 +2081,24 @@ cmd_uat() {
                 shift
                 ;;
             --help|-h)
-                echo -e "${BOLD}buildcrew uat${NC} — Run UAT regression tests against an artifact"
+                echo -e "${BOLD}buildcrew uat${NC} — Run UAT acceptance testing"
                 echo ""
                 echo -e "${BOLD}USAGE:${NC}"
-                echo "    buildcrew uat --regress <path> --readme <path> [options]"
+                echo "    buildcrew uat                                          # Run full UAT against current project"
+                echo "    buildcrew uat --regress <path> --readme <path>         # Regression test an existing artifact"
                 echo ""
                 echo -e "${BOLD}OPTIONS:${NC}"
-                echo "    --regress <path>       Path to the artifact directory to test (required)"
+                echo "    (no args)              Run full UAT against the current project (requires README.md)"
+                echo "    --regress <path>       Path to the artifact directory to test"
                 echo "    --readme <path>        Path to the project's README.md (required with --regress)"
                 echo "    --project <name>       Project identifier (default: derived from README parent dir)"
                 echo "    --preview              List existing scenarios without running agents (read-only)"
                 echo "    --help, -h             Show this help message"
                 echo ""
                 echo -e "${BOLD}EXAMPLES:${NC}"
+                echo "    buildcrew uat                                             # Run UAT on current project"
                 echo "    buildcrew uat --regress /path/to/artifact --readme ../my-project/README.md"
                 echo "    buildcrew uat --preview"
-                echo ""
-                echo -e "${BOLD}NOTE:${NC}"
-                echo "    UAT is now automatic during 'buildcrew run'."
-                echo "    Use this command for regression testing against an existing artifact."
                 exit 0
                 ;;
             *)
@@ -2129,11 +2128,32 @@ cmd_uat() {
         exit 0
     fi
 
-    # Require --regress for non-preview mode
+    # Standalone mode: no --regress → run full UAT against current project
     if [[ -z "$regress_path" ]]; then
-        echo -e "${RED}Error:${NC} UAT is now automatic during 'buildcrew run'. Use 'buildcrew uat --regress <path>' for regression testing."
-        echo "Run 'buildcrew uat --help' for usage."
-        exit 1
+        if [[ ! -f "README.md" ]]; then
+            echo -e "${RED}Error:${NC} No README.md found in $(pwd). UAT requires a README."
+            exit 1
+        fi
+
+        # Source workflow.sh for run_inline_uat and its dependencies
+        source "$BUILDCREW_HOME/lib/workflow.sh"
+
+        # Initialize workflow globals needed by run_inline_uat -> run_phase_group
+        CLAUDE_MODEL="${CLAUDE_MODEL:-sonnet}"
+        CLAUDE_EFFORT="${CLAUDE_EFFORT:-}"
+        __INVOCATION_COUNT=0
+        MAX_INVOCATIONS="${MAX_INVOCATIONS:-15}"
+        LOG_FILE="$(mktemp "${TMPDIR:-/tmp}/buildcrew-uat-XXXXXX.log")"
+        PHASE_RESULT_FILE=".claude/phase-result.json"
+        STATUS_FILE=".claude/workflow-status.json"
+
+        local _uat_project _uat_result=0
+        _uat_project="$(basename "$(pwd)")"
+        local _uat_task="[UAT] Fix failing acceptance tests for $_uat_project — see .buildcrew/uat-context.md for details"
+        run_inline_uat "$_uat_project" "$_uat_task" "standard" || _uat_result=$?
+
+        rm -f "$LOG_FILE"
+        exit "$_uat_result"
     fi
 
     # Validate --readme is provided and readable (required with --regress)
@@ -2326,8 +2346,6 @@ case "${1:-}" in
         ;;
     uat)
         shift
-        source "$BUILDCREW_HOME/lib/uat_signal.sh"
-        source "$BUILDCREW_HOME/lib/uat.sh"
         cmd_uat "$@"
         ;;
     dash)

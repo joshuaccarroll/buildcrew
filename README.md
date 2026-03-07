@@ -55,14 +55,14 @@ Each task runs through the following phases (each a separate Claude invocation).
 | 6 | Simplify | Principal Engineer | Non-blocking targeted simplifications |
 | 7 | Code Review | Principal Engineer | Adversarial review + elegance check; may request rebuild |
 | 8 | Verify + Commit | Security Engineer | Security audit, acceptance criteria verification, commit |
-| 9 | Inline UAT | QA Engineer | Blind scenario-based acceptance testing against README (opt out: `--no-uat`) |
+| 9 | UAT | QA Engineer | Blind scenario-based acceptance testing against README after backlog completion (opt out: `--no-uat`) |
 
 **Key behaviors:**
 - **Adversarial reviews** — reviewers are asked to find flaws, not approve quickly
 - **Complexity-aware skipping** — tag tasks `{trivial}`, `{simple}`, or `{standard}` to control which phases run. Auto-detected when no tag is present. Use `--full-pipeline` to force all phases.
 - **Circuit breaker** — two consecutive failures at any phase trigger a full re-plan from scratch (one re-plan attempt per task)
 - **TDD by default** — for standard-complexity tasks, failing tests are written before implementation and validated to actually fail; tamper detection via SHA-256 checksums
-- **Inline UAT** — after verify, the project is tested against its own README by a blind agent that never sees source code. On failure, triggers a rebuild loop and retries. Opt out with `--no-uat`.
+- **Post-completion UAT** — after all backlog tasks complete, the project is tested against its own README by a blind agent that never sees source code. On failure, triggers a rebuild loop and retries. UAT failure is non-fatal. Opt out with `--no-uat`. Run manually with `buildcrew uat`.
 - **Build retry feedback** — on rebuild, code review findings are injected into the build context so the agent knows what to fix
 - **Lessons system** — failures are automatically recorded in `.buildcrew/lessons.md` and injected into future runs
 - **Chunked execution** — large builds that hit max-turns are automatically split and retried
@@ -110,7 +110,7 @@ buildcrew reset              # Clear blocked tasks and clean up artifacts
 | `--interactive` | Restore interactive review pauses (spec, plan) |
 | `--sequential` | Run tasks one at a time (default is parallel). Auto-forced by `--single`, `--task`, `--review` |
 | `--max-parallel N` | Max concurrent tasks in parallel mode (default: 5) |
-| `--no-uat` | Skip inline UAT after verify (UAT is automatic for non-trivial tasks) |
+| `--no-uat` | Skip UAT after backlog completion |
 | `--max-invocations N` | Max Claude invocations per run (default: 15) |
 | `--model M` | Claude model: `auto` (default, per-phase), `opus`, `sonnet`, `haiku`, or full model ID. In `auto` mode, each phase uses the optimal model for its cognitive requirements (e.g., opus for review/verify, sonnet for build/research, haiku for simplify/tdd-scaffold). Complexity downgrades apply automatically. |
 | `--effort L` | Effort level: `low`, `medium`, `high` (default: medium) |
@@ -233,12 +233,13 @@ Standalone skills that work inside or outside the BuildCrew pipeline. Invoke the
 
 ## UAT (User Acceptance Testing)
 
-After verify, a blind UAT agent tests your project against its README — it never sees source code. The build agent never sees the tests. On failure, the build agent fixes and republishes; retries up to 5 times.
+After all backlog tasks complete, a blind UAT agent tests your project against its README — it never sees source code. The build agent never sees the tests. On failure, the build agent fixes and republishes; retries up to 5 times. UAT failure is non-fatal (backlog tasks are already committed).
 
-UAT runs automatically for non-trivial tasks. Use `--no-uat` to opt out, or run standalone:
+UAT runs automatically after backlog completion. Use `--no-uat` to opt out, or run standalone:
 
 ```bash
-buildcrew uat --regress /path/to/artifact   # Regression test an existing artifact
+buildcrew uat                                # Run full UAT against current project
+buildcrew uat --regress /path/to/artifact    # Regression test an existing artifact
 buildcrew uat --preview                      # List scenarios without running agents
 ```
 

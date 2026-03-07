@@ -346,7 +346,7 @@ parse_args() {
                 echo "  --auto       (deprecated) Auto mode is now the default. Use --interactive to opt out"
                 echo "  --interactive Restore interactive pauses (spec review, plan review, human review)"
                 echo "  --sequential Run tasks one at a time (opt out of parallel batch mode)"
-                echo "  --no-uat     Skip inline UAT after verify (with 'run')"
+                echo "  --no-uat     Skip UAT after backlog completion (with 'run')"
                 echo "  --batch      (deprecated) Batch mode is now the default"
                 echo "  --max-parallel N  Max concurrent tasks in parallel mode (default: 5)"
                 echo "  --model MODEL  Claude model: auto (default, per-phase), opus, sonnet, haiku, or full model ID"
@@ -1327,6 +1327,19 @@ _batch_post_completion() {
         if [[ -n "$merge_branch" ]]; then
             if _batch_run_post_build "$merge_branch" "$base_branch"; then
                 print_success "Post-build verification passed on $merge_branch"
+
+                # Post-completion UAT on merged code
+                if [[ "$NO_UAT" != "true" && -f "README.md" ]]; then
+                    local _uat_project _uat_result=0
+                    _uat_project="$(basename "$(pwd)")"
+                    local _uat_task="[UAT] Fix failing acceptance tests for $_uat_project — see .buildcrew/uat-context.md for details"
+                    run_inline_uat "$_uat_project" "$_uat_task" "standard" || _uat_result=$?
+                    if [[ $_uat_result -eq 2 ]]; then
+                        print_warning "UAT completed with disputed scenarios"
+                    elif [[ $_uat_result -ne 0 ]]; then
+                        print_error "UAT failed — run 'buildcrew uat' after fixing issues"
+                    fi
+                fi
             else
                 print_warning "Post-build verification failed"
                 # Log per-task AC results if available
@@ -4140,32 +4153,6 @@ process_task_isolated() {
 
     done  # end of outer re-planning while loop
 
-    # ── Inline UAT ──────────────────────────────────────────────────────────
-    if [[ "$NO_UAT" != "true" && "$task_complexity" != "trivial" ]]; then
-        if [[ -f "README.md" ]]; then
-            local project_name
-            project_name=$(extract_task_dir "$task")
-            if [[ -z "$project_name" ]]; then
-                project_name="$(basename "$(pwd)")"
-            fi
-            local task_for_uat
-            task_for_uat=$(strip_task_dir "$task")
-
-            local uat_result=0
-            run_inline_uat "$project_name" "$task_for_uat" "$task_complexity" || uat_result=$?
-            if [[ $uat_result -eq 2 ]]; then
-                print_warning "UAT completed with disputed scenarios (exit 2)"
-                return 2
-            elif [[ $uat_result -ne 0 ]]; then
-                print_error "Inline UAT failed"
-                return 1
-            fi
-        else
-            print_info "No README.md found — skipping inline UAT"
-        fi
-    fi
-    # ── End Inline UAT ──────────────────────────────────────────────────────
-
     # Task succeeded
     clear_task_progress
     rm -f "$CURRENT_TASK_FILE"
@@ -4562,22 +4549,18 @@ main() {
 
             if [[ $task_result -eq 0 ]]; then
                 ((completed++))
-            elif [[ $task_result -eq 2 ]]; then
-                # UAT disputed — task completed but with disputed scenarios
-                print_warning "Task completed with disputed UAT scenarios: $task"
-                ((completed++))
             else
                 ((failed++))
             fi
 
             # Branch cleanup: PR, return to base, sync backlog
             if [[ "$GIT_BRANCH" == "true" ]]; then
-                if [[ $task_result -eq 0 || $task_result -eq 2 ]]; then
+                if [[ $task_result -eq 0 ]]; then
                     create_task_pr "$task" || true
                 fi
                 return_to_original_branch
                 # Sync task status to base branch
-                if [[ $task_result -eq 0 || $task_result -eq 2 ]]; then
+                if [[ $task_result -eq 0 ]]; then
                     mark_task_complete "$task"
                 else
                     mark_task_blocked "$task" "See feature branch for details"
@@ -4627,6 +4610,21 @@ main() {
         print_info "$remaining tasks still pending in backlog"
     else
         print_success "All backlog tasks processed!"
+
+        # Post-completion UAT
+        if [[ "$NO_UAT" != "true" && "$failed" -eq 0 && -f "README.md" && "$SINGLE_TASK" != "true" ]]; then
+            local _uat_project _uat_result=0
+            _uat_project="${TARGET_DIR:-$(basename "$(pwd)")}"
+            local _uat_task="[UAT] Fix failing acceptance tests for $_uat_project — see .buildcrew/uat-context.md for details"
+            run_inline_uat "$_uat_project" "$_uat_task" "standard" || _uat_result=$?
+            if [[ $_uat_result -eq 2 ]]; then
+                print_warning "UAT completed with disputed scenarios"
+            elif [[ $_uat_result -ne 0 ]]; then
+                print_error "UAT failed — run 'buildcrew uat' after fixing issues"
+            fi
+        elif [[ "$NO_UAT" != "true" && "$failed" -gt 0 ]]; then
+            print_info "Skipping UAT — $failed task(s) failed. Run 'buildcrew uat' after fixing."
+        fi
     fi
 
     clear_workflow_state
