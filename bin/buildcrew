@@ -57,6 +57,7 @@ print_help() {
     echo "    plugins          Show recommended plugins for your project"
     echo "    update           Check for and install updates"
     echo "    uat              Run UAT regression tests against an artifact"
+    echo "    test-review      Review and audit the project test suite"
     echo "    dash             Manage the buildcrew-dash terminal dashboard"
     echo "    version          Show version information"
     echo "    uninstall        Remove BuildCrew from system"
@@ -2141,6 +2142,134 @@ _dash_uninstall() { _dash_download_and_run "uninstall.sh"; }
 # UAT command — blind scenario-based acceptance testing
 # ═══════════════════════════════════════════════════════════════════════════════
 
+cmd_test_review() {
+    # Verify git repository
+    if ! git rev-parse --git-dir >/dev/null 2>&1; then
+        echo -e "${RED}Error:${NC} Not inside a git repository. Run from within a git repo."
+        exit 1
+    fi
+
+    # Check for dirty working tree (includes untracked files)
+    local dirty_status
+    dirty_status="$(git status --porcelain 2>/dev/null)"
+    if [[ -n "$dirty_status" ]]; then
+        echo -e "${YELLOW}Warning:${NC} Working tree has uncommitted changes."
+        if [ -t 0 ]; then
+            read -p "Proceed with dirty working tree? [y/N] " -n 1 -r
+            echo ""
+            if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+                echo "Aborted."
+                exit 1
+            fi
+        fi
+    fi
+
+    # Discover test files using standard patterns, excluding common non-test directories
+    local test_files=()
+    local f
+    while IFS= read -r f; do
+        test_files+=("$f")
+    done < <(find . \
+        \( -name "*.test.js" -o -name "*.test.ts" -o \
+           -name "*.spec.js" -o -name "*.spec.ts" -o \
+           -name "*.bats" -o \
+           -name "test_*.py" -o -name "*_test.py" -o \
+           -name "*_test.go" \) \
+        -not -path "*/node_modules/*" \
+        -not -path "*/vendor/*" \
+        -not -path "*/.venv/*" \
+        -not -path "*/dist/*" \
+        -not -path "*/build/*" \
+        -not -path "*/target/*" \
+        -not -path "*/.git/*" \
+        -not -path "*/.buildcrew/*" \
+        -not -path "*/.claude/*" \
+        2>/dev/null | sort)
+
+    local file_count="${#test_files[@]}"
+    if [[ $file_count -eq 0 ]]; then
+        echo "No test files found."
+        exit 0
+    fi
+
+    echo "Discovered $file_count test file(s)."
+
+    # Detect test runner from discovered file extensions
+    local runner=""
+    for f in "${test_files[@]}"; do
+        case "$f" in
+            *.bats) runner="bats"; break ;;
+            *.test.js|*.spec.js|*.test.ts|*.spec.ts) runner="jest"; break ;;
+            *test_*.py|*_test.py) runner="pytest"; break ;;
+            *_test.go) runner="go test"; break ;;
+        esac
+    done
+
+    if [[ -n "$runner" ]]; then
+        echo "Runner detected: $runner"
+    else
+        echo "Warning: could not detect test runner automatically."
+    fi
+
+    # Batch division: 15 files per batch
+    local batch_count=$(( (file_count + 14) / 15 ))
+    if [[ $batch_count -eq 1 ]]; then
+        echo "Files organized into 1 batch."
+    else
+        echo "Files organized into $batch_count batches."
+    fi
+
+    # Run baseline verification
+    local baseline_ran=false
+    case "$runner" in
+        bats)
+            baseline_ran=true
+            if bats "${test_files[@]}" >/dev/null 2>&1; then
+                echo "baseline passed."
+            else
+                echo "baseline failed. Entering report-only mode (no fixes will be applied)."
+            fi
+            ;;
+        jest)
+            if command -v jest >/dev/null 2>&1; then
+                baseline_ran=true
+                if jest >/dev/null 2>&1; then
+                    echo "baseline passed."
+                else
+                    echo "baseline failed. Entering report-only mode (no fixes will be applied)."
+                fi
+            elif command -v npx >/dev/null 2>&1; then
+                baseline_ran=true
+                if npx jest >/dev/null 2>&1; then
+                    echo "baseline passed."
+                else
+                    echo "baseline failed. Entering report-only mode (no fixes will be applied)."
+                fi
+            fi
+            ;;
+        pytest)
+            if command -v pytest >/dev/null 2>&1; then
+                baseline_ran=true
+                if pytest >/dev/null 2>&1; then
+                    echo "baseline passed."
+                else
+                    echo "baseline failed. Entering report-only mode (no fixes will be applied)."
+                fi
+            fi
+            ;;
+        "go test")
+            if command -v go >/dev/null 2>&1; then
+                baseline_ran=true
+                if go test ./... >/dev/null 2>&1; then
+                    echo "baseline passed."
+                else
+                    echo "baseline failed. Entering report-only mode (no fixes will be applied)."
+                fi
+            fi
+            ;;
+    esac
+}
+
 cmd_uat() {
     local readme_path=""
     local project_name=""
@@ -2441,6 +2570,10 @@ case "${1:-}" in
     update)
         shift
         cmd_update "$@"
+        ;;
+    test-review)
+        shift
+        cmd_test_review "$@"
         ;;
     uat)
         shift
