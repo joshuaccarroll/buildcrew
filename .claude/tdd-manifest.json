@@ -1,44 +1,38 @@
 {
-  "test_files": ["tests/tdd/readme_config_docs.bats"],
+  "test_files": ["tests/tdd/config_example_complete.bats"],
   "stub_files": [],
   "test_dir": "tests/tdd",
-  "test_count": 16,
-  "all_failing": true,
+  "test_count": 20,
+  "all_failing": false,
   "framework": "bats",
-  "run_command": "bats tests/tdd/readme_config_docs.bats",
+  "run_command": "bats tests/tdd/config_example_complete.bats",
   "ac_coverage": {
     "AC-01": [
-      "AC01 README mentions per-persona rules with product-manager slug",
-      "AC01 README mentions per-persona rules with ux-designer slug",
-      "AC01 README mentions per-persona rules with feature-engineer slug",
-      "AC01 README mentions per-persona rules with principal-engineer slug",
-      "AC01 README mentions per-persona rules with qa-engineer slug",
-      "AC01 README mentions per-persona rules with security-engineer slug"
+      "AC01 config.example contains MAX_INVOCATIONS=15",
+      "AC01 config.example contains COMPLEXITY_AWARE=true",
+      "AC01 config.example contains AUTO_MODE=true",
+      "AC01 config.example contains CLAUDE_MODEL=auto",
+      "AC01 config.example contains CLAUDE_EFFORT=medium",
+      "AC01 config.example contains MAX_PARALLEL=5",
+      "AC01 config.example contains TARGET_DIR key",
+      "AC01 config.example contains UAT_MAX_RETRIES=5",
+      "AC01 config.example contains UAT_ARTIFACT_TIMEOUT=7200",
+      "AC01 config.example contains UAT_ARTIFACT_TYPE=cli",
+      "AC01 config.example contains UAT_RUN_COMMAND key",
+      "AC01 config.example contains UAT_STOP_COMMAND key",
+      "AC01 config.example contains UAT_INSTALL_COMMAND key",
+      "AC01 config.example contains UAT_HEALTH_CHECK key",
+      "AC01 config.example contains UAT_HEALTH_CHECK_TIMEOUT=30"
     ],
     "AC-02": [
-      "AC02 README documents Override: syntax",
-      "AC02 README documents Disable: syntax"
-    ],
-    "AC-03": [
-      "AC03 README documents UAT_INSTALL_COMMAND in configuration",
-      "AC03 README documents UAT_HEALTH_CHECK in configuration",
-      "AC03 README documents UAT_HEALTH_CHECK_TIMEOUT in configuration"
-    ],
-    "AC-04": [
-      "AC04 README explains 10KB context truncation limit",
-      "AC04 README mentions truncation behavior"
-    ],
-    "AC-05": [
-      "AC05 README --resume description mentions invocation count preservation"
-    ],
-    "AC-06": [
-      "AC06 README includes buildcrew dash status command"
-    ],
-    "AC-07": [
-      "AC07 How It Works rules merge mentions per-persona rules layer"
+      "AC02 config.example has General section header",
+      "AC02 config.example has Batch section header",
+      "AC02 config.example has UAT section header",
+      "AC02 config.example has UAT watch mode section",
+      "AC02 config.example has UAT regress mode section"
     ]
   },
   "checksums": {
-    "tests/tdd/readme_config_docs.bats": "c62f11366aad879f4cca5633e71338e2f8f8ef1b98f1f2155c1bb187a3572204"
+    "tests/tdd/config_example_complete.bats": "19df7977d79a26b54d4c0867bcd849b244602dd153c141991265705251647922"
   }
 }

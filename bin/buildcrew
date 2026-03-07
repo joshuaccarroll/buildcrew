@@ -299,6 +299,8 @@ EOF
 # BuildCrew Project Configuration
 # Copy to .buildcrew/config to activate
 
+# ── General ──────────────────────────────────────────────────────────────────
+
 # Maximum Claude invocations per buildcrew run (default: 15)
 # MAX_INVOCATIONS=15
 
@@ -306,8 +308,51 @@ EOF
 # Set to false to always run all phases (equivalent to --full-pipeline)
 # COMPLEXITY_AWARE=true
 
-# Auto mode is enabled by default. Set to false to restore interactive review pauses.
+# Run fully unattended — auto-approve all interactive pauses (default: true)
 # AUTO_MODE=true
+
+# Claude API model to use (default: auto — let Claude pick the best model)
+# CLAUDE_MODEL=auto
+
+# Claude effort level: low, medium, high (default: medium)
+# CLAUDE_EFFORT=medium
+
+# ── Batch / Parallel ─────────────────────────────────────────────────────────
+
+# Max tasks running in parallel during `buildcrew run --batch` (default: 5)
+# MAX_PARALLEL=5
+
+# Default target directory for tasks without a [dir:...] prefix (batch mode)
+# TARGET_DIR=
+
+# ── UAT ──────────────────────────────────────────────────────────────────────
+
+# Max UAT retry iterations before marking the task failed (default: 5)
+# UAT_MAX_RETRIES=5
+
+# Seconds to wait for the artifact to be published (watch mode) (default: 7200)
+# UAT_ARTIFACT_TIMEOUT=7200
+
+# Seconds to wait for a UAT execute phase to complete (default: 600)
+# UAT_EXECUTE_TIMEOUT=600
+
+# Artifact type: cli, webapp, api, library (default: cli)
+# UAT_ARTIFACT_TYPE=cli
+
+# Custom command to start the artifact under test (regress mode)
+# UAT_RUN_COMMAND=
+
+# Custom command to stop the artifact (if UAT_RUN_COMMAND starts a server)
+# UAT_STOP_COMMAND=
+
+# Custom install command run once before testing
+# UAT_INSTALL_COMMAND=
+
+# Custom health-check command polled until the artifact is ready
+# UAT_HEALTH_CHECK=
+
+# Seconds to wait for UAT_HEALTH_CHECK to succeed (default: 30)
+# UAT_HEALTH_CHECK_TIMEOUT=30
 
 EOF
         echo -e "  ${GREEN}✓${NC} Created .buildcrew/config.example"
