@@ -1,44 +1,56 @@
 {
-  "test_files": ["tests/tdd/readme_config_docs.bats"],
+  "test_files": [
+    "tests/tdd/ac01_context_files_created.bats",
+    "tests/tdd/ac02_context_loading.bats",
+    "tests/tdd/ac03_context_preservation.bats",
+    "tests/tdd/ac04_context_health.bats"
+  ],
   "stub_files": [],
   "test_dir": "tests/tdd",
-  "test_count": 16,
-  "all_failing": true,
+  "test_count": 25,
+  "all_failing": false,
   "framework": "bats",
-  "run_command": "bats tests/tdd/readme_config_docs.bats",
+  "run_command": "bats tests/tdd/ac*.bats",
   "ac_coverage": {
     "AC-01": [
-      "AC01 README mentions per-persona rules with product-manager slug",
-      "AC01 README mentions per-persona rules with ux-designer slug",
-      "AC01 README mentions per-persona rules with feature-engineer slug",
-      "AC01 README mentions per-persona rules with principal-engineer slug",
-      "AC01 README mentions per-persona rules with qa-engineer slug",
-      "AC01 README mentions per-persona rules with security-engineer slug"
+      "AC-01a: users.md creation",
+      "AC-01b: principles.md creation",
+      "AC-01c: domain.md creation",
+      "AC-01d: file readability",
+      "AC-01e: markdown structure"
     ],
     "AC-02": [
-      "AC02 README documents Override: syntax",
-      "AC02 README documents Disable: syntax"
+      "AC-02a: empty load",
+      "AC-02b: read users",
+      "AC-02c: read principles",
+      "AC-02d: read domain",
+      "AC-02e: concatenate files",
+      "AC-02f: file order",
+      "AC-02g: missing file handling",
+      "AC-02h: truncation at 10KB"
     ],
     "AC-03": [
-      "AC03 README documents UAT_INSTALL_COMMAND in configuration",
-      "AC03 README documents UAT_HEALTH_CHECK in configuration",
-      "AC03 README documents UAT_HEALTH_CHECK_TIMEOUT in configuration"
+      "AC-03a: preserve existing files",
+      "AC-03b: preserve mtime",
+      "AC-03c: principles not modified",
+      "AC-03d: domain not modified",
+      "AC-03e: create directory",
+      "AC-03f: coexist with examples"
     ],
     "AC-04": [
-      "AC04 README explains 10KB context truncation limit",
-      "AC04 README mentions truncation behavior"
-    ],
-    "AC-05": [
-      "AC05 README --resume description mentions invocation count preservation"
-    ],
-    "AC-06": [
-      "AC06 README includes buildcrew dash status command"
-    ],
-    "AC-07": [
-      "AC07 How It Works rules merge mentions per-persona rules layer"
+      "AC-04a: health check success",
+      "AC-04b: identify missing users",
+      "AC-04c: identify missing principles",
+      "AC-04d: identify missing domain",
+      "AC-04e: identify missing lessons",
+      "AC-04f: provide suggestions"
     ]
   },
   "checksums": {
-    "tests/tdd/readme_config_docs.bats": "c62f11366aad879f4cca5633e71338e2f8f8ef1b98f1f2155c1bb187a3572204"
-  }
+    "tests/tdd/ac01_context_files_created.bats": "7d7fa72500c3405a67daeaa068da8da13cae716818e766a7d76bdc4971dd9116",
+    "tests/tdd/ac02_context_loading.bats": "9f1931bdb62b3c4c857fe7bd14e02ac1a3c7b9e0b72728f681c5341750e53741",
+    "tests/tdd/ac03_context_preservation.bats": "44a5e80afabe7398766f2ff03ddf7bb703b28f73348e7763c5a79b23354b6c24",
+    "tests/tdd/ac04_context_health.bats": "34b0d228666c286a12717bdf78e1e9d6d4820001ca97204d5d0ead4ce010346c"
+  },
+  "notes": "AC-02, AC-03, AC-04 tests verify existing helper functions (load_project_context, check_context_health) in lib/common.sh. AC-01 tests drive the new builder feature to create context files during discovery. Only AC-01 tests are failing (5 failures); AC-02/03/04 pass (20 passing) testing existing infrastructure."
 }

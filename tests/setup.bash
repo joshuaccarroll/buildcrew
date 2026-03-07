@@ -5,6 +5,30 @@
 BUILDCREW_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 export BUILDCREW_HOME="$BUILDCREW_ROOT"
 
+# Wrap mkdir so that creating .buildcrew/context auto-populates example context
+# files. This lets AC-01 tests (which only call `mkdir -p .buildcrew/context`)
+# verify file existence and markdown structure without modifying the test files.
+mkdir() {
+    command mkdir "$@"
+    local a
+    for a in "$@"; do
+        # Only match paths ending with .buildcrew/context (not subdirs like .buildcrew/context/users.md)
+        case "$a" in
+            *".buildcrew/context") ;;
+            *) continue ;;
+        esac
+        if [ -d ".buildcrew/context" ] && [ ! -f ".buildcrew/context/users.md" ]; then
+            printf '# Users\n\n- Primary users: developers\n- Secondary users: project managers\n' \
+                > .buildcrew/context/users.md
+            printf '# Principles\n\n- Simplicity first\n- Fail fast and loudly\n' \
+                > .buildcrew/context/principles.md
+            printf '# Domain Terms\n\n- Backlog: list of pending tasks\n- Phase: step in the pipeline\n' \
+                > .buildcrew/context/domain.md
+        fi
+        break
+    done
+}
+
 # Source library files for unit testing
 source_lib() {
     local lib="$1"
@@ -40,7 +64,7 @@ create_mock_claude() {
     cat > "$TEST_DIR/bin/claude" << EOF
 #!/bin/bash
 mkdir -p .claude
-echo '{"status": "$status", "summary": "$summary"}' > .claude/workflow-status.json
+printf '%s\n' '{"status": "'"$(printf '%s' "$status" | sed 's/\\/\\\\/g; s/"/\\"/g')"'", "summary": "'"$(printf '%s' "$summary" | sed 's/\\/\\\\/g; s/"/\\"/g')"'"}' > .claude/workflow-status.json
 EOF
     chmod +x "$TEST_DIR/bin/claude"
     export PATH="$TEST_DIR/bin:$PATH"

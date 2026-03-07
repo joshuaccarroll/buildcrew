@@ -390,6 +390,46 @@ Note: The existing Step 4 already runs the Document Review Protocol on `DESIGN_[
 
 ---
 
+## Step 4c: Context Extraction (new-project path only)
+
+**Skip this step entirely if Step 0 (existing-project resume) was triggered.**
+
+After completing all discovery (Steps 2–4b, or just Step 2 if no design), extract
+and write three context files before generating the backlog.
+
+1. Create `.buildcrew/context/` if it does not exist:
+   ```bash
+   mkdir -p .buildcrew/context
+   ```
+
+2. Write these three files, synthesized from the full discovery session. Use
+   bullet-list format. Do **not** run the Document Review Protocol on these files.
+
+   **`.buildcrew/context/users.md`** — target user segments, their key pain points,
+   and what success looks like for each segment. Source: Step 2 users/audience discussion.
+
+   **`.buildcrew/context/principles.md`** — guiding principles and tradeoffs. Include
+   both explicit decisions (e.g., "mobile-first") and discovered constraints (e.g.,
+   "no third-party auth libraries"). Source: Steps 2 and 4 discovery.
+
+   **`.buildcrew/context/domain.md`** — domain terminology, business rules, and
+   project-specific vocabulary. Keep concise — a focused glossary, not an exhaustive dump.
+   Source: Steps 2 and 4 discovery.
+
+   Example format for each file:
+   ```markdown
+   # [Topic]
+
+   - Item one
+   - Item two
+   - Item three
+   ```
+
+These files are picked up automatically by `load_project_context()` in every subsequent
+build phase, giving the execution pipeline the context gathered during discovery.
+
+---
+
 ## Step 5: Backlog Generation
 
 Convert the project plan into an executable backlog.
