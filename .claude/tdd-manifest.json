@@ -1,57 +1,24 @@
 {
-  "test_files": [
-    "buildcrew/tests/tdd/convergence_loop.bats"
-  ],
-  "stub_files": [
-    "buildcrew/lib/convergence.sh"
-  ],
-  "test_dir": "buildcrew/tests/tdd",
-  "test_count": 21,
+  "test_files": ["tests/unit/uat.bats"],
+  "stub_files": ["lib/uat.sh"],
+  "test_dir": "tests/unit",
+  "test_count": 10,
   "all_failing": true,
   "framework": "bats",
-  "run_command": "cd buildcrew && bats tests/tdd/convergence_loop.bats",
+  "run_command": "bats tests/unit/uat.bats",
   "ac_coverage": {
-    "AC-01": [
-      "AC-01: convergence_loop initializes iteration counter to 0",
-      "AC-01: convergence_loop increments iteration counter",
-      "AC-01: convergence_loop stops after 3 iterations"
-    ],
-    "AC-02": [
-      "AC-02: convergence_check detects CONVERGED signal in response",
-      "AC-02: convergence_check rejects response without CONVERGED",
-      "AC-02: convergence_check case-sensitive for CONVERGED"
-    ],
-    "AC-03": [
-      "AC-03: convergence_handle_failure logs warning for missing output",
-      "AC-03: convergence_handle_failure records which iteration failed"
-    ],
-    "AC-04": [
-      "AC-04: convergence_loop_finalize prepares state for Pass 3",
-      "AC-04: Pass 3 can read convergence findings"
-    ],
-    "AC-05": [
-      "AC-05: convergence_is_revision_cycle returns true when plan-review-prev.md exists",
-      "AC-05: convergence_is_revision_cycle returns false when plan-review-prev.md missing",
-      "AC-05: convergence_get_prompt uses revision variant when in revision cycle",
-      "AC-05: convergence_get_prompt uses fresh variant when not in revision cycle"
-    ],
-    "AC-06": [
-      "AC-06: convergence_write_review_output creates plan-review.md",
-      "AC-06: plan-review.md includes verdict from synthesis"
-    ],
-    "AC-07": [
-      "AC-07: convergence_map_verdict maps approved correctly",
-      "AC-07: convergence_map_verdict maps needs_revision correctly",
-      "AC-07: convergence_map_verdict maps rejected correctly"
-    ],
-    "AC-08": [
-      "AC-08: workflow.sh can be sourced without modification"
-    ],
-    "AC-09": [
-      "AC-09: convergence loop integrates with review phase"
-    ]
+    "AC-01": ["AC-01: detect_http_dependencies detects external service URLs in README"],
+    "AC-02": ["AC-02: detect_http_dependencies returns empty when no external services"],
+    "AC-03": ["AC-03: generate_mock_stubs creates Python stub for detected dependency"],
+    "AC-04": ["AC-04: generate_start_mocks creates start-mocks.sh that exports MOCK_*_URL vars"],
+    "AC-05": ["AC-05: generate_stop_mocks creates stop-mocks.sh that kills by PID files"],
+    "AC-06": ["AC-06: mock scripts set correct env var format MOCK_<SERVICE>_URL"],
+    "AC-07": ["AC-07: mock setup in harness is skipped when no dependencies detected"],
+    "AC-08": ["AC-08: start-mocks.sh and stop-mocks.sh are executable when generated"],
+    "AC-09": ["AC-09: mock PID files are created by start-mocks.sh"],
+    "AC-10": ["AC-10: stop-mocks.sh removes processes from PID files"]
   },
   "checksums": {
-    "buildcrew/tests/tdd/convergence_loop.bats": "bafcc82101e3d16526b595a8c63efa68e5db694e77448ae68285c6bed347b551"
+    "tests/unit/uat.bats": "00bda65bf716793732e024fd17a31c760ed93f96bc3de45e99870d07646e1c3c"
   }
 }

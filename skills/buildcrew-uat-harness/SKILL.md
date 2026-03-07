@@ -55,6 +55,37 @@ From the README's usage documentation, determine how users interact with the pro
 
 If the README does not clearly indicate how to use the project (no commands, no API endpoints, no import paths), mark the phase as `disputed`.
 
+### Step 2.5: Detect HTTP Dependencies and Generate Mock Stubs
+
+After reading the README, scan for external HTTP service dependencies that the app calls. These are services the artifact makes outbound requests to — not the artifact itself.
+
+**Detection rules** (README-based only — no source code access):
+- Look for HTTPS URLs documented as integrations, API calls, webhooks, or third-party services
+- Exclude `localhost`, `127.0.0.1`, and any URL that is the artifact's own server
+- Examples: "calls the Stripe API at https://api.stripe.com", "sends to https://hooks.slack.com"
+
+**If no external HTTP dependencies are found:** skip mock generation entirely — proceed to Step 3 unchanged.
+
+**If dependencies are found**, generate mock infrastructure in `harness/mocks/`:
+
+1. For each dependency, create `harness/mocks/<service>.py` — a minimal HTTP stub that:
+   - Listens on a unique localhost port
+   - Returns `{"ok": true}` for any GET or POST request
+   - Writes its PID to `harness/mocks/<service>.pid` on startup
+
+2. Generate `harness/mocks/start-mocks.sh`:
+   - Starts each stub in the background
+   - Exports `MOCK_<SERVICE>_URL=http://localhost:<port>` for each stub
+   - Must be **sourced** (not executed) so env vars propagate to the caller shell
+
+3. Generate `harness/mocks/stop-mocks.sh`:
+   - Kills each stub process using its PID file
+   - Removes PID files after killing
+
+4. Make `start-mocks.sh` and `stop-mocks.sh` executable (`chmod +x`).
+
+**Scenario scripts** that call external services should use `$MOCK_<SERVICE>_URL` instead of hardcoded URLs.
+
 ### Step 3: Build the Harness
 
 Write executable test scripts in `harness/` that implement each scenario.
@@ -125,4 +156,5 @@ Before completing, verify:
 - [ ] Every scenario from `scenarios/*.md` has a corresponding test in the harness
 - [ ] All scripts source `.artifact-env` and add `.artifact-bin/` to PATH if they exist
 - [ ] No hardcoded paths to the project source directory
+- [ ] If external HTTP dependencies were detected: `harness/mocks/start-mocks.sh` and `harness/mocks/stop-mocks.sh` exist and are executable
 
