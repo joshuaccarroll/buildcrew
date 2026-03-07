@@ -1874,6 +1874,59 @@ cmd_status() {
     else
         echo -e "${CYAN}No previous workflow run found.${NC}"
     fi
+
+    # Project Context section
+    echo ""
+    echo -e "${BOLD}Project Context:${NC}"
+    local ctx_dir=".buildcrew/context"
+    if [[ ! -d "$ctx_dir" ]]; then
+        echo -e "  Not initialized — run \`buildcrew init\` to set up context files."
+    else
+        local ctx_files=("users.md" "principles.md" "domain.md")
+        for f in "${ctx_files[@]}"; do
+            local fpath="$ctx_dir/$f"
+            if [[ -f "$fpath" ]]; then
+                local bytes kb
+                bytes=$(stat -f%z "$fpath" 2>/dev/null || stat -c%s "$fpath")
+                kb=$(awk "BEGIN { printf \"%.1f\", $bytes/1024 }")
+                printf "  ✓ %-16s (%s KB)\n" "$f" "$kb"
+            else
+                printf "  ○ %-16s (not set)\n" "$f"
+            fi
+        done
+    fi
+
+    # Config section
+    echo ""
+    local _max_inv=15 _complexity=true _auto=false _tdd=false _keep=false _parallel=5
+    local _has_config=false
+    if [[ -f ".buildcrew/config" ]]; then
+        _has_config=true
+        local _line _key _val
+        while IFS= read -r _line || [[ -n "$_line" ]]; do
+            [[ "$_line" =~ ^[[:space:]]*# ]] && continue
+            [[ "$_line" =~ ^[[:space:]]*$ ]] && continue
+            if [[ "$_line" =~ ^([A-Z_][A-Z0-9_]*)=(.*)$ ]]; then
+                _key="${BASH_REMATCH[1]}"
+                _val="${BASH_REMATCH[2]}"
+                _val="${_val//[\"\']/}"
+                case "$_key" in
+                    MAX_INVOCATIONS)  _max_inv="$_val" ;;
+                    COMPLEXITY_AWARE) _complexity="$_val" ;;
+                    AUTO_MODE)        _auto="$_val" ;;
+                    TDD_MODE)         _tdd="$_val" ;;
+                    KEEP_LOGS)        _keep="$_val" ;;
+                    MAX_PARALLEL)     _parallel="$_val" ;;
+                esac
+            fi
+        done < ".buildcrew/config"
+    fi
+    local _cfg_line="MAX_INVOCATIONS=$_max_inv COMPLEXITY_AWARE=$_complexity AUTO_MODE=$_auto TDD_MODE=$_tdd KEEP_LOGS=$_keep MAX_PARALLEL=$_parallel"
+    if [[ "$_has_config" == "false" ]]; then
+        echo -e "${BOLD}Config:${NC} $_cfg_line (defaults)"
+    else
+        echo -e "${BOLD}Config:${NC} $_cfg_line"
+    fi
 }
 
 cmd_run() {

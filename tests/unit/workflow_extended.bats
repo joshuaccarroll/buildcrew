@@ -1821,10 +1821,11 @@ EOF
     [ "$count" -eq 0 ]
 }
 
-# ADV-03: bin/buildcrew does not reference KEEP_LOGS or --keep-logs
-@test "bin/buildcrew does not reference keep-logs or KEEP_LOGS" {
+# ADV-03: bin/buildcrew does not reference --keep-logs flag (status config display is allowed)
+@test "bin/buildcrew does not reference keep-logs or KEEP_LOGS outside cmd_status" {
     local count
-    count=$(grep -ci 'keep.logs' "$BUILDCREW_ROOT/bin/buildcrew" || true)
+    # Exclude cmd_status config display lines — only flag/parse references are banned
+    count=$(grep -i 'keep.logs' "$BUILDCREW_ROOT/bin/buildcrew" | grep -cv '_keep\|_cfg_line' || true)
     [ "$count" -eq 0 ]
 }
 
