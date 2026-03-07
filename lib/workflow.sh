@@ -43,6 +43,7 @@ source "$__WORKFLOW_DIR/common.sh"
 source "$__WORKFLOW_DIR/uat.sh"
 source "$__WORKFLOW_DIR/artifact.sh"
 source "$__WORKFLOW_DIR/uat_signal.sh"
+source "$__WORKFLOW_DIR/precompute.sh"
 
 # Load project config safely (key=value only, no shell execution)
 load_buildcrew_config() {
@@ -3605,7 +3606,11 @@ process_task_isolated() {
 
         # Clean up artifacts from any previous task
         rm -f "${ARTIFACT_FILES[@]}" "$PHASE_RESULT_FILE" "$STATUS_FILE"
+        rm -rf .claude/precompute
     fi
+
+    # Precompute phase metadata for downstream skills
+    run_precompute
 
     # Track current task for future archiving
     mkdir -p .buildcrew
