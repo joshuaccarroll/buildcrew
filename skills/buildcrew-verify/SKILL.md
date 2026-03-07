@@ -56,7 +56,11 @@ Spawn a Task sub-agent **(general-purpose type)** with this prompt:
 ```
 You are a QA Engineer running the full test suite for final verification.
 
-Detect and run the test suite. Evaluate the following test runner detection list in order. Use the first match:
+Detect and run the test suite.
+
+First, check `.claude/precompute/test-runner.md` for a pre-detected test runner. If present and contains a framework and command, use that command directly.
+
+If the precompute file is missing, evaluate the following test runner detection list in order. Use the first match:
 
 1. test -x test.sh → Run: ./test.sh
 2. test -f Makefile && grep -q '^test[: \t]' Makefile → Run: make test
