@@ -1,57 +1,18 @@
 {
-  "test_files": [
-    "buildcrew/tests/tdd/convergence_loop.bats"
-  ],
-  "stub_files": [
-    "buildcrew/lib/convergence.sh"
-  ],
-  "test_dir": "buildcrew/tests/tdd",
-  "test_count": 21,
+  "test_files": ["tests/tdd/ac01_no_uat_help_text.bats"],
+  "stub_files": [],
+  "test_dir": "tests/tdd",
+  "test_count": 4,
   "all_failing": true,
   "framework": "bats",
-  "run_command": "cd buildcrew && bats tests/tdd/convergence_loop.bats",
+  "run_command": "bats tests/tdd/ac01_no_uat_help_text.bats",
   "ac_coverage": {
-    "AC-01": [
-      "AC-01: convergence_loop initializes iteration counter to 0",
-      "AC-01: convergence_loop increments iteration counter",
-      "AC-01: convergence_loop stops after 3 iterations"
-    ],
-    "AC-02": [
-      "AC-02: convergence_check detects CONVERGED signal in response",
-      "AC-02: convergence_check rejects response without CONVERGED",
-      "AC-02: convergence_check case-sensitive for CONVERGED"
-    ],
-    "AC-03": [
-      "AC-03: convergence_handle_failure logs warning for missing output",
-      "AC-03: convergence_handle_failure records which iteration failed"
-    ],
-    "AC-04": [
-      "AC-04: convergence_loop_finalize prepares state for Pass 3",
-      "AC-04: Pass 3 can read convergence findings"
-    ],
-    "AC-05": [
-      "AC-05: convergence_is_revision_cycle returns true when plan-review-prev.md exists",
-      "AC-05: convergence_is_revision_cycle returns false when plan-review-prev.md missing",
-      "AC-05: convergence_get_prompt uses revision variant when in revision cycle",
-      "AC-05: convergence_get_prompt uses fresh variant when not in revision cycle"
-    ],
-    "AC-06": [
-      "AC-06: convergence_write_review_output creates plan-review.md",
-      "AC-06: plan-review.md includes verdict from synthesis"
-    ],
-    "AC-07": [
-      "AC-07: convergence_map_verdict maps approved correctly",
-      "AC-07: convergence_map_verdict maps needs_revision correctly",
-      "AC-07: convergence_map_verdict maps rejected correctly"
-    ],
-    "AC-08": [
-      "AC-08: workflow.sh can be sourced without modification"
-    ],
-    "AC-09": [
-      "AC-09: convergence loop integrates with review phase"
-    ]
+    "AC-01": ["test_AC-01_buildcrew_help_output_contains_exactly_one_instance_of_--no-uat_flag"],
+    "AC-02": ["test_AC-02_--no-uat_line_matches_exact_format_with_description"],
+    "AC-03": ["test_AC-03_--no-uat_line_immediately_follows_--no-tdd_line_in_help"],
+    "AC-04": ["test_AC-04_bin/buildcrew_source_contains_--no-uat_in_print_help_function"]
   },
   "checksums": {
-    "buildcrew/tests/tdd/convergence_loop.bats": "bafcc82101e3d16526b595a8c63efa68e5db694e77448ae68285c6bed347b551"
+    "tests/tdd/ac01_no_uat_help_text.bats": "c6f16c2e60aee7ea1d7a73400d7006efd110cbc89f965a5a73387cd16d1dafd3"
   }
 }
