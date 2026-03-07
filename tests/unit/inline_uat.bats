@@ -198,8 +198,10 @@ VEOF
 # ─────────────────────────────────────────────────────────────────────────────
 
 @test "run_inline_uat: help text includes --no-uat" {
-    run grep -- '--no-uat' "$BUILDCREW_ROOT/lib/workflow.sh"
+    # Behavioral: invoke parse_args --help and assert on stdout
+    run parse_args --help
     [ "$status" -eq 0 ]
+    [[ "$output" == *"--no-uat"* ]]
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -207,9 +209,12 @@ VEOF
 # ─────────────────────────────────────────────────────────────────────────────
 
 @test "process_task_isolated: does NOT contain inline UAT block" {
-    # The inline UAT block (delimited by "── Inline UAT ──" / "── End Inline UAT ──") has been removed
-    run grep -n '── Inline UAT ──' "$BUILDCREW_ROOT/lib/workflow.sh"
-    [ "$status" -ne 0 ]
+    # Semi-structural via declare -f: tests the function as loaded into the shell (sourced in setup()).
+    # Fully behavioral invocation is infeasible: process_task_isolated has ~20 dependencies
+    # (git ops, claude invocations, lock files) that cannot be mocked in a unit test.
+    local body
+    body="$(declare -f process_task_isolated)"
+    [[ "$body" != *"── Inline UAT ──"* ]]
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -217,23 +222,29 @@ VEOF
 # ─────────────────────────────────────────────────────────────────────────────
 
 @test "main: post-completion UAT trigger exists after 'All backlog tasks processed'" {
-    local success_line uat_line
-    success_line=$(grep -n 'All backlog tasks processed' "$BUILDCREW_ROOT/lib/workflow.sh" | head -1 | cut -d: -f1)
-    # Find the sequential post-completion UAT (in main(), not _batch_post_completion)
-    uat_line=$(grep -n '# Post-completion UAT$' "$BUILDCREW_ROOT/lib/workflow.sh" | tail -1 | cut -d: -f1)
-    [ -n "$success_line" ]
-    [ -n "$uat_line" ]
-    [ "$uat_line" -gt "$success_line" ]
+    # Semi-structural via declare -f: tests the loaded main() function body (sourced in setup()).
+    # Calling main() directly is infeasible: it runs the entire workflow orchestrator.
+    local body success_pos uat_pos
+    body="$(declare -f main)"
+    success_pos=$(echo "$body" | grep -n 'All backlog tasks processed' | head -1 | cut -d: -f1)
+    uat_pos=$(echo "$body" | grep -n 'run_inline_uat' | tail -1 | cut -d: -f1)
+    [ -n "$success_pos" ]
+    [ -n "$uat_pos" ]
+    [ "$uat_pos" -gt "$success_pos" ]
 }
 
 @test "main: post-completion UAT is guarded by NO_UAT and failed and README and SINGLE_TASK" {
-    run grep 'NO_UAT.*failed.*README.*SINGLE_TASK' "$BUILDCREW_ROOT/lib/workflow.sh"
-    [ "$status" -eq 0 ]
+    # Semi-structural via declare -f: A behavioral test would require calling main() with 4
+    # different configurations, which is infeasible (full orchestrator with git ops, claude, etc.).
+    local body
+    body="$(declare -f main)"
+    [[ "$body" == *'NO_UAT'*'failed'*'README'*'SINGLE_TASK'* ]]
 }
 
 @test "main: post-completion UAT skips when failed > 0 with info message" {
-    run grep 'Skipping UAT.*task(s) failed' "$BUILDCREW_ROOT/lib/workflow.sh"
-    [ "$status" -eq 0 ]
+    # Semi-structural via declare -f: same rationale as previous test.
+    local body="$(declare -f main)"
+    [[ "$body" == *'Skipping UAT'*'task(s) failed'* ]]
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -241,12 +252,15 @@ VEOF
 # ─────────────────────────────────────────────────────────────────────────────
 
 @test "_batch_post_completion: UAT trigger exists after post-build verification" {
-    local post_build_line uat_line
-    post_build_line=$(grep -n 'Post-build verification passed' "$BUILDCREW_ROOT/lib/workflow.sh" | head -1 | cut -d: -f1)
-    uat_line=$(grep -n 'Post-completion UAT on merged code' "$BUILDCREW_ROOT/lib/workflow.sh" | head -1 | cut -d: -f1)
-    [ -n "$post_build_line" ]
-    [ -n "$uat_line" ]
-    [ "$uat_line" -gt "$post_build_line" ]
+    # Semi-structural via declare -f: _batch_post_completion requires batch mode infrastructure
+    # (worktrees, merge operations, git state) that cannot be mocked in a unit test.
+    local body post_build_pos uat_pos
+    body="$(declare -f _batch_post_completion)"
+    post_build_pos=$(echo "$body" | grep -n 'Post-build verification passed\|post.build.*verif' | head -1 | cut -d: -f1)
+    uat_pos=$(echo "$body" | grep -n 'run_inline_uat' | head -1 | cut -d: -f1)
+    [ -n "$post_build_pos" ]
+    [ -n "$uat_pos" ]
+    [ "$uat_pos" -gt "$post_build_pos" ]
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -254,8 +268,11 @@ VEOF
 # ─────────────────────────────────────────────────────────────────────────────
 
 @test "_batch_launch_task: forwards --no-uat when set" {
-    run grep -A2 'NO_UAT.*--no-uat' "$BUILDCREW_ROOT/lib/workflow.sh"
-    [ "$status" -eq 0 ]
+    # Semi-structural via declare -f: _batch_launch_task spawns background subprocesses in worktrees
+    # and manages batch coordination state; a mock binary approach is impractical.
+    local body
+    body="$(declare -f _batch_launch_task)"
+    [[ "$body" == *'--no-uat'* ]]
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -331,9 +348,13 @@ VEOF
 # ─────────────────────────────────────────────────────────────────────────────
 
 @test "main task loop: no task_result -eq 2 handling" {
-    # With inline UAT removed, process_task_isolated only returns 0 or 1
-    run grep 'task_result -eq 2' "$BUILDCREW_ROOT/lib/workflow.sh"
-    [ "$status" -ne 0 ]
+    # Semi-structural via declare -f: process_task_isolated/main cannot be invoked due to side effects.
+    # With inline UAT removed, neither function should check for exit code 2.
+    local body main_body
+    body="$(declare -f process_task_isolated)"
+    [[ "$body" != *'task_result -eq 2'* ]]
+    main_body="$(declare -f main)"
+    [[ "$main_body" != *'task_result -eq 2'* ]]
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -341,12 +362,31 @@ VEOF
 # ─────────────────────────────────────────────────────────────────────────────
 
 @test "cmd_uat: standalone mode sources workflow.sh" {
-    run grep 'source.*workflow.sh' "$BUILDCREW_ROOT/bin/buildcrew"
+    # cmd_uat is defined in bin/buildcrew which cannot be sourced directly (no BASH_SOURCE guard).
+    # Extract the function via sed, load it, and verify it references run_inline_uat (from workflow.sh).
+    run bash -c '
+      source "'"$BUILDCREW_ROOT"'/lib/common.sh" 2>/dev/null || true
+      source "'"$BUILDCREW_ROOT"'/lib/workflow.sh" 2>/dev/null || true
+      eval "$(sed -n "/^cmd_uat()/,/^}/p" "'"$BUILDCREW_ROOT"'/bin/buildcrew")"
+      type cmd_uat && declare -f cmd_uat | grep -q run_inline_uat
+    '
     [ "$status" -eq 0 ]
+    [[ "$output" == *"function"* ]]
 }
 
 @test "cmd_uat: standalone mode exits 1 without README.md" {
-    run grep -A3 'No README.md found' "$BUILDCREW_ROOT/bin/buildcrew"
-    [ "$status" -eq 0 ]
-    [[ "$output" == *"exit 1"* ]]
+    # Behavioral: extract cmd_uat and invoke it without a README.md; verify exit 1 + error message.
+    # The README check fires before any sourcing (line 2231 in bin/buildcrew), so no complex deps arise.
+    rm -f README.md
+    run bash -c '
+      export BUILDCREW_HOME="'"$BUILDCREW_ROOT"'"
+      source "'"$BUILDCREW_ROOT"'/lib/common.sh" 2>/dev/null || true
+      source "'"$BUILDCREW_ROOT"'/lib/version.sh" 2>/dev/null || true
+      source "'"$BUILDCREW_ROOT"'/lib/update.sh" 2>/dev/null || true
+      eval "$(sed -n "/^cmd_uat()/,/^}/p" "'"$BUILDCREW_ROOT"'/bin/buildcrew")"
+      cd "'"$PWD"'"
+      cmd_uat
+    '
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"README"* ]]
 }

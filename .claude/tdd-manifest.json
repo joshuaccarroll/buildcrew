@@ -1,57 +1,47 @@
 {
   "test_files": [
-    "buildcrew/tests/tdd/convergence_loop.bats"
+    "tests/tdd/test_ac01_tdd_directory_documented.bats",
+    "tests/tdd/test_ac02_inline_uat_behavioral.bats",
+    "tests/tdd/test_ac03_stream_processor_polling.bats",
+    "tests/tdd/test_ac04_through_ac08_tests_pass.bats"
   ],
-  "stub_files": [
-    "buildcrew/lib/convergence.sh"
-  ],
-  "test_dir": "buildcrew/tests/tdd",
-  "test_count": 21,
+  "stub_files": [],
+  "test_dir": "tests/tdd",
+  "test_count": 19,
   "all_failing": true,
   "framework": "bats",
-  "run_command": "cd buildcrew && bats tests/tdd/convergence_loop.bats",
+  "run_command": "bats tests/tdd/test_ac*.bats",
   "ac_coverage": {
     "AC-01": [
-      "AC-01: convergence_loop initializes iteration counter to 0",
-      "AC-01: convergence_loop increments iteration counter",
-      "AC-01: convergence_loop stops after 3 iterations"
+      "AC-01: tests/README.md exists",
+      "AC-01: tests/README.md contains 'TDD' reference",
+      "AC-01: tests/README.md explains what tests/tdd contains",
+      "AC-01: tests/README.md explains why tests/tdd is excluded"
     ],
     "AC-02": [
-      "AC-02: convergence_check detects CONVERGED signal in response",
-      "AC-02: convergence_check rejects response without CONVERGED",
-      "AC-02: convergence_check case-sensitive for CONVERGED"
+      "AC-02: inline_uat.bats no longer greps lib/workflow.sh for --no-uat",
+      "AC-02: inline_uat.bats no longer greps for inline UAT markers",
+      "AC-02: inline_uat.bats no longer greps for post-completion UAT order",
+      "AC-02: inline_uat.bats no longer greps for UAT guards",
+      "AC-02: inline_uat.bats no longer greps for task_result -eq 2",
+      "AC-02: inline_uat.bats no longer greps bin/buildcrew for cmd_uat"
     ],
     "AC-03": [
-      "AC-03: convergence_handle_failure logs warning for missing output",
-      "AC-03: convergence_handle_failure records which iteration failed"
+      "AC-03: stream_processor.bats has polling loop",
+      "AC-03: stream_processor.bats polling loop uses sleep 0.1",
+      "AC-03: stream_processor.bats no bare sleep before grep",
+      "AC-03: stream_processor.bats preserves sleep 2 in input pipe"
     ],
-    "AC-04": [
-      "AC-04: convergence_loop_finalize prepares state for Pass 3",
-      "AC-04: Pass 3 can read convergence findings"
-    ],
-    "AC-05": [
-      "AC-05: convergence_is_revision_cycle returns true when plan-review-prev.md exists",
-      "AC-05: convergence_is_revision_cycle returns false when plan-review-prev.md missing",
-      "AC-05: convergence_get_prompt uses revision variant when in revision cycle",
-      "AC-05: convergence_get_prompt uses fresh variant when not in revision cycle"
-    ],
-    "AC-06": [
-      "AC-06: convergence_write_review_output creates plan-review.md",
-      "AC-06: plan-review.md includes verdict from synthesis"
-    ],
-    "AC-07": [
-      "AC-07: convergence_map_verdict maps approved correctly",
-      "AC-07: convergence_map_verdict maps needs_revision correctly",
-      "AC-07: convergence_map_verdict maps rejected correctly"
-    ],
-    "AC-08": [
-      "AC-08: workflow.sh can be sourced without modification"
-    ],
-    "AC-09": [
-      "AC-09: convergence loop integrates with review phase"
-    ]
+    "AC-04": ["AC-04: bats tests/unit/precompute.bats exits 0"],
+    "AC-05": ["AC-05: bats tests/unit/batch.bats exits 0"],
+    "AC-06": ["AC-06: bats tests/unit/model_effort.bats exits 0"],
+    "AC-07": ["AC-07: bats tests/unit/inline_uat.bats exits 0"],
+    "AC-08": ["AC-08: ./test.sh (full suite) exits 0"]
   },
   "checksums": {
-    "buildcrew/tests/tdd/convergence_loop.bats": "bafcc82101e3d16526b595a8c63efa68e5db694e77448ae68285c6bed347b551"
+    "tests/tdd/test_ac01_tdd_directory_documented.bats": "968cd4a430c93018e9380446b89582e948b2e422317b40db0dbb0420e2683d28",
+    "tests/tdd/test_ac02_inline_uat_behavioral.bats": "4bf3c602778dc237f82c13a67f263d03648226654dca71d5555c451967d752e2",
+    "tests/tdd/test_ac03_stream_processor_polling.bats": "3b205b74413b4729463e03e7aabae4dde918735a73dfde0fc86d22d88fde73a8",
+    "tests/tdd/test_ac04_through_ac08_tests_pass.bats": "c892018721748e7f668f892b1607e6b0f417bc29a8494b0cb0965457f0f02100"
   }
 }
