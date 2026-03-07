@@ -43,7 +43,9 @@ Testing philosophy:
 
 ### Step 2: Detect Test Framework
 
-Look for these indicators in the project:
+First, read `.claude/precompute/test-runner.md` if it exists. If it contains a detected framework and command, use those values directly.
+
+If the precompute file is missing, detect manually using these indicators:
 
 | Indicator | Framework | Command |
 |-----------|-----------|---------|
