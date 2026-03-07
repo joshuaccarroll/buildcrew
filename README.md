@@ -87,7 +87,7 @@ Each task runs through the following phases (each a separate Claude invocation).
 ### Core Commands
 
 ```bash
-buildcrew init               # Link project to BuildCrew
+buildcrew init               # Link project to BuildCrew (--quick skips interactive prompts)
 buildcrew plan               # Launch Product Manager for project planning
 buildcrew run                # Run workflow on BACKLOG.md
 buildcrew status             # Show backlog stats and last workflow result
@@ -106,6 +106,7 @@ buildcrew reset              # Clear blocked tasks and clean up artifacts
 | `--resume` | Resume an interrupted task from where it left off. Invocation counts from the interrupted run are preserved and count against the `MAX_INVOCATIONS` ceiling. Use `--max-invocations N` on resume to increase the budget if needed |
 | `--task N` | Target a specific task by name or number |
 | `--skip-spec` | Skip spec phase (task already has acceptance criteria) |
+| `--no-tdd` | Disable TDD mode (skip tdd-scaffold phase for standard tasks) |
 | `--full-pipeline` | Force all phases regardless of complexity |
 | `--interactive` | Restore interactive review pauses (spec, plan) |
 | `--sequential` | Run tasks one at a time (default is parallel). Auto-forced by `--single`, `--task`, `--review` |
@@ -146,6 +147,9 @@ Project-level config lives in `.buildcrew/config` (created by `buildcrew init`):
 | `COMPLEXITY_AWARE` | `true` | Auto-detect task complexity and skip phases. `false` = all phases |
 | `AUTO_MODE` | `true` | Auto-approve interactive pauses. `false` = prompt for review |
 | `MAX_PARALLEL` | `5` | Max concurrent tasks in parallel mode |
+| `CLAUDE_MODEL` | `auto` | Default model: `auto`, `opus`, `sonnet`, `haiku`, or full model ID |
+| `CLAUDE_EFFORT` | `medium` | Default effort level: `low`, `medium`, `high` |
+| `TARGET_DIR` | (none) | Target subdirectory for multi-project setups |
 
 UAT-specific config keys (`UAT_MAX_RETRIES`, `UAT_ARTIFACT_TYPE`, `UAT_RUN_COMMAND`, `BUILD_UAT_WATCH_TIMEOUT`) are documented in the [UAT section](#uat-configuration) below.
 
@@ -195,6 +199,7 @@ Use `Override:` to replace a named rule section from the defaults, or `Disable:`
 cp .buildcrew/context/users.md.example .buildcrew/context/users.md
 cp .buildcrew/context/principles.md.example .buildcrew/context/principles.md
 cp .buildcrew/context/domain.md.example .buildcrew/context/domain.md
+cp .buildcrew/context/conventions.md.example .buildcrew/context/conventions.md
 ```
 
 When present, these are injected into every phase's prompt automatically.
