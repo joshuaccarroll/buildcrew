@@ -944,14 +944,29 @@ _batch_poll_tasks() {
             local manifest_idx=$((i + 1))
             local task_text="${_batch_tasks[$i]}"
             if [[ $exit_code -eq 0 ]]; then
-                _batch_mark_task "$manifest_idx" "completed" "0"
-                _batch_completed=$(( _batch_completed + 1 ))
-                # Sync completion to BACKLOG.md (parent-side — child's mark is uncommitted and lost during squash merge)
-                local _saved_bf="$BACKLOG_FILE"
-                [[ "$BACKLOG_FILE" != /* ]] && BACKLOG_FILE="$__BATCH_CWD/$BACKLOG_FILE"
-                mark_task_complete "$task_text"
-                BACKLOG_FILE="$_saved_bf"
-                log_msg "Task $manifest_idx completed: '$task_text'"
+                # Sentinel check: verify the task actually reached verify/complete
+                local _wt_path _sentinel
+                _wt_path=$(_batch_worktree_path "${_batch_slugs[$i]}" "${_batch_target_dirs[$i]:-}")
+                local _phase_result="$_wt_path/.claude/phase-result.json"
+                if [[ -f "$_phase_result" ]]; then
+                    _sentinel=$(jq -r '"\(.phase)/\(.verdict)"' "$_phase_result" 2>/dev/null) || _sentinel=""
+                else
+                    _sentinel=""
+                fi
+                if [[ "$_sentinel" == "verify/complete" ]]; then
+                    _batch_mark_task "$manifest_idx" "completed" "0"
+                    _batch_completed=$(( _batch_completed + 1 ))
+                    # Sync completion to BACKLOG.md (parent-side — child's mark is uncommitted and lost during squash merge)
+                    local _saved_bf="$BACKLOG_FILE"
+                    [[ "$BACKLOG_FILE" != /* ]] && BACKLOG_FILE="$__BATCH_CWD/$BACKLOG_FILE"
+                    mark_task_complete "$task_text"
+                    BACKLOG_FILE="$_saved_bf"
+                    log_msg "Task $manifest_idx completed: '$task_text'"
+                else
+                    _batch_mark_task "$manifest_idx" "failed" "0"
+                    _batch_failed=$(( _batch_failed + 1 ))
+                    log_msg "Task $manifest_idx failed (sentinel=${_sentinel:-missing}): '$task_text'"
+                fi
             else
                 _batch_mark_task "$manifest_idx" "failed" "$exit_code"
                 _batch_failed=$(( _batch_failed + 1 ))

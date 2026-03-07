@@ -1171,6 +1171,12 @@ EOF
     _batch_init_manifest "main" "abc123"
     _batch_add_task 1 "Fix the bug" "fix-the-bug"
 
+    # Set up sentinel file for verify/complete
+    local _wt_dir="$TEST_DIR/_wt_sentinel"
+    mkdir -p "$_wt_dir/.claude"
+    echo '{"phase":"verify","verdict":"complete","details":"ok"}' > "$_wt_dir/.claude/phase-result.json"
+    _batch_worktree_path() { echo "$_wt_dir"; }
+
     # Launch a process that succeeds
     true &
     local pid=$!
@@ -1179,6 +1185,7 @@ EOF
     _batch_pids[0]="$pid"
     _batch_tasks[0]="Fix the bug"
     _batch_slugs[0]="fix-the-bug"
+    _batch_target_dirs=()
     _batch_running=1
     _batch_completed=0
     _batch_failed=0
@@ -1223,6 +1230,12 @@ EOF
     _batch_init_manifest "main" "abc123"
     _batch_add_task 1 "Fix the bug" "fix-the-bug"
 
+    # Set up sentinel file for verify/complete
+    local _wt_dir="$TEST_DIR/_wt_sentinel"
+    mkdir -p "$_wt_dir/.claude"
+    echo '{"phase":"verify","verdict":"complete","details":"ok"}' > "$_wt_dir/.claude/phase-result.json"
+    _batch_worktree_path() { echo "$_wt_dir"; }
+
     true &
     local pid=$!
     wait "$pid" 2>/dev/null || true
@@ -1230,6 +1243,7 @@ EOF
     _batch_pids[0]="$pid"
     _batch_tasks[0]="Fix the bug"
     _batch_slugs[0]="fix-the-bug"
+    _batch_target_dirs=()
     _batch_running=1
     _batch_completed=0
     _batch_failed=0
@@ -1238,6 +1252,131 @@ EOF
 
     # Prefixes preserved, complexity tag dropped
     grep -q '^\- \[x\] \[plan:~/.claude/plans/foo.md\] \[dir:project-a\] Fix the bug$' BACKLOG.md
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Sentinel validation tests (_batch_poll_tasks verify/complete check)
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Helper: set up state for _batch_poll_tasks sentinel tests.
+# Sets __sentinel_wt_dir to the worktree directory (use directly, not in subshell).
+_setup_sentinel_test() {
+    cat > BACKLOG.md << 'EOF'
+- [ ] Fix the bug
+EOF
+    BACKLOG_FILE="BACKLOG.md"
+    __BATCH_CWD="$(pwd)"
+    _batch_init_manifest "main" "abc123"
+    _batch_add_task 1 "Fix the bug" "fix-the-bug"
+
+    # Create a worktree directory for the sentinel file
+    __sentinel_wt_dir="$TEST_DIR/worktree-sentinel"
+    mkdir -p "$__sentinel_wt_dir/.claude"
+    _batch_worktree_path() { echo "$__sentinel_wt_dir"; }
+}
+
+# Helper: launch and reap a process with given exit code (0=true, nonzero=false)
+_setup_poll_process() {
+    local succeed="${1:-true}"
+    $succeed &
+    local pid=$!
+    wait "$pid" 2>/dev/null || true
+    _batch_pids=()
+    _batch_pids[0]="$pid"
+    _batch_tasks[0]="Fix the bug"
+    _batch_slugs[0]="fix-the-bug"
+    _batch_target_dirs=()
+    _batch_running=1
+    _batch_completed=0
+    _batch_failed=0
+}
+
+# AC-01: No phase-result.json → failed
+@test "_batch_poll_tasks sentinel: no phase-result.json marks failed" {
+    _setup_sentinel_test
+    rm -f "$__sentinel_wt_dir/.claude/phase-result.json"
+    _setup_poll_process true
+
+    _batch_poll_tasks
+
+    [[ $_batch_failed -eq 1 ]]
+    [[ $_batch_completed -eq 0 ]]
+    grep -q '^\- \[ \] Fix the bug' BACKLOG.md
+}
+
+# AC-02: verify/complete → completed
+@test "_batch_poll_tasks sentinel: verify/complete marks completed" {
+    _setup_sentinel_test
+    echo '{"phase":"verify","verdict":"complete","details":"ok"}' > "$__sentinel_wt_dir/.claude/phase-result.json"
+    _setup_poll_process true
+
+    _batch_poll_tasks
+
+    [[ $_batch_completed -eq 1 ]]
+    [[ $_batch_failed -eq 0 ]]
+    grep -q '^\- \[x\] Fix the bug' BACKLOG.md
+}
+
+# AC-03: build/complete → failed
+@test "_batch_poll_tasks sentinel: build/complete marks failed" {
+    _setup_sentinel_test
+    echo '{"phase":"build","verdict":"complete","details":"ok"}' > "$__sentinel_wt_dir/.claude/phase-result.json"
+    _setup_poll_process true
+
+    _batch_poll_tasks
+
+    [[ $_batch_failed -eq 1 ]]
+    [[ $_batch_completed -eq 0 ]]
+    grep -q '^\- \[ \] Fix the bug' BACKLOG.md
+}
+
+# AC-05: Log message includes sentinel value
+@test "_batch_poll_tasks sentinel: log includes sentinel value on failure" {
+    _setup_sentinel_test
+    echo '{"phase":"build","verdict":"complete","details":"ok"}' > "$__sentinel_wt_dir/.claude/phase-result.json"
+    __LOG_FILE="$TEST_DIR/batch.log"
+    log_msg() { echo "$*" >> "$__LOG_FILE"; }
+    _setup_poll_process true
+
+    _batch_poll_tasks
+
+    grep -q 'sentinel=build/complete' "$__LOG_FILE"
+}
+
+# AC-06: Non-zero exit + valid phase-result → still failed (regression guard)
+@test "_batch_poll_tasks sentinel: non-zero exit still marks failed even with verify/complete" {
+    _setup_sentinel_test
+    echo '{"phase":"verify","verdict":"complete","details":"ok"}' > "$__sentinel_wt_dir/.claude/phase-result.json"
+    _setup_poll_process false
+
+    _batch_poll_tasks
+
+    [[ $_batch_failed -eq 1 ]]
+    [[ $_batch_completed -eq 0 ]]
+}
+
+# AC-07: Corrupt JSON → failed
+@test "_batch_poll_tasks sentinel: corrupt JSON marks failed" {
+    _setup_sentinel_test
+    echo 'NOT VALID JSON{{{' > "$__sentinel_wt_dir/.claude/phase-result.json"
+    _setup_poll_process true
+
+    _batch_poll_tasks
+
+    [[ $_batch_failed -eq 1 ]]
+    [[ $_batch_completed -eq 0 ]]
+}
+
+# AC-08: uat-execute/pass → failed (only verify/complete counts)
+@test "_batch_poll_tasks sentinel: uat-execute/pass marks failed" {
+    _setup_sentinel_test
+    echo '{"phase":"uat-execute","verdict":"pass","details":"ok"}' > "$__sentinel_wt_dir/.claude/phase-result.json"
+    _setup_poll_process true
+
+    _batch_poll_tasks
+
+    [[ $_batch_failed -eq 1 ]]
+    [[ $_batch_completed -eq 0 ]]
 }
 
 @test "batch resume: reconciles previously-completed tasks in BACKLOG.md" {
