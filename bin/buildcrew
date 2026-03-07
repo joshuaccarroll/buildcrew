@@ -70,6 +70,7 @@ print_help() {
     echo "    --resume      Resume an interrupted task from where it left off (with 'run')"
     echo "    --task N      Target a specific task by name or number (with 'run')"
     echo "    --skip-spec   Skip the specification refinement phase (with 'run')"
+    echo "    --skip-prereqs  Skip the prerequisites check phase (with 'run')"
     echo "    --strict      (default) Require ALL acceptance criteria to pass before commit (with 'run')"
     echo "    --no-strict   Allow partial acceptance criteria pass — proceed with warnings (with 'run')"
     echo "    --max-invocations N  Max Claude invocations per run (default: 15, with 'run')"

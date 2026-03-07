@@ -1,57 +1,63 @@
 {
   "test_files": [
-    "buildcrew/tests/tdd/convergence_loop.bats"
+    "tests/tdd/prereqs_workflow_integration.bats"
   ],
-  "stub_files": [
-    "buildcrew/lib/convergence.sh"
-  ],
-  "test_dir": "buildcrew/tests/tdd",
-  "test_count": 21,
-  "all_failing": true,
+  "stub_files": [],
+  "test_dir": "tests/tdd",
+  "test_count": 29,
+  "all_failing": false,
   "framework": "bats",
-  "run_command": "cd buildcrew && bats tests/tdd/convergence_loop.bats",
+  "run_command": "bats tests/tdd/prereqs_workflow_integration.bats",
   "ac_coverage": {
     "AC-01": [
-      "AC-01: convergence_loop initializes iteration counter to 0",
-      "AC-01: convergence_loop increments iteration counter",
-      "AC-01: convergence_loop stops after 3 iterations"
+      "AC-01a: phase_completed recognizes 'prereqs' as valid phase name",
+      "AC-01b: update_workflow_state accepts 'prereqs' phase",
+      "AC-01c: phase_completed returns 0 after prereqs marked completed",
+      "AC-01d: PHASE_RESULT_FILE can be written with prereqs verdict"
     ],
     "AC-02": [
-      "AC-02: convergence_check detects CONVERGED signal in response",
-      "AC-02: convergence_check rejects response without CONVERGED",
-      "AC-02: convergence_check case-sensitive for CONVERGED"
+      "AC-02a: prereqs skill directory check works",
+      "AC-02b: prereqs skill directory can be created",
+      "AC-02c: skipped verdict is handled correctly",
+      "AC-02d: phase can record 'no prereqs detected' in status"
     ],
     "AC-03": [
-      "AC-03: convergence_handle_failure logs warning for missing output",
-      "AC-03: convergence_handle_failure records which iteration failed"
+      "AC-03a: AUTO_MODE variable exists and defaults to false or true",
+      "AC-03b: phase result 'blocked' verdict is valid",
+      "AC-03c: non-auto mode can be set"
     ],
     "AC-04": [
-      "AC-04: convergence_loop_finalize prepares state for Pass 3",
-      "AC-04: Pass 3 can read convergence findings"
+      "AC-04a: AUTO_MODE=true is recognized",
+      "AC-04b: warnings file can be written to .buildcrew/prereqs.json",
+      "AC-04c: auto mode result is skipped not blocked"
     ],
     "AC-05": [
-      "AC-05: convergence_is_revision_cycle returns true when plan-review-prev.md exists",
-      "AC-05: convergence_is_revision_cycle returns false when plan-review-prev.md missing",
-      "AC-05: convergence_get_prompt uses revision variant when in revision cycle",
-      "AC-05: convergence_get_prompt uses fresh variant when not in revision cycle"
+      "AC-05a: parse_args sets SKIP_PREREQS=true when flag present",
+      "AC-05b: parse_args accepts both --skip-spec and --skip-prereqs",
+      "AC-05c: SKIP_PREREQS defaults to false",
+      "AC-05d: forward flag syntax works for sub-invocations",
+      "AC-05e: forward flag syntax when false produces empty string"
     ],
     "AC-06": [
-      "AC-06: convergence_write_review_output creates plan-review.md",
-      "AC-06: plan-review.md includes verdict from synthesis"
+      "AC-06a: parse_args sets RESUME_MODE with --resume flag",
+      "AC-06b: phase_completed returns 0 after prereqs already done",
+      "AC-06c: resume with completed prereqs should skip the phase"
     ],
     "AC-07": [
-      "AC-07: convergence_map_verdict maps approved correctly",
-      "AC-07: convergence_map_verdict maps needs_revision correctly",
-      "AC-07: convergence_map_verdict maps rejected correctly"
+      "AC-07a: prereqs skill directory existence is checkable",
+      "AC-07b: phase count logic can include prereqs when skill exists",
+      "AC-07c: phase count omits prereqs when skill missing"
     ],
     "AC-08": [
-      "AC-08: workflow.sh can be sourced without modification"
+      "AC-08a: --skip-prereqs appears in help text",
+      "AC-08b: help text documents --skip-prereqs alongside --skip-spec"
     ],
     "AC-09": [
-      "AC-09: convergence loop integrates with review phase"
+      "AC-09a: get_phase_max_turns recognizes 'prereqs' phase",
+      "AC-09b: prereqs max turns is a reasonable value"
     ]
   },
   "checksums": {
-    "buildcrew/tests/tdd/convergence_loop.bats": "bafcc82101e3d16526b595a8c63efa68e5db694e77448ae68285c6bed347b551"
+    "tests/tdd/prereqs_workflow_integration.bats": "1ec5796a058fc26afd2a82a52f4e4312c1509a3e0b171a23fb00711891980840"
   }
 }

@@ -160,6 +160,7 @@ __DISCOVERY_HEARTBEAT_PID=""
 get_phase_max_turns() {
     case "$1" in
         spec)       echo 50 ;;
+        prereqs)    echo 30 ;;
         research)   echo 40 ;;
         review)     echo 50 ;;
         tdd-scaffold) echo 40 ;;
@@ -186,6 +187,7 @@ ORIGINAL_BRANCH=""
 HAS_REMOTE=false
 GH_AVAILABLE=false
 SKIP_SPEC=false
+SKIP_PREREQS=false
 STRICT_MODE=true
 STRICT_EXPLICIT=false   # true only when --strict or --no-strict is passed explicitly
 VERBOSE=false
@@ -249,6 +251,10 @@ parse_args() {
                 ;;
             --skip-spec)
                 SKIP_SPEC=true
+                shift
+                ;;
+            --skip-prereqs)
+                SKIP_PREREQS=true
                 shift
                 ;;
             --strict)
@@ -339,6 +345,7 @@ parse_args() {
                 echo "  --task NAME  Target a specific task by name or number (implies --single)"
                 echo "  --resume     Resume an interrupted task from where it left off"
                 echo "  --skip-spec  Skip the specification refinement phase (for tasks with detailed specs already)"
+                echo "  --skip-prereqs  Skip the prerequisites check phase"
                 echo "  --strict     (default) Require ALL acceptance criteria to pass before commit"
                 echo "  --no-strict  Allow partial acceptance criteria pass — proceed with warnings"
                 echo "  --max-invocations N  Set maximum Claude invocations per run (default: 15)"
@@ -919,6 +926,7 @@ _batch_launch_task() {
             --model "$CLAUDE_MODEL" \
             $( [[ -n "${CLAUDE_EFFORT:-}" ]] && echo "--effort $CLAUDE_EFFORT" ) \
             $( [[ "$SKIP_SPEC" == "true" ]] && echo "--skip-spec" ) \
+            $( [[ "$SKIP_PREREQS" == "true" ]] && echo "--skip-prereqs" ) \
             $( [[ "$FULL_PIPELINE" == "true" ]] && echo "--full-pipeline" ) \
             $( [[ "$VERBOSE" == "true" ]] && echo "--verbose" ) \
             $( [[ "$NO_UAT" == "true" ]] && echo "--no-uat" ) \
@@ -2478,7 +2486,7 @@ update_workflow_state() {
     local status="$2"
     local tmp
     tmp="${WORKFLOW_STATE_FILE}.tmp.$$"
-    mkdir -p .buildcrew
+    mkdir -p .buildcrew .claude
     {
         echo "TASK_NUM=${__WF_TASK_NUM:-}"
         echo "TOTAL_TASKS=${__WF_TOTAL_TASKS:-}"
@@ -2491,6 +2499,21 @@ update_workflow_state() {
         echo "AUTO_MODE=${AUTO_MODE:-true}"
     } > "$tmp"
     mv -f "$tmp" "$WORKFLOW_STATE_FILE"
+    # Also write a JSON snapshot for dashboard and tooling consumers
+    local ts
+    ts=$(date +%s)
+    printf '{"phase":"%s","status":"%s","task_num":%s,"total_tasks":%s,"timestamp":%s}\n' \
+        "$phase" "$status" "${__WF_TASK_NUM:-0}" "${__WF_TOTAL_TASKS:-0}" "$ts" \
+        > ".claude/workflow-status.json"
+    # Track completed phases in-session so phase_completed works within a run
+    if [[ "$status" == "complete" || "$status" == "skipped" ]]; then
+        local already=false
+        local p
+        for p in $__RESUME_PHASES; do
+            [[ "$p" == "$phase" ]] && already=true && break
+        done
+        [[ "$already" == "false" ]] && __RESUME_PHASES="${__RESUME_PHASES:+$__RESUME_PHASES }$phase"
+    fi
 }
 
 # Remove workflow state file and any orphaned temp files.
@@ -3791,6 +3814,42 @@ process_task_isolated() {
     fi
     # If spec skill is not installed, fall through silently (no message, no context set)
 
+    # --- prereqs (optional, skipped with --skip-prereqs or when skill not installed) ---
+    if [[ -d ".claude/skills/buildcrew-prereqs" ]]; then
+        if [[ "$SKIP_PREREQS" == "true" ]]; then
+            print_info "Skipping phase: prereqs (--skip-prereqs flag set)"
+            update_workflow_state "prereqs" "skipped"
+        elif phase_completed "prereqs"; then
+            print_info "Skipping phase: prereqs (completed in previous run)"
+            update_workflow_state "prereqs" "skipped"
+        else
+            local prereqs_extra="${__spec_context}"
+            if [[ "$AUTO_MODE" == "true" ]]; then
+                prereqs_extra="${prereqs_extra:+$prereqs_extra | }AUTO MODE: report warnings only, do not block"
+            fi
+            run_phase_group "prereqs" "$task" "$prereqs_extra" "$task_complexity" || { mark_task_blocked "$task" "prereqs phase failed to produce a valid result"; clear_task_progress; return 1; }
+
+            local prereqs_verdict
+            prereqs_verdict=$(jq -r '.verdict // "complete"' "$PHASE_RESULT_FILE")
+            case "$prereqs_verdict" in
+                complete|skipped)
+                    __completed_phases="${__completed_phases:+$__completed_phases }prereqs"
+                    save_task_progress "$task" "$__completed_phases" "$__INVOCATION_COUNT"
+                    ;;
+                blocked)
+                    mark_task_blocked "$task" "Unmet prerequisites — run with --skip-prereqs to bypass"
+                    clear_task_progress
+                    return 1
+                    ;;
+                *)
+                    mark_task_blocked "$task" "prereqs phase returned unknown verdict: $prereqs_verdict"
+                    clear_task_progress
+                    return 1
+                    ;;
+            esac
+        fi
+    fi
+
     # --- research + plan ---
     if [[ "$__plan_ref_skip" == "true" ]]; then
         print_info "Skipping phase: research (reviewed plan provided: $plan_ref)"
@@ -4371,11 +4430,12 @@ main() {
     else
         local _phase_count=5
         [[ "$SKIP_SPEC" != "true" ]] && [[ -d ".claude/skills/buildcrew-spec" ]] && _phase_count=$((_phase_count + 1))
+        [[ "$SKIP_PREREQS" != "true" ]] && [[ -d ".claude/skills/buildcrew-prereqs" ]] && _phase_count=$((_phase_count + 1))
         [[ -d ".claude/skills/buildcrew-simplify" ]] && _phase_count=$((_phase_count + 1))
         [[ -d ".claude/skills/buildcrew-tdd-scaffold" ]] && _phase_count=$((_phase_count + 1))
         print_info "Mode: Phase-isolated ($_phase_count invocations per task)"
     fi
-    print_debug "Flags: skip_spec=$SKIP_SPEC strict=$STRICT_MODE review=$HUMAN_REVIEW branch=$GIT_BRANCH resume=$RESUME_MODE full_pipeline=$FULL_PIPELINE complexity_aware=$COMPLEXITY_AWARE auto=$AUTO_MODE"
+    print_debug "Flags: skip_spec=$SKIP_SPEC skip_prereqs=$SKIP_PREREQS strict=$STRICT_MODE review=$HUMAN_REVIEW branch=$GIT_BRANCH resume=$RESUME_MODE full_pipeline=$FULL_PIPELINE complexity_aware=$COMPLEXITY_AWARE auto=$AUTO_MODE"
 
     # Git branch setup
     if [[ "$GIT_BRANCH" == "true" ]]; then
@@ -4405,7 +4465,7 @@ main() {
     # Create lockfile now (after worktree check, so --branch mode sees clean tree)
     mkdir -p .buildcrew
     log_init
-    log_msg "Flags: skip_spec=$SKIP_SPEC strict=$STRICT_MODE review=$HUMAN_REVIEW branch=$GIT_BRANCH resume=$RESUME_MODE full_pipeline=$FULL_PIPELINE complexity_aware=$COMPLEXITY_AWARE auto=$AUTO_MODE"
+    log_msg "Flags: skip_spec=$SKIP_SPEC skip_prereqs=$SKIP_PREREQS strict=$STRICT_MODE review=$HUMAN_REVIEW branch=$GIT_BRANCH resume=$RESUME_MODE full_pipeline=$FULL_PIPELINE complexity_aware=$COMPLEXITY_AWARE auto=$AUTO_MODE"
     print_info "Activity log: $__LOG_FILE"
     echo $$ > "$LOCKFILE"
     trap cleanup EXIT INT TERM
@@ -4512,6 +4572,9 @@ main() {
                         phase_list="research review build codereview verify"
                         if [[ "$SKIP_SPEC" != "true" ]] && [[ -d ".claude/skills/buildcrew-spec" ]]; then
                             phase_list="spec $phase_list"
+                        fi
+                        if [[ "$SKIP_PREREQS" != "true" ]] && [[ -d ".claude/skills/buildcrew-prereqs" ]]; then
+                            phase_list="${phase_list/research/prereqs research}"
                         fi
                         if [[ -d ".claude/skills/buildcrew-tdd-scaffold" ]]; then
                             phase_list="${phase_list/review build/review tdd-scaffold build}"
