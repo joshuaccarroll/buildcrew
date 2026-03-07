@@ -880,7 +880,7 @@ WRAPPER_EOF
                 fi
             fi
 
-            __UAT_ARTIFACT_CONTEXT="CLI commands are available in harness/.artifact-bin/. Use these to invoke the artifact."
+            __UAT_ARTIFACT_CONTEXT="Artifact type: cli. CLI commands are available in harness/.artifact-bin/. Use these to invoke the artifact."
             ;;
 
         api)
@@ -957,7 +957,7 @@ WRAPPER_EOF
             if [[ -z "$server_url" ]]; then
                 server_url="http://localhost:8080"
             fi
-            __UAT_ARTIFACT_CONTEXT="The API server is running at $server_url. Make HTTP requests to test it."
+            __UAT_ARTIFACT_CONTEXT="Artifact type: api. The API server is running at $server_url. Make HTTP requests to test it."
             ;;
 
         library)
@@ -988,16 +988,16 @@ WRAPPER_EOF
                 fi
             } > "$env_file"
 
-            __UAT_ARTIFACT_CONTEXT="Source harness/.artifact-env before running tests (\`source harness/.artifact-env\`). The library is importable from the UAT directory."
+            __UAT_ARTIFACT_CONTEXT="Artifact type: library. Source harness/.artifact-env before running tests (\`source harness/.artifact-env\`). The library is importable from the UAT directory."
             ;;
 
         other)
-            __UAT_ARTIFACT_CONTEXT="No artifact environment could be set up. Mark all scenarios as error with message: 'Set UAT_ARTIFACT_TYPE and UAT_RUN_COMMAND in .buildcrew/config'."
+            __UAT_ARTIFACT_CONTEXT="Artifact type: other. No artifact environment could be set up. Mark all scenarios as error with message: 'Set UAT_ARTIFACT_TYPE and UAT_RUN_COMMAND in .buildcrew/config'."
             ;;
 
         *)
             print_warning "Unknown artifact type: $artifact_type"
-            __UAT_ARTIFACT_CONTEXT="No artifact environment could be set up. Unknown artifact type: $artifact_type."
+            __UAT_ARTIFACT_CONTEXT="Artifact type: $artifact_type. No artifact environment could be set up. Unknown artifact type: $artifact_type."
             ;;
     esac
 

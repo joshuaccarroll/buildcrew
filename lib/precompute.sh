@@ -224,6 +224,41 @@ EOF
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
+# collect_scenario_results — log UAT scenario results for observability
+# Called after execute phase succeeds, before uat_phase_verdict.
+# Reads results/iteration-N/scenario-results.json and logs a summary line.
+# ─────────────────────────────────────────────────────────────────────────────
+collect_scenario_results() {
+    local results_file="$1"
+
+    if [[ -z "$results_file" ]]; then
+        print_debug "collect_scenario_results: no results file specified"
+        return 1
+    fi
+
+    if [[ ! -f "$results_file" ]]; then
+        print_debug "collect_scenario_results: file not found: $results_file"
+        return 1
+    fi
+
+    # Validate JSON
+    if ! jq empty "$results_file" 2>/dev/null; then
+        print_debug "collect_scenario_results: invalid JSON in $results_file"
+        return 1
+    fi
+
+    local total passed failed errored disputed
+    total=$(jq 'length' "$results_file")
+    passed=$(jq '[.[] | select(.status == "pass")] | length' "$results_file")
+    failed=$(jq '[.[] | select(.status == "fail")] | length' "$results_file")
+    errored=$(jq '[.[] | select(.status == "error")] | length' "$results_file")
+    disputed=$(jq '[.[] | select(.status == "disputed")] | length' "$results_file")
+
+    print_info "UAT scenario results: total=$total pass=$passed fail=$failed error=$errored disputed=$disputed"
+    return 0
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
 # run_precompute — orchestrate all precomputation
 # ─────────────────────────────────────────────────────────────────────────────
 run_precompute() {

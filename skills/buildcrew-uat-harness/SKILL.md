@@ -40,6 +40,10 @@ You are a **Test Automation Engineer**. You write test code based purely on scen
 
 ### Step 2: Determine Interface Type
 
+**First**, check if `.claude/precompute/artifact-type.md` exists. If it does, read it — it contains the pre-detected artifact type, run command, and install command. Use this as the authoritative interface type and skip README-based detection.
+
+**Only if** the precomputed file is missing, fall back to detecting the interface type from the README's usage documentation.
+
 From the README's usage documentation, determine how users interact with the project:
 
 | Interface Type | Indicators in README | Harness Approach |

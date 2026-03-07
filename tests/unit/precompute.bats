@@ -233,3 +233,63 @@ teardown() {
     precompute_uat
     grep -q "Type: api" .claude/precompute/artifact-type.md
 }
+
+# ─────────────────────────────────────────────────────────────────────────────
+# collect_scenario_results tests
+# ─────────────────────────────────────────────────────────────────────────────
+
+@test "collect_scenario_results: returns 1 when no file specified" {
+    run collect_scenario_results ""
+    [ "$status" -eq 1 ]
+}
+
+@test "collect_scenario_results: returns 1 when file not found" {
+    run collect_scenario_results "/nonexistent/file.json"
+    [ "$status" -eq 1 ]
+}
+
+@test "collect_scenario_results: returns 1 for invalid JSON" {
+    echo "not json" > bad.json
+    run collect_scenario_results "bad.json"
+    [ "$status" -eq 1 ]
+}
+
+@test "collect_scenario_results: logs summary for valid results" {
+    cat > results.json << 'EOF'
+[
+  {"scenario": "test1", "status": "pass"},
+  {"scenario": "test2", "status": "fail"},
+  {"scenario": "test3", "status": "error"},
+  {"scenario": "test4", "status": "disputed"},
+  {"scenario": "test5", "status": "pass"}
+]
+EOF
+    run collect_scenario_results "results.json"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"total=5"* ]]
+    [[ "$output" == *"pass=2"* ]]
+    [[ "$output" == *"fail=1"* ]]
+    [[ "$output" == *"error=1"* ]]
+    [[ "$output" == *"disputed=1"* ]]
+}
+
+@test "collect_scenario_results: handles all-pass results" {
+    cat > results.json << 'EOF'
+[
+  {"scenario": "test1", "status": "pass"},
+  {"scenario": "test2", "status": "pass"}
+]
+EOF
+    run collect_scenario_results "results.json"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"total=2"* ]]
+    [[ "$output" == *"pass=2"* ]]
+    [[ "$output" == *"fail=0"* ]]
+}
+
+@test "collect_scenario_results: handles empty array" {
+    echo '[]' > results.json
+    run collect_scenario_results "results.json"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"total=0"* ]]
+}

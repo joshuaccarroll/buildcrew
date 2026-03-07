@@ -3379,6 +3379,14 @@ run_inline_uat() {
         return 1
     }
 
+    # 4a. Copy precomputed artifact-type.md into UAT working directory
+    local precompute_src="$project_dir/.claude/precompute/artifact-type.md"
+    if [[ -f "$precompute_src" ]]; then
+        mkdir -p .claude/precompute
+        cp "$precompute_src" .claude/precompute/artifact-type.md
+        print_debug "Copied precomputed artifact-type.md to UAT dir"
+    fi
+
     local run_start_time
     run_start_time=$(date +%s)
     local signal_dir="$HOME/.buildcrew/uat-signals/$project_name"
@@ -3481,6 +3489,10 @@ run_inline_uat() {
 
         # Stop server after execute (for api-type artifacts)
         uat_stop_server
+
+        # Log scenario results before verdict for observability
+        local scenario_results_file="results/iteration-${build_iteration}/scenario-results.json"
+        collect_scenario_results "$scenario_results_file" || true
 
         # Phase 6: Write verdict
         write_uat_state "verdict" "$build_iteration" "running"
