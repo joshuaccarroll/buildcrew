@@ -1,24 +1,38 @@
 {
-  "test_files": ["tests/unit/uat.bats"],
+  "test_files": ["tests/tdd/uat_mock_validation.bats"],
   "stub_files": ["lib/uat.sh"],
-  "test_dir": "tests/unit",
-  "test_count": 10,
-  "all_failing": true,
+  "test_dir": "tests/tdd",
+  "test_count": 14,
+  "all_failing": false,
   "framework": "bats",
-  "run_command": "bats tests/unit/uat.bats",
+  "run_command": "bats tests/tdd/uat_mock_validation.bats",
   "ac_coverage": {
-    "AC-01": ["AC-01: detect_http_dependencies detects external service URLs in README"],
-    "AC-02": ["AC-02: detect_http_dependencies returns empty when no external services"],
-    "AC-03": ["AC-03: generate_mock_stubs creates Python stub for detected dependency"],
-    "AC-04": ["AC-04: generate_start_mocks creates start-mocks.sh that exports MOCK_*_URL vars"],
-    "AC-05": ["AC-05: generate_stop_mocks creates stop-mocks.sh that kills by PID files"],
-    "AC-06": ["AC-06: mock scripts set correct env var format MOCK_<SERVICE>_URL"],
-    "AC-07": ["AC-07: mock setup in harness is skipped when no dependencies detected"],
-    "AC-08": ["AC-08: start-mocks.sh and stop-mocks.sh are executable when generated"],
-    "AC-09": ["AC-09: mock PID files are created by start-mocks.sh"],
-    "AC-10": ["AC-10: stop-mocks.sh removes processes from PID files"]
+    "AC-01": [
+      "AC-01: catalog file created at .buildcrew/uat-mocks.json",
+      "AC-01: catalog supports multiple mock entries",
+      "AC-01: second mock write appends to existing catalog (not overwrites)"
+    ],
+    "AC-02": [
+      "AC-02: catalog contains service name in JSON",
+      "AC-02: catalog contains doc_url with correct value",
+      "AC-02: catalog contains mock_file with correct path",
+      "AC-02: catalog contains validation_status field",
+      "AC-02: catalog contains generated_at ISO timestamp",
+      "AC-02: catalog contains doc_fetched_at ISO timestamp",
+      "AC-02: catalog contains both mocks after multiple writes"
+    ],
+    "AC-03": [
+      "AC-03: uat_validate_mock_urls returns success even with unreachable URL",
+      "AC-03: catalog mocks array is valid JSON after validation"
+    ],
+    "AC-04": [
+      "AC-04: catalog remains valid JSON after validation call"
+    ],
+    "AC-05": [
+      "AC-05: catalog is written to .buildcrew (not in isolated agent dir)"
+    ]
   },
   "checksums": {
-    "tests/unit/uat.bats": "00bda65bf716793732e024fd17a31c760ed93f96bc3de45e99870d07646e1c3c"
+    "tests/tdd/uat_mock_validation.bats": "553e8e56bcc3c736118c39c8dd6fd6759d9f90905dc45637acea60388928505d"
   }
 }

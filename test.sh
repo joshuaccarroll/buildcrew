@@ -55,6 +55,13 @@ if [ "$VERBOSE" = true ]; then
     BATS_ARGS="--verbose-run"
 fi
 
+# Run TDD tests (if they exist)
+if [ -d "$SCRIPT_DIR/tests/tdd/" ] && ls "$SCRIPT_DIR/tests/tdd/"*.bats > /dev/null 2>&1; then
+    echo -e "${GREEN}TDD Tests${NC}"
+    bats $BATS_ARGS "$SCRIPT_DIR/tests/tdd/"*.bats
+    echo ""
+fi
+
 # Run unit tests
 echo -e "${GREEN}Unit Tests${NC}"
 bats $BATS_ARGS "$SCRIPT_DIR/tests/unit/"*.bats

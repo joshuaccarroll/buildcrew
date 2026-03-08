@@ -67,54 +67,118 @@ __UAT_README_HASH=""
 # ─────────────────────────────────────────────────────────────────────────────────
 
 load_uat_config() {
-    local config_file=".buildcrew/config"
-    [[ -f "$config_file" ]] || return 0
+    local value
+    # Use read_config_key() from common.sh to avoid reimplementing file parsing
+    value=$(read_config_key "UAT_POLL_INTERVAL")
+    [[ "$value" =~ ^[1-9][0-9]*$ ]] && UAT_POLL_INTERVAL="$value"
 
-    local line key value
-    while IFS= read -r line || [[ -n "$line" ]]; do
-        # Skip comments and blank lines
-        [[ "$line" =~ ^[[:space:]]*# ]] && continue
-        [[ "$line" =~ ^[[:space:]]*$ ]] && continue
-        if [[ "$line" =~ ^([A-Z_][A-Z0-9_]*)=(.*)$ ]]; then
-            key="${BASH_REMATCH[1]}"
-            value="${BASH_REMATCH[2]}"
-            # Strip surrounding quotes
-            value="${value#\"}"
-            value="${value%\"}"
-            value="${value#\'}"
-            value="${value%\'}"
-            case "$key" in
-                UAT_POLL_INTERVAL)
-                    if [[ "$value" =~ ^[1-9][0-9]*$ ]]; then
-                        UAT_POLL_INTERVAL="$value"
-                    fi
-                    ;;
-                UAT_ARTIFACT_TIMEOUT)
-                    if [[ "$value" =~ ^[1-9][0-9]*$ ]]; then
-                        UAT_ARTIFACT_TIMEOUT="$value"
-                    fi
-                    ;;
-                UAT_EXECUTE_TIMEOUT)
-                    if [[ "$value" =~ ^[1-9][0-9]*$ ]]; then
-                        UAT_EXECUTE_TIMEOUT="$value"
-                    fi
-                    ;;
-                UAT_HEALTH_CHECK_TIMEOUT)
-                    if [[ "$value" =~ ^[1-9][0-9]*$ ]]; then
-                        UAT_HEALTH_CHECK_TIMEOUT="$value"
-                    fi
-                    ;;
-                UAT_MAX_RETRIES)
-                    if [[ "$value" =~ ^[1-9][0-9]*$ ]]; then
-                        UAT_MAX_RETRIES="$value"
-                    fi
-                    ;;
-            esac
-        fi
-    done < "$config_file"
+    value=$(read_config_key "UAT_ARTIFACT_TIMEOUT")
+    [[ "$value" =~ ^[1-9][0-9]*$ ]] && UAT_ARTIFACT_TIMEOUT="$value"
+
+    value=$(read_config_key "UAT_EXECUTE_TIMEOUT")
+    [[ "$value" =~ ^[1-9][0-9]*$ ]] && UAT_EXECUTE_TIMEOUT="$value"
+
+    value=$(read_config_key "UAT_HEALTH_CHECK_TIMEOUT")
+    [[ "$value" =~ ^[1-9][0-9]*$ ]] && UAT_HEALTH_CHECK_TIMEOUT="$value"
+
+    value=$(read_config_key "UAT_MAX_RETRIES")
+    [[ "$value" =~ ^[1-9][0-9]*$ ]] && UAT_MAX_RETRIES="$value"
 }
 
 # sha256_hash and read_config_key are now in common.sh (sourced above)
+
+# ─────────────────────────────────────────────────────────────────────────────────
+# Mock Validation and Catalog Management
+# ─────────────────────────────────────────────────────────────────────────────────
+
+# uat_write_mock_catalog — write or append mock to .buildcrew/uat-mocks.json catalog
+# Args: service_name, doc_url, mock_file
+# Creates catalog with schema: {service, doc_url, doc_fetched_at, mock_file, validation_status}
+uat_write_mock_catalog() {
+    local service="$1"
+    local doc_url="$2"
+    local mock_file="$3"
+
+    mkdir -p .buildcrew
+    local catalog=".buildcrew/uat-mocks.json"
+    local now
+    now=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+
+    if [ ! -f "$catalog" ]; then
+        # Create new catalog using jq to avoid JSON injection
+        jq -n \
+            --arg generated_at "$now" \
+            --arg service "$service" \
+            --arg doc_url "$doc_url" \
+            --arg doc_fetched_at "$now" \
+            --arg mock_file "$mock_file" \
+            '{generated_at: $generated_at, mocks: [{service: $service, doc_url: $doc_url, doc_fetched_at: $doc_fetched_at, mock_file: $mock_file, validation_status: "unchecked"}]}' \
+            > "$catalog"
+    else
+        # Append to existing catalog using jq to ensure valid JSON
+        local temp_catalog
+        temp_catalog=$(mktemp)
+
+        # Build entry as JSON object and append to mocks array
+        jq \
+            --arg service "$service" \
+            --arg doc_url "$doc_url" \
+            --arg doc_fetched_at "$now" \
+            --arg mock_file "$mock_file" \
+            '.mocks += [{service: $service, doc_url: $doc_url, doc_fetched_at: $doc_fetched_at, mock_file: $mock_file, validation_status: "unchecked"}]' \
+            "$catalog" > "$temp_catalog"
+        mv "$temp_catalog" "$catalog"
+    fi
+}
+
+# uat_validate_mock_urls — validate all mock doc URLs in catalog, update validation_status
+# Uses curl --head --silent --max-time 5 to check each URL
+# Updates validation_status: valid (2xx), unreachable (non-2xx/error), unchecked (curl missing)
+uat_validate_mock_urls() {
+    local catalog=".buildcrew/uat-mocks.json"
+
+    [ -f "$catalog" ] || return 0
+
+    if ! command -v curl &>/dev/null; then
+        echo "[UAT] Warning: curl not found — skipping mock URL validation" >&2
+        return 0
+    fi
+
+    if ! command -v jq &>/dev/null; then
+        echo "[UAT] Warning: jq not found — skipping mock URL validation" >&2
+        return 0
+    fi
+
+    local count
+    count=$(jq '.mocks | length' "$catalog" 2>/dev/null) || return 0
+
+    local i=0
+    while [ "$i" -lt "$count" ]; do
+        local doc_url
+        doc_url=$(jq -r ".mocks[$i].doc_url" "$catalog")
+
+        local http_code
+        http_code=$(curl --head --silent --max-time 5 -o /dev/null -w "%{http_code}" "$doc_url" 2>/dev/null) || http_code=""
+
+        local status
+        if [[ "$http_code" =~ ^2 ]]; then
+            status="valid"
+        else
+            status="unreachable"
+            echo "[UAT] Warning: mock doc URL unreachable (HTTP $http_code): $doc_url" >&2
+        fi
+
+        local temp_catalog
+        temp_catalog=$(mktemp)
+        jq --arg idx "$i" --arg s "$status" \
+            '.mocks[($idx | tonumber)].validation_status = $s' \
+            "$catalog" > "$temp_catalog" && mv "$temp_catalog" "$catalog"
+
+        i=$((i + 1))
+    done
+
+    return 0
+}
 
 # ─────────────────────────────────────────────────────────────────────────────────
 # _uat_make_error_verdict — construct a synthetic error verdict JSON array
