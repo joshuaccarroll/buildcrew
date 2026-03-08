@@ -136,7 +136,7 @@ MOCKEOF
 
 @test "AC-02: missing principles.md shows ✗ with cp command when users.md exists" {
     _mock_claude_ok
-    mkdir -p .buildcrew/context
+    command mkdir -p .buildcrew/context
     printf 'test' > .buildcrew/context/users.md
     run "$BUILDCREW_BIN" init --quick
     [ "$status" -eq 0 ]

@@ -64,7 +64,7 @@ teardown() {
 
 @test "AC-03b: SKILL.md for tdd-review must exist at correct location" {
     # After implementation, SKILL.md should be at skills/buildcrew-tdd-review/SKILL.md
-    [ -f "skills/buildcrew-tdd-review/SKILL.md" ]
+    [ -f "$BUILDCREW_ROOT/skills/buildcrew-tdd-review/SKILL.md" ]
 }
 
 # ─────────────────────────────────────────────────────────────────────────────

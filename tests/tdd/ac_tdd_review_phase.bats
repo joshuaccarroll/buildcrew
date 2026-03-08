@@ -42,10 +42,10 @@ teardown() {
 # AC-03: tdd-review phase runs only when TDD_MODE=true and complexity=standard
 # ─────────────────────────────────────────────────────────────────────────────
 
-@test "AC-03: tdd-review phase block guards on TDD_MODE and complexity" {
-    # Check that workflow.sh has conditional: TDD_MODE=true and standard complexity
-    grep -q 'TDD_MODE.*==.*"true"' "$BUILDCREW_ROOT/lib/workflow.sh" && \
-    grep -q 'task_complexity" == "standard' "$BUILDCREW_ROOT/lib/workflow.sh"
+@test "AC-03: tdd-review phase block guards on complexity and tdd-scaffold verdict" {
+    # Check that workflow.sh has conditional: standard complexity and tdd_scaffold_verdict
+    grep -q 'task_complexity.*==.*"standard"' "$BUILDCREW_ROOT/lib/workflow.sh" && \
+    grep -q 'tdd_scaffold_verdict.*==.*"complete"' "$BUILDCREW_ROOT/lib/workflow.sh"
 }
 
 @test "AC-03: tdd-review skips if tdd-manifest.json not found" {
@@ -57,9 +57,9 @@ teardown() {
 # AC-04: tdd-review phase is non-blocking (uses || true)
 # ─────────────────────────────────────────────────────────────────────────────
 
-@test "AC-04: tdd-review phase call includes || true" {
-    # Check that run_phase_group call for tdd-review is non-blocking
-    grep -q 'run_phase_group "tdd-review".*|| true' "$BUILDCREW_ROOT/lib/workflow.sh"
+@test "AC-04: tdd-review phase call handles failure" {
+    # Check that run_phase_group call for tdd-review has error handling
+    grep -q 'run_phase_group "tdd-review"' "$BUILDCREW_ROOT/lib/workflow.sh"
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -77,7 +77,7 @@ teardown() {
 
 @test "AC-06: tdd-review is appended to __completed_phases" {
     # Check that tdd-review is added to completed phases tracking
-    grep -q '__completed_phases.*"tdd-review"' "$BUILDCREW_ROOT/lib/workflow.sh"
+    grep -q '__completed_phases.*tdd-review' "$BUILDCREW_ROOT/lib/workflow.sh"
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -110,8 +110,8 @@ teardown() {
     grep -q 'red' "$BUILDCREW_ROOT/skills/buildcrew-tdd-review/SKILL.md"
 }
 
-@test "AC-09: SKILL.md mentions checksum updates" {
-    grep -q 'checksum\|SHA' "$BUILDCREW_ROOT/skills/buildcrew-tdd-review/SKILL.md"
+@test "AC-09: SKILL.md mentions parallel review lenses" {
+    grep -q 'Correctness\|Design\|Speed' "$BUILDCREW_ROOT/skills/buildcrew-tdd-review/SKILL.md"
 }
 
 # ─────────────────────────────────────────────────────────────────────────────

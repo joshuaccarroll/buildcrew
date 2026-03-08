@@ -13,6 +13,9 @@ export BUILDCREW_TEST_RUNNING=1
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+# Ensure tests run from the buildcrew root (some tests use relative paths)
+cd "$SCRIPT_DIR"
+
 # Colors
 RED='\033[0;31m'
 GREEN='\033[0;32m'

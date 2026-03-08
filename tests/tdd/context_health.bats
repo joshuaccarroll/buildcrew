@@ -138,7 +138,7 @@ assert_not_contains() {
 }
 
 @test "AC-02: only missing files appear — present files excluded" {
-    mkdir -p .buildcrew/context
+    command mkdir -p .buildcrew/context
     echo "principles" > .buildcrew/context/principles.md
     echo "lessons" > .buildcrew/lessons.md
     # users.md and domain.md missing

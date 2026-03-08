@@ -42,7 +42,7 @@ teardown() {
 }
 
 @test "AC-01c: status shows context file absent with (not set)" {
-    mkdir -p .buildcrew/context
+    command mkdir -p .buildcrew/context
     # only users.md exists; domain.md is absent
 
     printf 'users content\n' > .buildcrew/context/users.md
