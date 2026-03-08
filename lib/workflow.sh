@@ -1399,6 +1399,38 @@ _batch_post_completion() {
 
 # ── Parse task list and handle slug collisions ────────────────────────────────
 
+# Check if a slug is already enrolled in the _batch_slugs array.
+_is_slug_enrolled() {
+    local slug="$1"
+    local idx
+    for idx in "${!_batch_slugs[@]}"; do
+        [[ "${_batch_slugs[$idx]}" == "$slug" ]] && return 0
+    done
+    return 1
+}
+
+# Validate target directory when parent is not a git repo.
+# Returns 0 if valid, prints warning and returns 1 if invalid.
+_validate_target_dir() {
+    local text="$1"
+    local target_dir="$2"
+
+    if [[ -z "$target_dir" ]]; then
+        print_warning "Hot-reload: skipping '$text' — no target directory"
+        return 1
+    elif [[ ! -d "$target_dir" ]]; then
+        print_warning "Hot-reload: skipping '$text' — target dir '$target_dir' does not exist"
+        return 1
+    elif ! git -C "$target_dir" rev-parse --is-inside-work-tree &>/dev/null 2>&1; then
+        print_warning "Hot-reload: skipping '$text' — target dir '$target_dir' is not a git repo"
+        return 1
+    elif [[ -n "$(git -C "$target_dir" status --porcelain 2>/dev/null)" ]]; then
+        print_warning "Hot-reload: skipping '$text' — target dir '$target_dir' has uncommitted changes"
+        return 1
+    fi
+    return 0
+}
+
 # Parse the numbered task list into _batch_tasks[], _batch_slugs[], and _batch_target_dirs[] arrays.
 # gather_pending_tasks preserves [dir:...] prefixes; this function extracts and strips them.
 _batch_parse_task_list() {
@@ -1437,15 +1469,7 @@ _batch_parse_task_list() {
         fi
 
         # Collision check: deduplicate slugs
-        local j=0 collision=false
-        while (( j < i )); do
-            if [[ "${_batch_slugs[$j]}" == "$slug" ]]; then
-                collision=true
-                break
-            fi
-            (( j++ )) || true
-        done
-        if [[ "$collision" == "true" ]] || git rev-parse --verify "buildcrew/$slug" >/dev/null 2>&1; then
+        if _is_slug_enrolled "$slug" || git rev-parse --verify "buildcrew/$slug" >/dev/null 2>&1; then
             slug="${slug}-${i}"
         fi
         _batch_slugs[$i]="$slug"
@@ -1453,15 +1477,99 @@ _batch_parse_task_list() {
     done <<< "$task_list"
 }
 
+# Detect new pending tasks in BACKLOG.md and enroll them into the running batch.
+# Called periodically from _batch_dispatch_loop (every ~15s).
+_batch_check_new_tasks() {
+    local base_branch="$1"
+
+    # Re-read BACKLOG via gather_pending_tasks (resolves relative path same as _batch_resume)
+    local _saved_bf="$BACKLOG_FILE"
+    [[ "$BACKLOG_FILE" != /* ]] && BACKLOG_FILE="$__BATCH_CWD/$BACKLOG_FILE"
+    gather_pending_tasks
+    BACKLOG_FILE="$_saved_bf"
+
+    [[ "$__BATCH_TASK_COUNT" -eq 0 ]] && return 0
+
+    local line text plan_ref target_dir slug new_idx added=0
+    while IFS= read -r line; do
+        [[ -z "$line" ]] && continue
+        text="${line#*. }"  # strip " N. " prefix
+        [[ -z "$text" ]] && continue
+
+        # Extract and strip [plan:...] then [dir:...] — same order as _batch_parse_task_list
+        plan_ref=$(extract_task_plan_ref "$text")
+        text=$(strip_task_plan_ref "$text")
+        target_dir=$(resolve_task_target_dir "$text")
+        text=$(strip_task_dir "$text")
+
+        # Generate slug matching _batch_parse_task_list logic
+        slug=$(task_to_slug "$text")
+        if [[ -n "$target_dir" ]]; then
+            slug="$(task_to_slug "$target_dir")-${slug}"
+            slug="${slug:0:60}"
+        fi
+
+        # Dedup: skip if slug already enrolled
+        _is_slug_enrolled "$slug" && continue
+
+        # New task: suffix slug on branch collision (genuinely new task, old branch exists)
+        new_idx=${#_batch_tasks[@]}
+        if git rev-parse --verify "buildcrew/$slug" >/dev/null 2>&1; then
+            slug="${slug}-${new_idx}"
+        fi
+
+        # Validate target dir when parent is not a git repo
+        if [[ "$__BATCH_PARENT_IS_GIT" == "false" ]]; then
+            _validate_target_dir "$text" "$target_dir" || continue
+        fi
+
+        # Create worktree first — only enroll on success
+        if ! _batch_create_worktree "$slug" "$base_branch" "$target_dir"; then
+            print_warning "Hot-reload: failed to create worktree for '$text' — skipping"
+            continue
+        fi
+
+        # Enroll in parallel arrays
+        _batch_tasks[$new_idx]="$text"
+        _batch_slugs[$new_idx]="$slug"
+        _batch_target_dirs[$new_idx]="$target_dir"
+        _batch_plan_refs[$new_idx]="$plan_ref"
+        _batch_pids[$new_idx]=""
+
+        # Update manifest (1-based index)
+        _batch_add_task $((new_idx + 1)) "$text" "$slug" "$target_dir" "$plan_ref"
+
+        # Keep total task counter accurate for status reporting
+        __WF_TOTAL_TASKS=${#_batch_tasks[@]}
+
+        log_msg "Hot-reload: enrolled new task '$text' (slug: $slug)"
+        (( added++ )) || true
+    done <<< "$__BATCH_TASK_LIST"
+
+    if (( added > 0 )); then
+        print_info "Hot-reload: added $added new task(s) to batch"
+    fi
+}
+
 # ── Shared dispatch loop ──────────────────────────────────────────────────────
 
 # Main dispatch loop — launches tasks up to MAX_PARALLEL, polls for completion.
 _batch_dispatch_loop() {
-    local total="$1" base_branch="$2"
+    local base_branch="$1"
     local _batch_stopping=false
+    local _reload_counter=0
 
-    while (( _batch_completed + _batch_failed < total )); do
+    while (( _batch_completed + _batch_failed < ${#_batch_tasks[@]} )); do
         _batch_poll_tasks || true
+
+        # Hot-reload: check for new tasks periodically (every ~15s at current 3s sleep)
+        (( _reload_counter++ )) || true
+        if [[ "${BATCH_HOT_RELOAD:-}" != "false" ]] && (( _reload_counter >= 5 )); then
+            _reload_counter=0
+            if [[ "$_batch_stopping" != "true" ]]; then
+                _batch_check_new_tasks "$base_branch"
+            fi
+        fi
 
         # Stop signal: drain running tasks, then exit
         if [[ "$_batch_stopping" != "true" ]] && check_stop_signal; then
@@ -1481,7 +1589,7 @@ _batch_dispatch_loop() {
         fi
 
         # Launch new tasks while slots are available
-        while (( _batch_running < MAX_PARALLEL && _batch_next_idx < total )); do
+        while (( _batch_running < MAX_PARALLEL && _batch_next_idx < ${#_batch_tasks[@]} )); do
             local manifest_idx=$(( _batch_next_idx + 1 ))
             local status
             status=$(_batch_get_task_status "$manifest_idx")
@@ -1515,7 +1623,7 @@ _batch_dispatch_loop() {
     done
 
     if [[ "$_batch_stopping" == "true" ]]; then
-        local _batch_skipped=$(( total - _batch_completed - _batch_failed ))
+        local _batch_skipped=$(( ${#_batch_tasks[@]} - _batch_completed - _batch_failed ))
         if (( _batch_skipped > 0 )); then
             print_info "$_batch_skipped task(s) were not started. Resume with: buildcrew run --batch --resume"
         fi
@@ -1590,7 +1698,7 @@ _batch_resume() {
     echo ""
 
     clear_stop_signal
-    _batch_dispatch_loop "$total" "$base_branch"
+    _batch_dispatch_loop "$base_branch"
 }
 
 # ── Main batch entry point ────────────────────────────────────────────────────
@@ -1699,7 +1807,7 @@ enter_batch_mode() {
     echo ""
 
     clear_stop_signal
-    _batch_dispatch_loop "$total" "$base_branch"
+    _batch_dispatch_loop "$base_branch"
 }
 
 # Pause for human review when --review is set
