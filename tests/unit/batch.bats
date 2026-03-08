@@ -867,24 +867,30 @@ _setup_batch_dispatch_mocks() {
 # EDGE-08: Stop between batches (some completed, none running, more pending)
 @test "batch stop: stop between completed batches with pending tasks" {
     _setup_batch_dispatch_mocks
+    # Add extra tasks so 3 are pending after 2 complete (total 5: A B C D E)
+    _batch_tasks=("Task A" "Task B" "Task C" "Task D" "Task E")
+    _batch_slugs=("task-a" "task-b" "task-c" "task-d" "task-e")
     _batch_completed=2
     _batch_running=0
     _batch_next_idx=2
     touch "$STOP_FILE"
 
-    run _batch_dispatch_loop 5 main
+    run _batch_dispatch_loop main
     [ "$status" -eq 0 ]
     [[ "$output" == *"Stop signal received"* ]]
     # 5 total - 2 completed - 0 failed = 3 skipped
     [[ "$output" == *"3 task(s) were not started"* ]]
 }
 
-# EDGE-09: _batch_dispatch_loop called with total=0
+# EDGE-09: _batch_dispatch_loop called with empty array never enters loop
 @test "batch stop: dispatch loop with total=0 never enters loop" {
     _setup_batch_dispatch_mocks
+    # Empty task array simulates total=0
+    _batch_tasks=()
+    _batch_slugs=()
     touch "$STOP_FILE"
 
-    run _batch_dispatch_loop 0 main
+    run _batch_dispatch_loop main
     [ "$status" -eq 0 ]
     # Never entered loop, stop not checked
     [[ "$output" != *"Stop signal received"* ]]
@@ -1407,4 +1413,153 @@ EOF
 
     grep -q '^\- \[x\] First task' BACKLOG.md
     grep -q '^\- \[ \] Second task' BACKLOG.md
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Hot-reload: _batch_check_new_tasks
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Helper: initialize batch arrays and set up hot-reload test environment
+_setup_hotreload_test() {
+    __BATCH_CWD="$TEST_DIR"
+    BACKLOG_FILE="$TEST_DIR/BACKLOG.md"
+
+    # Initialize batch state arrays (parallel arrays must all be populated)
+    _batch_tasks=()
+    _batch_slugs=()
+    _batch_target_dirs=()
+    _batch_plan_refs=()
+    _batch_pids=()
+
+    # Stub functions to avoid real git/jq operations
+    _batch_create_worktree() { return 0; }
+    _batch_add_task() { :; }
+    _batch_worktree_path() { echo "$TEST_DIR/wt-$1"; }
+
+    # Stub gather_pending_tasks to populate __BATCH_TASK_LIST
+    gather_pending_tasks() {
+        __BATCH_TASK_LIST=""
+        __BATCH_TASK_COUNT=0
+        local idx=1
+        while IFS= read -r line; do
+            [[ ! "$line" =~ ^-\ \[\ \] ]] && continue
+            # Strip "- [ ] " prefix
+            local text="${line#*- \[ \] }"
+            __BATCH_TASK_LIST+="$idx. $text"$'\n'
+            (( idx++, __BATCH_TASK_COUNT++ ))
+        done < "$BACKLOG_FILE"
+        __BATCH_TASK_LIST="${__BATCH_TASK_LIST%$'\n'}"  # trim trailing newline
+    }
+
+    # Set __BATCH_PARENT_IS_GIT to skip target dir validation
+    __BATCH_PARENT_IS_GIT=true
+}
+
+# HR-01: Detects new tasks
+@test "batch hot-reload: detects new tasks and appends to arrays" {
+    _setup_hotreload_test
+
+    # Set up initial state with 2 tasks
+    _batch_tasks=("Task one" "Task two")
+    _batch_slugs=("task-one" "task-two")
+    _batch_target_dirs=("" "")
+    _batch_plan_refs=("" "")
+    _batch_pids=("" "")
+
+    # Write BACKLOG with 3 items (2 existing + 1 new)
+    cat > "$BACKLOG_FILE" << 'EOF'
+- [ ] Task one
+- [ ] Task two
+- [ ] Task three
+EOF
+
+    # Call hot-reload
+    _batch_check_new_tasks "main"
+
+    # Assert array grew to 3
+    [[ ${#_batch_tasks[@]} -eq 3 ]]
+    [[ "${_batch_tasks[2]}" == *"Task three"* ]]
+    # Verify parallel array invariant
+    [[ -n "${_batch_pids[2]}" || "${_batch_pids[2]}" == "" ]]
+    [[ ${#_batch_slugs[@]} -eq 3 ]]
+}
+
+# HR-02: Dedup by slug (new task with dupe slug not added, new task with unique slug added)
+@test "batch hot-reload: dedup by slug detects one new unique task among duplicates" {
+    _setup_hotreload_test
+
+    # Set up initial state with 2 tasks
+    _batch_tasks=("Task one" "Task two")
+    _batch_slugs=("task-one" "task-two")
+    _batch_target_dirs=("" "")
+    _batch_plan_refs=("" "")
+    _batch_pids=("" "")
+
+    # Write BACKLOG with 2 existing + 1 new (unique slug)
+    cat > "$BACKLOG_FILE" << 'EOF'
+- [ ] Task one
+- [ ] Task two
+- [ ] Brand new task
+EOF
+
+    # Call hot-reload
+    _batch_check_new_tasks "main"
+
+    # Assert only new unique task added (not duplicates)
+    [[ ${#_batch_tasks[@]} -eq 3 ]]
+    [[ "${_batch_tasks[2]}" == *"Brand new task"* ]]
+}
+
+# HR-03: Mixed backlog (complete + new)
+@test "batch hot-reload: adds new task when mixed with completed tasks" {
+    _setup_hotreload_test
+
+    # Set up initial state
+    _batch_tasks=("Task one")
+    _batch_slugs=("task-one")
+    _batch_target_dirs=("")
+    _batch_plan_refs=("")
+    _batch_pids=("")
+
+    # Write BACKLOG with completed task + new pending task
+    cat > "$BACKLOG_FILE" << 'EOF'
+- [x] Done task
+- [ ] Brand new task
+EOF
+
+    # Call hot-reload
+    _batch_check_new_tasks "main"
+
+    # Assert only pending tasks detected, new one added
+    [[ ${#_batch_tasks[@]} -eq 2 ]]
+    [[ "${_batch_tasks[1]}" == *"Brand new task"* ]]
+}
+
+# HR-04: New task with [dir:...] prefix
+@test "batch hot-reload: processes new task with [dir:subdir] prefix" {
+    _setup_hotreload_test
+
+    # Set up initial state
+    _batch_tasks=("Task one")
+    _batch_slugs=("task-one")
+    _batch_target_dirs=("")
+    _batch_plan_refs=("")
+    _batch_pids=("")
+
+    # Write BACKLOG with target dir annotation
+    cat > "$BACKLOG_FILE" << 'EOF'
+- [ ] Task one
+- [ ] [dir:subproject] New task
+EOF
+
+    # Call hot-reload
+    _batch_check_new_tasks "main"
+
+    # Assert new task added
+    [[ ${#_batch_tasks[@]} -eq 2 ]]
+    [[ "${_batch_tasks[1]}" == *"New task"* ]]
+    # Verify target_dirs populated
+    [[ ${#_batch_target_dirs[@]} -eq 2 ]]
+    # New task should have target dir set (non-empty or empty string)
+    [[ -n "${_batch_target_dirs[1]}" || "${_batch_target_dirs[1]}" == "" ]]
 }

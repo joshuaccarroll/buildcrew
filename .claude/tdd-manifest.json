@@ -1,57 +1,30 @@
 {
   "test_files": [
-    "buildcrew/tests/tdd/convergence_loop.bats"
+    "buildcrew/tests/unit/batch.bats"
   ],
   "stub_files": [
-    "buildcrew/lib/convergence.sh"
+    "buildcrew/lib/workflow.sh"
   ],
-  "test_dir": "buildcrew/tests/tdd",
-  "test_count": 21,
+  "test_dir": "buildcrew/tests/unit",
+  "test_count": 4,
   "all_failing": true,
   "framework": "bats",
-  "run_command": "cd buildcrew && bats tests/tdd/convergence_loop.bats",
+  "run_command": "bats buildcrew/tests/unit/batch.bats",
   "ac_coverage": {
     "AC-01": [
-      "AC-01: convergence_loop initializes iteration counter to 0",
-      "AC-01: convergence_loop increments iteration counter",
-      "AC-01: convergence_loop stops after 3 iterations"
+      "batch hot-reload: detects new tasks and appends to arrays"
     ],
     "AC-02": [
-      "AC-02: convergence_check detects CONVERGED signal in response",
-      "AC-02: convergence_check rejects response without CONVERGED",
-      "AC-02: convergence_check case-sensitive for CONVERGED"
+      "batch hot-reload: dedup by slug detects one new unique task among duplicates"
     ],
     "AC-03": [
-      "AC-03: convergence_handle_failure logs warning for missing output",
-      "AC-03: convergence_handle_failure records which iteration failed"
+      "batch hot-reload: adds new task when mixed with completed tasks"
     ],
     "AC-04": [
-      "AC-04: convergence_loop_finalize prepares state for Pass 3",
-      "AC-04: Pass 3 can read convergence findings"
-    ],
-    "AC-05": [
-      "AC-05: convergence_is_revision_cycle returns true when plan-review-prev.md exists",
-      "AC-05: convergence_is_revision_cycle returns false when plan-review-prev.md missing",
-      "AC-05: convergence_get_prompt uses revision variant when in revision cycle",
-      "AC-05: convergence_get_prompt uses fresh variant when not in revision cycle"
-    ],
-    "AC-06": [
-      "AC-06: convergence_write_review_output creates plan-review.md",
-      "AC-06: plan-review.md includes verdict from synthesis"
-    ],
-    "AC-07": [
-      "AC-07: convergence_map_verdict maps approved correctly",
-      "AC-07: convergence_map_verdict maps needs_revision correctly",
-      "AC-07: convergence_map_verdict maps rejected correctly"
-    ],
-    "AC-08": [
-      "AC-08: workflow.sh can be sourced without modification"
-    ],
-    "AC-09": [
-      "AC-09: convergence loop integrates with review phase"
+      "batch hot-reload: processes new task with [dir:subdir] prefix"
     ]
   },
   "checksums": {
-    "buildcrew/tests/tdd/convergence_loop.bats": "bafcc82101e3d16526b595a8c63efa68e5db694e77448ae68285c6bed347b551"
+    "buildcrew/tests/unit/batch.bats": "08b90eb28d9defb1566e5240e34e9acb20b703ce0e12abe5571a079a2ce7ec65"
   }
 }
