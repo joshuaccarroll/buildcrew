@@ -789,7 +789,7 @@ _uat_run_agent_phase() {
     # Start file monitor
     start_file_monitor "$UAT_PHASE_RESULT_FILE" "claude.*${phase_tag}"
 
-    update_workflow_state "$phase_name" "running" "$resolved_model"
+    type update_workflow_state &>/dev/null && update_workflow_state "$phase_name" "running" "$resolved_model"
     print_info "Phase: $phase_name (max $max_turns turns)"
     log_msg "=== UAT PHASE: $phase_name started (max_turns=$max_turns) ==="
 
@@ -813,7 +813,7 @@ _uat_run_agent_phase() {
 
         start_file_monitor "$UAT_PHASE_RESULT_FILE" "claude.*${phase_tag}"
 
-        update_workflow_state "$phase_name" "running" "$resolved_model"
+        type update_workflow_state &>/dev/null && update_workflow_state "$phase_name" "running" "$resolved_model"
         log_msg "=== UAT PHASE: $phase_name retry ==="
         if [[ -n "${__LOG_FILE:-}" ]]; then
             log_msg "--- claude output start: $phase_name ---"
@@ -830,7 +830,7 @@ _uat_run_agent_phase() {
             local phase_end; phase_end=$(date +%s)
             print_info "Phase $phase_name completed in $(_uat_format_duration $((phase_end - phase_start)))"
             print_error "Phase $phase_name failed after retry"
-            update_workflow_state "$phase_name" "failed" "$resolved_model"
+            type update_workflow_state &>/dev/null && update_workflow_state "$phase_name" "failed" "$resolved_model"
             return 1
         fi
     fi
@@ -846,13 +846,13 @@ _uat_run_agent_phase() {
         local phase_end; phase_end=$(date +%s)
         print_info "Phase $phase_name completed in $(_uat_format_duration $((phase_end - phase_start)))"
         print_error "Phase $phase_name verdict: fail — $details"
-        update_workflow_state "$phase_name" "failed" "$resolved_model"
+        type update_workflow_state &>/dev/null && update_workflow_state "$phase_name" "failed" "$resolved_model"
         return 1
     fi
 
     local phase_end; phase_end=$(date +%s)
     print_info "Phase $phase_name completed in $(_uat_format_duration $((phase_end - phase_start)))"
-    update_workflow_state "$phase_name" "complete" "$resolved_model"
+    type update_workflow_state &>/dev/null && update_workflow_state "$phase_name" "complete" "$resolved_model"
     return 0
 }
 
