@@ -4630,6 +4630,11 @@ main() {
 
     clear_workflow_state
     cleanup_log "$failed"
+
+    # Propagate failure to exit code so batch parent can detect it
+    if [[ "$failed" -gt 0 ]]; then
+        exit 1
+    fi
 }
 
 # ─────────────────────────────────────────────────────────────────────────────────
