@@ -1,84 +1,19 @@
 {
-  "test_files": [
-    "tests/tdd/workflow_diagram_mermaid.bats"
-  ],
+  "test_files": [],
   "stub_files": [],
-  "test_dir": "tests/tdd",
-  "test_count": 50,
-  "all_failing": true,
-  "note": "For documentation tasks, some tests pass because keywords exist elsewhere in README (tables, prose). This is expected. The critical tests (mermaid block existence, specific diagram edges) fail until implementation.",
-  "framework": "test.sh",
+  "test_dir": null,
+  "test_count": 0,
+  "all_failing": false,
+  "framework": "test.sh (bats)",
   "run_command": "./test.sh",
   "ac_coverage": {
-    "AC-01": [
-      "AC-01a: README.md contains exactly one mermaid code block",
-      "AC-01b: Mermaid block is located in 'How It Works' section",
-      "AC-01c: Mermaid block starts with flowchart TD",
-      "AC-01d: No mermaid blocks outside 'How It Works' section"
-    ],
-    "AC-02": [
-      "AC-02a: Diagram shows 'buildcrew run' entry point",
-      "AC-02b: Diagram shows 'Pending tasks?' decision node",
-      "AC-02c: Diagram shows 'Discovery mode' terminal for no pending tasks",
-      "AC-02d: Discovery mode branch shows PM planning"
-    ],
-    "AC-03": [
-      "AC-03a: Diagram shows Precompute step after pending tasks decision",
-      "AC-03b: Diagram shows Yes branch from Pending tasks to Precompute"
-    ],
-    "AC-04": [
-      "AC-04a: spec phase shows Sonnet model",
-      "AC-04b: research phase shows Sonnet model",
-      "AC-04c: review phase shows Opus model",
-      "AC-04d: tdd-scaffold phase shows Haiku model",
-      "AC-04e: build phase shows Sonnet model",
-      "AC-04f: simplify phase shows Haiku model",
-      "AC-04g: codereview phase shows Opus model",
-      "AC-04h: verify phase shows Opus model"
-    ],
-    "AC-05": [
-      "AC-05a: Diagram shows trivial complexity branch",
-      "AC-05b: Diagram shows simple complexity branch",
-      "AC-05c: Diagram shows standard complexity branch",
-      "AC-05d: Trivial path includes build and verify only",
-      "AC-05e: Simple path includes research and build and verify"
-    ],
-    "AC-06": [
-      "AC-06a: Diagram shows review phase",
-      "AC-06b: Diagram shows needs_revision verdict from review",
-      "AC-06c: First needs_revision causes review retry (self-loop)",
-      "AC-06d: Second consecutive needs_revision triggers replan",
-      "AC-06e: Replan from review goes back to research",
-      "AC-06f: Diagram shows rejected verdict blocks task"
-    ],
-    "AC-07": [
-      "AC-07a: Diagram shows codereview phase",
-      "AC-07b: Diagram shows needs_rebuild verdict from codereview",
-      "AC-07c: needs_rebuild loops back to build",
-      "AC-07d: Second consecutive needs_rebuild triggers circuit breaker"
-    ],
-    "AC-08": [
-      "AC-08a: Diagram shows verify phase",
-      "AC-08b: Diagram shows blocked verdict from verify",
-      "AC-08c: Verify blocked loops back to build",
-      "AC-08d: Verify rebuild path includes simplify and codereview for standard",
-      "AC-08e: Second consecutive verify blocked triggers circuit breaker"
-    ],
-    "AC-09": [
-      "AC-09a: Diagram shows chunked build node",
-      "AC-09b: Diagram shows max-turns trigger from build to chunked build",
-      "AC-09c: Chunked build complete path returns to simplify",
-      "AC-09d: Chunked build failure blocks task"
-    ],
-    "AC-10": [
-      "AC-10a: Diagram shows UAT phase after completion",
-      "AC-10b: UAT pass verdict leads to Done",
-      "AC-10c: UAT fail verdict triggers rebuild retry",
-      "AC-10d: UAT retries are bounded (up to 5)",
-      "AC-10e: UAT exhausted retries marked non-fatal"
-    ]
+    "AC-01": "Skill file existence verified at build time",
+    "AC-02": "Prerequisite detection tested implicitly via workflow execution",
+    "AC-03": "Verification command execution tested implicitly via workflow execution",
+    "AC-04": "File output tested implicitly via workflow execution",
+    "AC-05": "Phase result verdict tested implicitly via workflow execution",
+    "AC-06": "No new tests required for skill-only file per AC"
   },
-  "checksums": {
-    "tests/tdd/workflow_diagram_mermaid.bats": "b7fa393503257c10a2d8540232400f7e2d9b3d117801895af8f5a2e9b8b974b6"
-  }
+  "checksums": {},
+  "note": "This task creates a skill prompt file (SKILL.md), not executable library code. Skills are tested implicitly when executed by the BuildCrew workflow. The acceptance criteria explicitly states 'no new tests required for a skill-only file'. Existing unit tests (1045+) continue to pass with no modifications."
 }
