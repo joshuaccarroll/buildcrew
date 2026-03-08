@@ -2462,6 +2462,7 @@ __WF_TASK_NAME=""
 update_workflow_state() {
     local phase="$1"
     local status="$2"
+    local model="${3:-}"
     local tmp
     tmp="${WORKFLOW_STATE_FILE}.tmp.$$"
     mkdir -p .buildcrew
@@ -2474,7 +2475,7 @@ update_workflow_state() {
         echo "INVOCATION_COUNT=$__INVOCATION_COUNT"
         echo "MAX_INVOCATIONS=$MAX_INVOCATIONS"
         echo "TIMESTAMP=$(date +%s)"
-        echo "AUTO_MODE=${AUTO_MODE:-true}"
+        echo "MODEL=$model"
     } > "$tmp"
     mv -f "$tmp" "$WORKFLOW_STATE_FILE"
 }
@@ -3061,7 +3062,7 @@ Use Task subagents for: reading 3+ files, research, code review/analysis, any in
     # Start file watcher (uses phase_tag for pkill pattern — unique per worker in batch mode)
     start_file_monitor "$PHASE_RESULT_FILE" "claude.*${phase_tag}"
 
-    update_workflow_state "$phase" "running"
+    update_workflow_state "$phase" "running" "$resolved_model"
     __INVOCATION_COUNT=$(( __INVOCATION_COUNT + 1 ))
     print_debug "Invoking claude for phase: $phase (invocation $__INVOCATION_COUNT/$MAX_INVOCATIONS, max_turns=$max_turns)"
     log_msg "=== PHASE: $phase started (max_turns=$max_turns, invocation=$__INVOCATION_COUNT/$MAX_INVOCATIONS) ==="
@@ -3095,14 +3096,14 @@ Use Task subagents for: reading 3+ files, research, code review/analysis, any in
         # Check for permission denial first -- this is recoverable
         if _check_permission_denied_in_log "$__log_offset"; then
             if ! _prompt_permission_approval "$__PERM_DENIED_TOOL" "$phase"; then
-                update_workflow_state "$phase" "permission_denied"
+                update_workflow_state "$phase" "permission_denied" "$resolved_model"
                 return 1
             fi
             # Permission approved -- fall through to retry below
         # Check for max-turns before retrying -- retrying at the same limit will hit the same wall
         elif _check_max_turns_in_log "$__log_offset"; then
             print_warning "Phase $phase hit max-turns limit ($max_turns turns)"
-            update_workflow_state "$phase" "max_turns"
+            update_workflow_state "$phase" "max_turns" "$resolved_model"
             return 2
         fi
 
@@ -3117,7 +3118,7 @@ Use Task subagents for: reading 3+ files, research, code review/analysis, any in
 
         start_file_monitor "$PHASE_RESULT_FILE" "claude.*${phase_tag}"
 
-        update_workflow_state "$phase" "running"
+        update_workflow_state "$phase" "running" "$resolved_model"
         __INVOCATION_COUNT=$(( __INVOCATION_COUNT + 1 ))
         print_debug "Phase $phase produced no result file — retrying (invocation $__INVOCATION_COUNT/$MAX_INVOCATIONS)"
         log_msg "=== PHASE: $phase retry (invocation=$__INVOCATION_COUNT/$MAX_INVOCATIONS) ==="
@@ -3156,17 +3157,17 @@ Use Task subagents for: reading 3+ files, research, code review/analysis, any in
             # Log-based check on retry failure
             if _check_max_turns_in_log "$__log_offset"; then
                 print_warning "Phase $phase hit max-turns limit on retry ($max_turns turns)"
-                update_workflow_state "$phase" "max_turns"
+                update_workflow_state "$phase" "max_turns" "$resolved_model"
                 return 2
             fi
             # Heuristic: both attempts failed on a heavy phase = likely max-turns
             if [[ "$phase" == "build" ]]; then
                 print_warning "Phase $phase failed both attempts -- treating as likely max-turns"
-                update_workflow_state "$phase" "max_turns"
+                update_workflow_state "$phase" "max_turns" "$resolved_model"
                 return 2
             fi
             print_error "Phase $phase failed after retry"
-            update_workflow_state "$phase" "failed"
+            update_workflow_state "$phase" "failed" "$resolved_model"
             return 1
         fi
     fi
@@ -3175,7 +3176,7 @@ Use Task subagents for: reading 3+ files, research, code review/analysis, any in
     verdict=$(jq -r '.verdict // "unknown"' "$PHASE_RESULT_FILE")
     print_debug "Phase result: verdict=$verdict, details=$(jq -r '.details // "none"' "$PHASE_RESULT_FILE")"
     print_success "Phase $phase complete — verdict: $verdict"
-    update_workflow_state "$phase" "complete"
+    update_workflow_state "$phase" "complete" "$resolved_model"
     log_msg "=== PHASE: $phase ended (verdict: $verdict) ==="
 }
 

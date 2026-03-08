@@ -1,21 +1,71 @@
 {
-  "test_files": ["tests/tdd/strict_flag_removal.bats"],
+  "test_files": [
+    "tests/tdd/ac01_uat_workflow_state.bats",
+    "tests/tdd/ac02_model_parameter.bats",
+    "tests/tdd/ac03_model_display.bats",
+    "tests/tdd/ac04_status_colors.bats"
+  ],
   "stub_files": [],
   "test_dir": "tests/tdd",
-  "test_count": 14,
-  "all_failing": true,
+  "test_count": 34,
+  "all_failing": false,
+  "failing_count": 21,
+  "passing_count": 13,
+  "note": "Passing tests verify existing functionality (resolve_phase_model, AC-05 exit behavior already correct). All new feature tests (MODEL parameter, display, colors) fail on assertions.",
   "framework": "bats",
-  "run_command": "bats tests/tdd/strict_flag_removal.bats",
+  "run_command": "./test.sh",
   "ac_coverage": {
-    "AC-01": ["AC-01a: STRICT_MODE variable is not set after parse_args with no args", "AC-01b: STRICT_EXPLICIT variable is not set after parse_args with no args"],
-    "AC-02": ["AC-02a: parse_args --strict causes unknown option error", "AC-02b: parse_args --no-strict causes unknown option error"],
-    "AC-03": ["AC-03a: buildcrew --help does not mention --strict", "AC-03b: buildcrew --help does not mention --no-strict"],
-    "AC-04": ["AC-04a: lib/workflow.sh does not contain 'strict=' in log/debug context"],
-    "AC-05": ["AC-05a: workflow_extended.bats has no tests for --strict behavior", "AC-05b: workflow_extended.bats has no tests for --no-strict behavior"],
-    "AC-06": ["AC-06a: workflow_extended.bats has no STRICT_MODE setup", "AC-06b: inline_uat.bats has no STRICT_MODE setup", "AC-06c: inline_uat.bats has no STRICT_EXPLICIT setup"],
-    "AC-07": ["AC-07: STRICT_MODE not declared in lib/workflow.sh", "AC-07b: STRICT_EXPLICIT not declared in lib/workflow.sh"]
+    "AC-01": [
+      "AC-01: _uat_run_agent_phase should write running status before invoking phase",
+      "AC-01: _uat_run_agent_phase should call update_workflow_state for uat-stories phase",
+      "AC-01: update_workflow_state supports uat-scenarios phase name",
+      "AC-01: update_workflow_state supports uat-harness phase name",
+      "AC-01: update_workflow_state supports uat-execute phase name",
+      "AC-01: update_workflow_state can write complete status for UAT phases",
+      "AC-01: update_workflow_state can write failed status for UAT phases",
+      "AC-01: resolve_phase_model should return valid model for uat-stories",
+      "AC-01: resolve_phase_model should return valid model for uat-scenarios",
+      "AC-01: resolve_phase_model should return valid model for uat-harness",
+      "AC-01: resolve_phase_model should return valid model for uat-execute"
+    ],
+    "AC-02": [
+      "AC-02: update_workflow_state writes MODEL field with provided model value",
+      "AC-02: update_workflow_state writes empty MODEL when no 3rd argument",
+      "AC-02: update_workflow_state does NOT write AUTO_MODE= line",
+      "AC-02: update_workflow_state preserves other state fields with model parameter"
+    ],
+    "AC-03": [
+      "AC-03: statusline displays model name in brackets when MODEL set",
+      "AC-03: statusline does not show brackets when MODEL empty",
+      "AC-03: statusline does not show brackets when MODEL absent from state file",
+      "AC-03: statusline displays different model names correctly",
+      "AC-03: statusline model suffix inherits phase color"
+    ],
+    "AC-04": [
+      "AC-04: statusline shows yellow color for awaiting_input status",
+      "AC-04: statusline shows red color for max_turns status",
+      "AC-04: statusline shows red color for permission_denied status",
+      "AC-04: statusline uses reset color for skipped status"
+    ],
+    "AC-05": [
+      "AC-05: statusline exits 0 with awaiting_input status",
+      "AC-05: statusline exits 0 with max_turns status",
+      "AC-05: statusline exits 0 with permission_denied status",
+      "AC-05: statusline exits 0 with skipped status",
+      "AC-05: statusline exits 0 with running status (existing behavior)",
+      "AC-05: statusline exits 0 with complete status (existing behavior)",
+      "AC-05: statusline exits 0 with failed status (existing behavior)",
+      "AC-05: statusline exits 0 with malformed state file",
+      "AC-05: statusline exits 0 with missing state file"
+    ],
+    "AC-06": [
+      "AC-06: with CLAUDE_MODEL=auto, update_workflow_state writes resolved model name"
+    ]
   },
   "checksums": {
-    "tests/tdd/strict_flag_removal.bats": "2a612f5d7c637aa24143c42ffc4f5ed57e3e8349a9c8630cc568a90fdc0825c6"
+    "tests/tdd/ac01_uat_workflow_state.bats": "8c0c4f093db48282f4c8fb6d6088098f056414db720d1b81f2d40b69219a35da",
+    "tests/tdd/ac02_model_parameter.bats": "38cedfc3b420bd7619f914d17d5f9dd77d992c67a144ad49f346537dc6f4146b",
+    "tests/tdd/ac03_model_display.bats": "b170383ce3820f58f0332abf082fa0fe4d5b147f6c7f6a2f1bba2d5eefdb702a",
+    "tests/tdd/ac04_status_colors.bats": "637d37e2f06f2628c37f53e8f133cd0c3f693dad88ed43afa7e1b97afe2b8a7a"
   }
 }

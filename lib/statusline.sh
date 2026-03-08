@@ -52,6 +52,7 @@ PHASE=""
 PHASE_STATUS=""
 INVOCATION_COUNT=""
 MAX_INVOCATIONS=""
+MODEL=""
 
 if [[ -f "$STATE_FILE" ]]; then
     while IFS='=' read -r key value; do
@@ -63,6 +64,7 @@ if [[ -f "$STATE_FILE" ]]; then
             PHASE_STATUS)     PHASE_STATUS="$value" ;;
             INVOCATION_COUNT) INVOCATION_COUNT="$value" ;;
             MAX_INVOCATIONS)  MAX_INVOCATIONS="$value" ;;
+            MODEL)            MODEL="$value" ;;
         esac
     done < "$STATE_FILE"
 fi
@@ -71,10 +73,14 @@ fi
 if [[ -n "$PHASE" ]]; then
     # Workflow is active — color-code phase status
     case "$PHASE_STATUS" in
-        running)   phase_color="$CYAN" ;;
-        complete)  phase_color="$GREEN" ;;
-        failed)    phase_color="$RED" ;;
-        *)         phase_color="$RESET" ;;
+        running)          phase_color="$CYAN" ;;
+        complete)         phase_color="$GREEN" ;;
+        failed)           phase_color="$RED" ;;
+        awaiting_input)   phase_color="$YELLOW" ;;
+        skipped)          phase_color="$RESET" ;;
+        max_turns)        phase_color="$RED" ;;
+        permission_denied) phase_color="$RED" ;;
+        *)                phase_color="$RESET" ;;
     esac
 
     task_part=""
@@ -87,7 +93,9 @@ if [[ -n "$PHASE" ]]; then
         inv_part=" | inv ${INVOCATION_COUNT}/${MAX_INVOCATIONS}"
     fi
 
-    printf '%b' "${task_part}${phase_color}${PHASE}${RESET} | ${ctx_str}${inv_part}"
+    [[ -n "$MODEL" ]] && model_suffix=" [${MODEL}]" || model_suffix=""
+
+    printf '%b' "${task_part}${phase_color}${PHASE}${model_suffix}${RESET} | ${ctx_str}${inv_part}"
 else
     # No active workflow
     printf '%b' "BuildCrew | ${ctx_str}"
