@@ -170,3 +170,27 @@ The results file must be a JSON array of scenario result objects:
 - Do NOT include test harness code, assertion framework output, or stack traces in these fields
 - Keep summaries concise but informative — one to two sentences
 
+### Step 6: Write `.claude/phase-result.json`
+
+**After all other work is complete**, write `.claude/phase-result.json`. The orchestrator terminates the Claude process when this file appears — do not write it until all other files are written.
+
+**If all scenarios passed:**
+```json
+{ "phase": "uat-execute", "verdict": "pass", "details": "All N scenarios passed" }
+```
+
+**If any scenarios failed:**
+```json
+{ "phase": "uat-execute", "verdict": "fail", "details": "N of M scenarios failed" }
+```
+
+**If scenarios could not run due to environmental issues:**
+```json
+{ "phase": "uat-execute", "verdict": "error", "details": "<reason>" }
+```
+
+**If results are ambiguous (disputed scenarios, no clear failures):**
+```json
+{ "phase": "uat-execute", "verdict": "disputed", "details": "N scenarios disputed — see disputes.md" }
+```
+

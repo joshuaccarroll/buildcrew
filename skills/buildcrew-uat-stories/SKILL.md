@@ -87,3 +87,17 @@ Extracted from README.md on <date>.
 - As a <role>, I want to <action>, so that <outcome>.
 ```
 
+### Step 4: Write `.claude/phase-result.json`
+
+**After all other work is complete**, write `.claude/phase-result.json`. The orchestrator terminates the Claude process when this file appears — do not write it until all other files are written.
+
+**If user stories were successfully extracted:**
+```json
+{ "phase": "uat-stories", "verdict": "pass", "details": "Extracted N user stories across M feature areas" }
+```
+
+**If the README was insufficient (no concrete user-facing behaviors):**
+```json
+{ "phase": "uat-stories", "verdict": "fail", "details": "README lacks concrete usage documentation" }
+```
+

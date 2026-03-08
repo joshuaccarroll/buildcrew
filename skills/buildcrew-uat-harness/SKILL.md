@@ -158,3 +158,22 @@ Before completing, verify:
 - [ ] No hardcoded paths to the project source directory
 - [ ] If external HTTP dependencies were detected: `harness/mocks/start-mocks.sh` and `harness/mocks/stop-mocks.sh` exist and are executable
 
+### Step 5: Write `.claude/phase-result.json`
+
+**After all other work is complete**, write `.claude/phase-result.json`. The orchestrator terminates the Claude process when this file appears — do not write it until all other files are written.
+
+**If harness was successfully built:**
+```json
+{ "phase": "uat-harness", "verdict": "pass", "details": "Built harness with N scenario tests" }
+```
+
+**If the interface type could not be determined from the README:**
+```json
+{ "phase": "uat-harness", "verdict": "disputed", "details": "Could not determine artifact interface type from README" }
+```
+
+**If harness generation failed:**
+```json
+{ "phase": "uat-harness", "verdict": "fail", "details": "<reason>" }
+```
+
