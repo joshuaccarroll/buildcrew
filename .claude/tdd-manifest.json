@@ -1,30 +1,64 @@
 {
   "test_files": [
-    "buildcrew/tests/unit/batch.bats"
+    "tests/tdd/rate_limit.bats"
   ],
   "stub_files": [
-    "buildcrew/lib/workflow.sh"
+    "lib/workflow.sh"
   ],
-  "test_dir": "buildcrew/tests/unit",
-  "test_count": 4,
+  "test_dir": "tests/tdd",
+  "test_count": 15,
   "all_failing": true,
   "framework": "bats",
-  "run_command": "bats buildcrew/tests/unit/batch.bats",
+  "run_command": "bats tests/tdd/rate_limit.bats",
   "ac_coverage": {
-    "AC-01": [
-      "batch hot-reload: detects new tasks and appends to arrays"
+    "AC-01a": [
+      "AC-01a: _check_rate_limit_in_log detects 'rate limit reached' pattern"
     ],
-    "AC-02": [
-      "batch hot-reload: dedup by slug detects one new unique task among duplicates"
+    "AC-01b": [
+      "AC-01b: _check_rate_limit_in_log detects 'rate_limit_error' pattern"
     ],
-    "AC-03": [
-      "batch hot-reload: adds new task when mixed with completed tasks"
+    "AC-01c": [
+      "AC-01c: _check_rate_limit_in_log detects 'usage limit' pattern"
     ],
-    "AC-04": [
-      "batch hot-reload: processes new task with [dir:subdir] prefix"
+    "AC-01d": [
+      "AC-01d: _check_rate_limit_in_log detects 'rate.limit.exceeded' pattern"
+    ],
+    "AC-01e": [
+      "AC-01e: _check_rate_limit_in_log rejects normal failures"
+    ],
+    "AC-01f": [
+      "AC-01f: _check_rate_limit_in_log returns 1 when log file empty"
+    ],
+    "AC-01g": [
+      "AC-01g: _check_rate_limit_in_log respects byte offset"
+    ],
+    "AC-02a": [
+      "AC-02a: _signal_rate_limit_pause creates sentinel file"
+    ],
+    "AC-02b": [
+      "AC-02b: _check_rate_limit_pause detects sentinel file"
+    ],
+    "AC-02c": [
+      "AC-02c: _check_rate_limit_pause returns 1 when no sentinel"
+    ],
+    "AC-02d": [
+      "AC-02d: _clear_rate_limit_pause removes sentinel file"
+    ],
+    "AC-03a": [
+      "AC-03a: _batch_requeue_rate_limited_tasks resets task status to pending"
+    ],
+    "AC-03b": [
+      "AC-03b: _batch_requeue_rate_limited_tasks handles multiple rate-limited tasks"
+    ],
+    "AC-04a": [
+      "AC-04a: Helper rate limit functions are defined"
+    ],
+    "AC-04b": [
+      "AC-04b: Batch requeue function is defined and callable"
     ]
   },
   "checksums": {
-    "buildcrew/tests/unit/batch.bats": "08b90eb28d9defb1566e5240e34e9acb20b703ce0e12abe5571a079a2ce7ec65"
-  }
+    "tests/tdd/rate_limit.bats": "f7f08040fec64da61509851c711fccc4005a9935830b1b9b3f9d91101dd0c034"
+  },
+  "notes": "Acceptance criteria from plan: (1) _check_rate_limit_in_log detects rate limit patterns, rejects normal failures; (2) _signal_rate_limit_pause, _check_rate_limit_pause, _clear_rate_limit_pause sentinel file lifecycle; (3) _batch_requeue_rate_limited_tasks resets task status; (4) stream_processor.py emits 'Rate limit reached' for rate_limit_event and rate_limit_error (tested separately in tests/unit/stream_processor.bats)"
 }

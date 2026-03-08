@@ -81,7 +81,13 @@ def main():
             elif etype == 'result':
                 if event.get('stop_reason') == 'max_turns':
                     print('Max turns limit reached')
-            # system, user, rate_limit_event: ignore silently
+            elif etype == 'rate_limit_event':
+                print('Rate limit reached')
+            elif etype == 'error':
+                err = event.get('error')
+                if isinstance(err, dict) and err.get('type') == 'rate_limit_error':
+                    print('Rate limit reached')
+            # system, user: ignore silently
     except BrokenPipeError:
         pass
 
