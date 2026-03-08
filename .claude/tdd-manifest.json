@@ -1,77 +1,21 @@
 {
-  "test_files": [
-    "tests/tdd/test_ac01_workflow_exit_code.bats",
-    "../../../buildcrew-dash/tests/tdd/test_ac04_ac05_manifest_failure_statuses.py",
-    "../../../buildcrew-dash/tests/tdd/test_ac06_ac07_kanban_failure_display.py"
-  ],
+  "test_files": ["tests/tdd/strict_flag_removal.bats"],
   "stub_files": [],
   "test_dir": "tests/tdd",
-  "test_count": 26,
+  "test_count": 14,
   "all_failing": true,
-  "frameworks": [
-    {
-      "name": "bats",
-      "run_command": "bats tests/tdd/test_ac01_workflow_exit_code.bats",
-      "test_files": ["tests/tdd/test_ac01_workflow_exit_code.bats"]
-    },
-    {
-      "name": "pytest",
-      "run_command": "cd ../../../buildcrew-dash && python -m pytest tests/tdd/test_ac04_ac05_manifest_failure_statuses.py tests/tdd/test_ac06_ac07_kanban_failure_display.py -v",
-      "test_files": [
-        "../../../buildcrew-dash/tests/tdd/test_ac04_ac05_manifest_failure_statuses.py",
-        "../../../buildcrew-dash/tests/tdd/test_ac06_ac07_kanban_failure_display.py"
-      ]
-    }
-  ],
+  "framework": "bats",
+  "run_command": "bats tests/tdd/strict_flag_removal.bats",
   "ac_coverage": {
-    "AC-01": [
-      "AC-01a: main() exits 0 when no tasks fail",
-      "AC-03: exit code is accessible to parent process"
-    ],
-    "AC-02": [
-      "AC-02a: main() exits 1 when a phase returns failed verdict",
-      "AC-02b: main() exits 1 explicitly when failed count > 0"
-    ],
-    "AC-04": [
-      "test_AC04a_verify_failed_count_zero_when_no_verify_failed_tasks",
-      "test_AC04b_verify_failed_count_counts_verify_failed_tasks",
-      "test_AC04c_merge_conflict_count_zero_when_no_conflicts",
-      "test_AC04d_merge_conflict_count_counts_conflict_tasks",
-      "test_AC04e_failure_counts_independent"
-    ],
-    "AC-05": [
-      "test_AC05a_summary_parts_includes_verify_failed",
-      "test_AC05b_summary_parts_includes_merge_conflict",
-      "test_AC05c_summary_parts_rich_colors_verify_failed",
-      "test_AC05d_summary_parts_rich_colors_merge_conflict",
-      "test_AC05e_summary_parts_with_mixed_statuses"
-    ],
-    "AC-06": [
-      "test_AC06a_format_batch_status_verify_failed_red",
-      "test_AC06b_format_batch_status_merge_conflict_yellow",
-      "test_AC06c_format_batch_status_verify_failed_exit_code",
-      "test_AC06d_format_batch_status_verify_failed_no_exit_code",
-      "test_AC06e_format_batch_status_failed_still_red",
-      "test_AC06f_format_batch_status_completed_still_green",
-      "test_AC06g_format_batch_status_all_statuses"
-    ],
-    "AC-07": [
-      "test_AC07a_failed_task_not_green",
-      "test_AC07b_verify_failed_task_red",
-      "test_AC07c_merge_conflict_task_yellow",
-      "test_AC07d_get_batch_task_phase_returns_empty_for_non_running",
-      "test_AC07e_get_batch_task_phase_returns_phase_for_running",
-      "test_AC07f_get_batch_task_phase_starting_for_running_no_state"
-    ],
-    "AC-08": [
-      "test_AC08a_phase_strip_mentions_failed",
-      "test_AC08b_index_screen_summary_includes_failures"
-    ]
+    "AC-01": ["AC-01a: STRICT_MODE variable is not set after parse_args with no args", "AC-01b: STRICT_EXPLICIT variable is not set after parse_args with no args"],
+    "AC-02": ["AC-02a: parse_args --strict causes unknown option error", "AC-02b: parse_args --no-strict causes unknown option error"],
+    "AC-03": ["AC-03a: buildcrew --help does not mention --strict", "AC-03b: buildcrew --help does not mention --no-strict"],
+    "AC-04": ["AC-04a: lib/workflow.sh does not contain 'strict=' in log/debug context"],
+    "AC-05": ["AC-05a: workflow_extended.bats has no tests for --strict behavior", "AC-05b: workflow_extended.bats has no tests for --no-strict behavior"],
+    "AC-06": ["AC-06a: workflow_extended.bats has no STRICT_MODE setup", "AC-06b: inline_uat.bats has no STRICT_MODE setup", "AC-06c: inline_uat.bats has no STRICT_EXPLICIT setup"],
+    "AC-07": ["AC-07: STRICT_MODE not declared in lib/workflow.sh", "AC-07b: STRICT_EXPLICIT not declared in lib/workflow.sh"]
   },
   "checksums": {
-    "tests/tdd/test_ac01_workflow_exit_code.bats": "fc5c12c972af2f87114f299db2c6c071bd7951c53eaf890f1e61374f2d03e2fc",
-    "buildcrew-dash/tests/tdd/test_ac04_ac05_manifest_failure_statuses.py": "9b72456d17612f51a0956add8ef35453750efa97a4551e901fb3ea6f8f4056d1",
-    "buildcrew-dash/tests/tdd/test_ac06_ac07_kanban_failure_display.py": "ad92af43e79b30328fee556fa964f84950cd5f5e9839cedc585c51db59d4af61"
-  },
-  "notes": "This manifest covers TDD tests for batch failure visibility task spanning [dir:buildcrew] and [dir:buildcrew-dash]. Bats tests verify exit code propagation in workflow.sh main(). Pytest tests verify manifest_reader and kanban screen handle new failure statuses (verify_failed, merge_conflict). Tests are currently failing on assertions (correct TDD behavior) and will drive implementation in build phase."
+    "tests/tdd/strict_flag_removal.bats": "2a612f5d7c637aa24143c42ffc4f5ed57e3e8349a9c8630cc568a90fdc0825c6"
+  }
 }

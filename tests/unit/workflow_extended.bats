@@ -741,7 +741,7 @@ teardown() {
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
-# New flags: --skip-spec and --strict
+# --skip-spec flag
 # ─────────────────────────────────────────────────────────────────────────────
 
 @test "parse_args: --skip-spec sets SKIP_SPEC=true" {
@@ -749,68 +749,21 @@ teardown() {
     [ "$SKIP_SPEC" = "true" ]
 }
 
-@test "parse_args: --strict sets STRICT_MODE=true" {
-    parse_args --strict
-    [ "$STRICT_MODE" = "true" ]
-}
-
 @test "parse_args: no args leaves SKIP_SPEC=false" {
     parse_args
     [ "$SKIP_SPEC" = "false" ]
 }
 
-@test "parse_args: no args leaves STRICT_MODE=true (strict by default)" {
-    parse_args
-    [ "$STRICT_MODE" = "true" ]
-}
-
 @test "parse_args: --skip-spec combined with other flags" {
-    parse_args --skip-spec --strict --dry-run
+    parse_args --skip-spec --verbose --dry-run
     [ "$SKIP_SPEC" = "true" ]
-    [ "$STRICT_MODE" = "true" ]
+    [ "$VERBOSE" = "true" ]
     [ "$DRY_RUN" = "true" ]
-}
-
-@test "parse_args: --no-strict sets STRICT_MODE=false" {
-    parse_args --no-strict
-    [ "$STRICT_MODE" = "false" ]
-}
-
-@test "parse_args: --no-strict sets STRICT_EXPLICIT=true" {
-    parse_args --no-strict
-    [ "$STRICT_EXPLICIT" = "true" ]
-}
-
-@test "parse_args: --strict sets STRICT_EXPLICIT=true" {
-    parse_args --strict
-    [ "$STRICT_EXPLICIT" = "true" ]
-}
-
-@test "parse_args: no args leaves STRICT_EXPLICIT=false" {
-    parse_args
-    [ "$STRICT_EXPLICIT" = "false" ]
-}
-
-@test "parse_args: --strict --no-strict last wins (STRICT_MODE=false, STRICT_EXPLICIT=true)" {
-    parse_args --strict --no-strict
-    [ "$STRICT_MODE" = "false" ]
-    [ "$STRICT_EXPLICIT" = "true" ]
-}
-
-@test "parse_args: --no-strict --strict last wins (STRICT_MODE=true, STRICT_EXPLICIT=true)" {
-    parse_args --no-strict --strict
-    [ "$STRICT_MODE" = "true" ]
-    [ "$STRICT_EXPLICIT" = "true" ]
 }
 
 @test "parse_args: --help mentions --skip-spec" {
     run parse_args --help
     [[ "$output" == *"--skip-spec"* ]]
-}
-
-@test "parse_args: --help mentions --strict" {
-    run parse_args --help
-    [[ "$output" == *"--strict"* ]]
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -918,7 +871,6 @@ EOF
     mkdir -p .buildcrew .claude
     echo "- [ ] test task" > BACKLOG.md
     SKIP_SPEC=true
-    STRICT_MODE=false
     HUMAN_REVIEW=false
     # Pre-mark research, review, and tdd-scaffold as completed so they're skipped via phase_completed
     __RESUME_PHASES="research review tdd-scaffold"
@@ -952,7 +904,6 @@ EOF
     printf '# Spec\n- [ ] AC-01: only one criterion\n' > .claude/spec.md
     echo "- [ ] test task" > BACKLOG.md
     SKIP_SPEC=false
-    STRICT_MODE=true
     HUMAN_REVIEW=false
     # Simulate a resume — RESUME_MODE=true causes process_task_isolated to take
     # the resume path, which skips the artifact cleanup (so spec.md is preserved).
@@ -1172,7 +1123,6 @@ EOF
     mkdir -p .buildcrew ".claude/skills/buildcrew-spec"
     echo "- [ ] test task" > BACKLOG.md
     SKIP_SPEC=false
-    STRICT_MODE=false
     HUMAN_REVIEW=false
     __RESUME_PHASES=""
 
@@ -1200,7 +1150,6 @@ EOF
     mkdir -p .buildcrew
     echo "- [ ] test task" > BACKLOG.md
     SKIP_SPEC=true
-    STRICT_MODE=false
     HUMAN_REVIEW=false
     __RESUME_PHASES=""
 
@@ -1227,7 +1176,6 @@ EOF
     mkdir -p .buildcrew
     echo "- [ ] test task" > BACKLOG.md
     SKIP_SPEC=true
-    STRICT_MODE=false
     HUMAN_REVIEW=false
     __RESUME_PHASES="research"
 
@@ -1991,7 +1939,6 @@ EOF
     mkdir -p .buildcrew .claude
     echo "- [ ] test task" > BACKLOG.md
     SKIP_SPEC=true
-    STRICT_MODE=false
     HUMAN_REVIEW=false
     # Use RESUME_MODE=true so process_task_isolated skips artifact cleanup,
     # preserving .claude/current-plan.md which was created before run.
@@ -2070,7 +2017,6 @@ EOF
     mkdir -p .buildcrew .claude
     echo "- [ ] test task" > BACKLOG.md
     SKIP_SPEC=true
-    STRICT_MODE=false
     HUMAN_REVIEW=false
     RESUME_MODE=true
 

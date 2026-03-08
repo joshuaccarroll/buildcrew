@@ -186,8 +186,6 @@ ORIGINAL_BRANCH=""
 HAS_REMOTE=false
 GH_AVAILABLE=false
 SKIP_SPEC=false
-STRICT_MODE=true
-STRICT_EXPLICIT=false   # true only when --strict or --no-strict is passed explicitly
 VERBOSE=false
 FULL_PIPELINE=false
 SEQUENTIAL_MODE=false
@@ -249,16 +247,6 @@ parse_args() {
                 ;;
             --skip-spec)
                 SKIP_SPEC=true
-                shift
-                ;;
-            --strict)
-                STRICT_MODE=true
-                STRICT_EXPLICIT=true
-                shift
-                ;;
-            --no-strict)
-                STRICT_MODE=false
-                STRICT_EXPLICIT=true
                 shift
                 ;;
             --verbose|--debug)
@@ -339,8 +327,6 @@ parse_args() {
                 echo "  --task NAME  Target a specific task by name or number (implies --single)"
                 echo "  --resume     Resume an interrupted task from where it left off"
                 echo "  --skip-spec  Skip the specification refinement phase (for tasks with detailed specs already)"
-                echo "  --strict     (default) Require ALL acceptance criteria to pass before commit"
-                echo "  --no-strict  Allow partial acceptance criteria pass — proceed with warnings"
                 echo "  --max-invocations N  Set maximum Claude invocations per run (default: 15)"
                 echo "  --full-pipeline  Force all phases regardless of complexity assessment"
                 echo "  --auto       (deprecated) Auto mode is now the default. Use --interactive to opt out"
@@ -4375,7 +4361,7 @@ main() {
         [[ -d ".claude/skills/buildcrew-tdd-scaffold" ]] && _phase_count=$((_phase_count + 1))
         print_info "Mode: Phase-isolated ($_phase_count invocations per task)"
     fi
-    print_debug "Flags: skip_spec=$SKIP_SPEC strict=$STRICT_MODE review=$HUMAN_REVIEW branch=$GIT_BRANCH resume=$RESUME_MODE full_pipeline=$FULL_PIPELINE complexity_aware=$COMPLEXITY_AWARE auto=$AUTO_MODE"
+    print_debug "Flags: skip_spec=$SKIP_SPEC review=$HUMAN_REVIEW branch=$GIT_BRANCH resume=$RESUME_MODE full_pipeline=$FULL_PIPELINE complexity_aware=$COMPLEXITY_AWARE auto=$AUTO_MODE"
 
     # Git branch setup
     if [[ "$GIT_BRANCH" == "true" ]]; then
@@ -4405,7 +4391,7 @@ main() {
     # Create lockfile now (after worktree check, so --branch mode sees clean tree)
     mkdir -p .buildcrew
     log_init
-    log_msg "Flags: skip_spec=$SKIP_SPEC strict=$STRICT_MODE review=$HUMAN_REVIEW branch=$GIT_BRANCH resume=$RESUME_MODE full_pipeline=$FULL_PIPELINE complexity_aware=$COMPLEXITY_AWARE auto=$AUTO_MODE"
+    log_msg "Flags: skip_spec=$SKIP_SPEC review=$HUMAN_REVIEW branch=$GIT_BRANCH resume=$RESUME_MODE full_pipeline=$FULL_PIPELINE complexity_aware=$COMPLEXITY_AWARE auto=$AUTO_MODE"
     print_info "Activity log: $__LOG_FILE"
     echo $$ > "$LOCKFILE"
     trap cleanup EXIT INT TERM

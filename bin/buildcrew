@@ -71,8 +71,6 @@ print_help() {
     echo "    --resume      Resume an interrupted task from where it left off (with 'run')"
     echo "    --task N      Target a specific task by name or number (with 'run')"
     echo "    --skip-spec   Skip the specification refinement phase (with 'run')"
-    echo "    --strict      (default) Require ALL acceptance criteria to pass before commit (with 'run')"
-    echo "    --no-strict   Allow partial acceptance criteria pass — proceed with warnings (with 'run')"
     echo "    --max-invocations N  Max Claude invocations per run (default: 15, with 'run')"
     echo "    --full-pipeline  Force all phases regardless of complexity assessment (with 'run')"
     echo "    --auto        (deprecated) Auto mode is now the default. Use --interactive to opt out (with 'run')"
@@ -283,10 +281,9 @@ description: Create git commit
 ## Customization Tips
 
 1. Use --skip-spec for tasks that already have detailed specs
-2. Use --strict to enforce all acceptance criteria before commit
-3. Remove PLAN_REVIEW and CODE_REVIEW for faster iteration on simple tasks
-4. Add a DEPLOY phase after COMMIT for CI/CD integration
-5. Run `buildcrew lessons` to review what BuildCrew has learned from past failures
+2. Remove PLAN_REVIEW and CODE_REVIEW for faster iteration on simple tasks
+3. Add a DEPLOY phase after COMMIT for CI/CD integration
+4. Run `buildcrew lessons` to review what BuildCrew has learned from past failures
 
 See ~/.buildcrew/workflows/default-workflow.md for the full default workflow.
 EOF
