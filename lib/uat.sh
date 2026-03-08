@@ -69,20 +69,21 @@ __UAT_README_HASH=""
 load_uat_config() {
     local value
     # Use read_config_key() from common.sh to avoid reimplementing file parsing
+    # Note: use if/then instead of [[ ]] && to avoid set -e abort when regex doesn't match
     value=$(read_config_key "UAT_POLL_INTERVAL")
-    [[ "$value" =~ ^[1-9][0-9]*$ ]] && UAT_POLL_INTERVAL="$value"
+    if [[ "$value" =~ ^[1-9][0-9]*$ ]]; then UAT_POLL_INTERVAL="$value"; fi
 
     value=$(read_config_key "UAT_ARTIFACT_TIMEOUT")
-    [[ "$value" =~ ^[1-9][0-9]*$ ]] && UAT_ARTIFACT_TIMEOUT="$value"
+    if [[ "$value" =~ ^[1-9][0-9]*$ ]]; then UAT_ARTIFACT_TIMEOUT="$value"; fi
 
     value=$(read_config_key "UAT_EXECUTE_TIMEOUT")
-    [[ "$value" =~ ^[1-9][0-9]*$ ]] && UAT_EXECUTE_TIMEOUT="$value"
+    if [[ "$value" =~ ^[1-9][0-9]*$ ]]; then UAT_EXECUTE_TIMEOUT="$value"; fi
 
     value=$(read_config_key "UAT_HEALTH_CHECK_TIMEOUT")
-    [[ "$value" =~ ^[1-9][0-9]*$ ]] && UAT_HEALTH_CHECK_TIMEOUT="$value"
+    if [[ "$value" =~ ^[1-9][0-9]*$ ]]; then UAT_HEALTH_CHECK_TIMEOUT="$value"; fi
 
     value=$(read_config_key "UAT_MAX_RETRIES")
-    [[ "$value" =~ ^[1-9][0-9]*$ ]] && UAT_MAX_RETRIES="$value"
+    if [[ "$value" =~ ^[1-9][0-9]*$ ]]; then UAT_MAX_RETRIES="$value"; fi
 }
 
 # sha256_hash and read_config_key are now in common.sh (sourced above)
