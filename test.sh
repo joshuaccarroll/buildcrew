@@ -4,6 +4,13 @@
 
 set -e
 
+# Prevent infinite recursion when TDD tests call ./test.sh
+if [[ "${BUILDCREW_TEST_RUNNING:-}" == "1" ]]; then
+    echo "test.sh: already running (recursion guard), skipping"
+    exit 0
+fi
+export BUILDCREW_TEST_RUNNING=1
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Colors
