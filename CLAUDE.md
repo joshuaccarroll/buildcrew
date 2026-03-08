@@ -3,7 +3,7 @@
 ## Architecture
 
 - The shell orchestrator (`lib/workflow.sh`) launches `claude -p` once per phase in **phase-isolated mode**.
-- Each phase is a separate skill: `skills/buildcrew-*/SKILL.md` (spec, research, review, tdd-scaffold, build, simplify, codereview, verify).
+- Each phase is a separate skill: `skills/buildcrew-*/SKILL.md` (spec, research, review, tdd-scaffold, build, codereview, verify).
 - **UAT subsystem** (`lib/uat.sh`, `lib/uat_signal.sh`, `lib/artifact.sh`) provides blind scenario-based acceptance testing.
 - All orchestrator↔Claude communication is **file-based only** — no pipes, no env vars, no return values.
 
@@ -27,7 +27,6 @@ An unknown verdict hits the catch-all and marks the task blocked:
 | research   | `complete`                                   |
 | review     | `approved`, `needs_revision`, `rejected`     |
 | build      | `complete`                                   |
-| simplify   | `complete`                                   |
 | codereview | `approved`, `needs_rebuild`                  |
 | tdd-scaffold | `complete`, `blocked`                      |
 | verify     | `complete`, `blocked`                        |
@@ -93,10 +92,9 @@ When context is compacted, always preserve:
 3. **review** — 3-pass adversarial plan review
 3.5. **tdd-scaffold** (standard complexity) — Write failing tests from spec+plan before implementation
 4. **build** — Implement per plan
-5. **simplify** — Non-blocking review: apply targeted simplifications before formal review
-6. **codereview** — Adversarial code review + elegance check; may request rebuild
-7. **verify** — Security audit + AC cross-reference + commit
-8. **UAT** — Blind scenario-based acceptance testing against README.md (runs once after all backlog tasks complete; skip with `--no-uat`)
+5. **codereview** — Adversarial code review + elegance check; may request rebuild
+6. **verify** — Security audit + AC cross-reference + commit
+7. **UAT** — Blind scenario-based acceptance testing against README.md (runs once after all backlog tasks complete; skip with `--no-uat`)
 
 ## Modes
 

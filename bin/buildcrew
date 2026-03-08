@@ -224,11 +224,6 @@ agent: feature-engineer
 description: Implement the plan
 output: working code
 
-### SIMPLIFY (non-blocking)
-agent: none
-description: Review and apply targeted simplifications before formal code review
-output: .claude/simplify-report.md
-
 ### CODE-REVIEW + REFACTOR
 agent: principal-engineer
 description: Adversarial code review + elegance check

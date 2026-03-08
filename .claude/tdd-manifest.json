@@ -1,20 +1,31 @@
 {
-  "test_files": ["tests/unit/workflow_docs.bats"],
+  "test_files": [
+    "tests/tdd/ac01_simplify_deletion.bats"
+  ],
   "stub_files": [],
-  "test_dir": "tests/unit",
-  "test_count": 6,
+  "test_dir": "tests/tdd",
+  "test_count": 9,
   "all_failing": true,
   "framework": "bats",
-  "run_command": "bats tests/unit/workflow_docs.bats",
+  "run_command": "bats tests/tdd/ac01_simplify_deletion.bats",
   "ac_coverage": {
-    "AC-01": ["AC-01: run_optional_docs returns 0 when docs skill not installed"],
-    "AC-02": ["AC-02: get_phase_max_turns returns 20 for docs phase"],
-    "AC-03": ["AC-03: run_optional_docs exits 0 even if run_phase_group would fail"],
-    "AC-04": ["AC-04: run_optional_docs calls run_phase_group with 'docs' phase"],
-    "AC-05": ["AC-05: Phase count includes docs when skill is installed"],
-    "AC-06": ["AC-06: Phase count unchanged when docs skill not installed"]
+    "AC-01": [
+      "AC-01: skills/buildcrew-simplify directory does not exist"
+    ],
+    "AC-02": [
+      "AC-02: No buildcrew-simplify references in skills/",
+      "AC-02: No buildcrew-simplify references in bin/",
+      "AC-02: No buildcrew-simplify references in lib/",
+      "AC-02: No simplify phase references in workflows/",
+      "AC-02: No run_optional_simplify references in source",
+      "AC-02: No simplify phase references in CLAUDE.md",
+      "AC-02: No simplify phase references in README.md"
+    ],
+    "AC-03": [
+      "AC-03: ./test.sh passes"
+    ]
   },
   "checksums": {
-    "tests/unit/workflow_docs.bats": "b0953b3cb9e38a54f64c4613efbd56c87fee6f7ecdfb7adc51f32d808beb2de6"
+    "tests/tdd/ac01_simplify_deletion.bats": "771f50d0c3aff296af182dba665b70663e2a34f0276c6412195a8703b06265a2"
   }
 }
