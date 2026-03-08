@@ -185,6 +185,10 @@ buildcrew reset              # Clear blocked tasks and clean up artifacts
 | `--max-invocations N` | Max Claude invocations per run (default: 15) |
 | `--model M` | Claude model: `auto` (default, per-phase), `opus`, `sonnet`, `haiku`, or full model ID. In `auto` mode, each phase uses the optimal model for its cognitive requirements (e.g., opus for review/verify, sonnet for build/research, haiku for tdd-scaffold). Complexity downgrades apply automatically. |
 | `--effort L` | Effort level: `low`, `medium`, `high` (default: medium) |
+| `--skip-prereqs` | Skip the prerequisites check phase |
+| `--max-rebase-rounds N` | Max rebase-rebuild attempts for merge conflicts (default: 2) |
+| `--no-rebase` | Skip rebase-rebuild for merge conflicts |
+| `--merge-strategy S` | Merge order: `smallest-first` (default), `priority-first`, `fifo` |
 | `--verbose` / `--debug` | Show orchestrator decisions, phase verdicts, invocation counts |
 
 Flags combine freely: `buildcrew run --single --review --branch`
@@ -220,8 +224,11 @@ Project-level config lives in `.buildcrew/config` (created by `buildcrew init`):
 | `CLAUDE_MODEL` | `auto` | Default model: `auto`, `opus`, `sonnet`, `haiku`, or full model ID |
 | `CLAUDE_EFFORT` | `medium` | Default effort level: `low`, `medium`, `high` |
 | `TARGET_DIR` | (none) | Target subdirectory for multi-project setups |
+| `MAX_REBASE_ROUNDS` | `2` | Max rebase-rebuild attempts for merge conflicts (0-10) |
+| `NO_REBASE` | `false` | Skip rebase-rebuild for merge conflicts |
+| `MERGE_STRATEGY` | `smallest-first` | Merge order: `smallest-first`, `priority-first`, `fifo` |
 
-UAT-specific config keys (`UAT_MAX_RETRIES`, `UAT_ARTIFACT_TYPE`, `UAT_RUN_COMMAND`, `BUILD_UAT_WATCH_TIMEOUT`) are documented in the [UAT section](#uat-configuration) below.
+UAT-specific config keys (`UAT_MAX_RETRIES`, `UAT_ARTIFACT_TYPE`, `UAT_RUN_COMMAND`, `UAT_ARTIFACT_TIMEOUT`, `UAT_EXECUTE_TIMEOUT`) are documented in the [UAT section](#uat-configuration) below.
 
 ---
 
@@ -328,7 +335,8 @@ buildcrew uat --preview                      # List scenarios without running ag
 | `UAT_INSTALL_COMMAND` | (none) | Shell command run once to install/set up the artifact before UAT test execution (e.g. `npm install`) |
 | `UAT_HEALTH_CHECK` | (none) | Shell command polled after artifact start to confirm readiness before scenarios run (e.g. `curl -sf http://localhost:3000/health`). Times out after `UAT_HEALTH_CHECK_TIMEOUT` seconds (default: 30) |
 | `UAT_HEALTH_CHECK_TIMEOUT` | `30` | Seconds to wait for `UAT_HEALTH_CHECK` to succeed before aborting |
-| `BUILD_UAT_WATCH_TIMEOUT` | `600` | Seconds to wait for UAT verdict |
+| `UAT_ARTIFACT_TIMEOUT` | `7200` | Seconds to wait for artifact to publish |
+| `UAT_EXECUTE_TIMEOUT` | `600` | Seconds per UAT execute phase |
 
 ---
 
