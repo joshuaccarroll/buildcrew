@@ -1,71 +1,63 @@
 {
   "test_files": [
-    "tests/tdd/ac01_uat_workflow_state.bats",
-    "tests/tdd/ac02_model_parameter.bats",
-    "tests/tdd/ac03_model_display.bats",
-    "tests/tdd/ac04_status_colors.bats"
+    "tests/tdd/prereqs_workflow_integration.bats"
   ],
   "stub_files": [],
   "test_dir": "tests/tdd",
-  "test_count": 34,
+  "test_count": 29,
   "all_failing": false,
-  "failing_count": 21,
-  "passing_count": 13,
-  "note": "Passing tests verify existing functionality (resolve_phase_model, AC-05 exit behavior already correct). All new feature tests (MODEL parameter, display, colors) fail on assertions.",
   "framework": "bats",
-  "run_command": "./test.sh",
+  "run_command": "bats tests/tdd/prereqs_workflow_integration.bats",
   "ac_coverage": {
     "AC-01": [
-      "AC-01: _uat_run_agent_phase should write running status before invoking phase",
-      "AC-01: _uat_run_agent_phase should call update_workflow_state for uat-stories phase",
-      "AC-01: update_workflow_state supports uat-scenarios phase name",
-      "AC-01: update_workflow_state supports uat-harness phase name",
-      "AC-01: update_workflow_state supports uat-execute phase name",
-      "AC-01: update_workflow_state can write complete status for UAT phases",
-      "AC-01: update_workflow_state can write failed status for UAT phases",
-      "AC-01: resolve_phase_model should return valid model for uat-stories",
-      "AC-01: resolve_phase_model should return valid model for uat-scenarios",
-      "AC-01: resolve_phase_model should return valid model for uat-harness",
-      "AC-01: resolve_phase_model should return valid model for uat-execute"
+      "AC-01a: phase_completed recognizes 'prereqs' as valid phase name",
+      "AC-01b: update_workflow_state accepts 'prereqs' phase",
+      "AC-01c: phase_completed returns 0 after prereqs marked completed",
+      "AC-01d: PHASE_RESULT_FILE can be written with prereqs verdict"
     ],
     "AC-02": [
-      "AC-02: update_workflow_state writes MODEL field with provided model value",
-      "AC-02: update_workflow_state writes empty MODEL when no 3rd argument",
-      "AC-02: update_workflow_state does NOT write AUTO_MODE= line",
-      "AC-02: update_workflow_state preserves other state fields with model parameter"
+      "AC-02a: prereqs skill directory check works",
+      "AC-02b: prereqs skill directory can be created",
+      "AC-02c: skipped verdict is handled correctly",
+      "AC-02d: phase can record 'no prereqs detected' in status"
     ],
     "AC-03": [
-      "AC-03: statusline displays model name in brackets when MODEL set",
-      "AC-03: statusline does not show brackets when MODEL empty",
-      "AC-03: statusline does not show brackets when MODEL absent from state file",
-      "AC-03: statusline displays different model names correctly",
-      "AC-03: statusline model suffix inherits phase color"
+      "AC-03a: AUTO_MODE variable exists and defaults to false or true",
+      "AC-03b: phase result 'blocked' verdict is valid",
+      "AC-03c: non-auto mode can be set"
     ],
     "AC-04": [
-      "AC-04: statusline shows yellow color for awaiting_input status",
-      "AC-04: statusline shows red color for max_turns status",
-      "AC-04: statusline shows red color for permission_denied status",
-      "AC-04: statusline uses reset color for skipped status"
+      "AC-04a: AUTO_MODE=true is recognized",
+      "AC-04b: warnings file can be written to .buildcrew/prereqs.json",
+      "AC-04c: auto mode result is skipped not blocked"
     ],
     "AC-05": [
-      "AC-05: statusline exits 0 with awaiting_input status",
-      "AC-05: statusline exits 0 with max_turns status",
-      "AC-05: statusline exits 0 with permission_denied status",
-      "AC-05: statusline exits 0 with skipped status",
-      "AC-05: statusline exits 0 with running status (existing behavior)",
-      "AC-05: statusline exits 0 with complete status (existing behavior)",
-      "AC-05: statusline exits 0 with failed status (existing behavior)",
-      "AC-05: statusline exits 0 with malformed state file",
-      "AC-05: statusline exits 0 with missing state file"
+      "AC-05a: parse_args sets SKIP_PREREQS=true when flag present",
+      "AC-05b: parse_args accepts both --skip-spec and --skip-prereqs",
+      "AC-05c: SKIP_PREREQS defaults to false",
+      "AC-05d: forward flag syntax works for sub-invocations",
+      "AC-05e: forward flag syntax when false produces empty string"
     ],
     "AC-06": [
-      "AC-06: with CLAUDE_MODEL=auto, update_workflow_state writes resolved model name"
+      "AC-06a: parse_args sets RESUME_MODE with --resume flag",
+      "AC-06b: phase_completed returns 0 after prereqs already done",
+      "AC-06c: resume with completed prereqs should skip the phase"
+    ],
+    "AC-07": [
+      "AC-07a: prereqs skill directory existence is checkable",
+      "AC-07b: phase count logic can include prereqs when skill exists",
+      "AC-07c: phase count omits prereqs when skill missing"
+    ],
+    "AC-08": [
+      "AC-08a: --skip-prereqs appears in help text",
+      "AC-08b: help text documents --skip-prereqs alongside --skip-spec"
+    ],
+    "AC-09": [
+      "AC-09a: get_phase_max_turns recognizes 'prereqs' phase",
+      "AC-09b: prereqs max turns is a reasonable value"
     ]
   },
   "checksums": {
-    "tests/tdd/ac01_uat_workflow_state.bats": "8c0c4f093db48282f4c8fb6d6088098f056414db720d1b81f2d40b69219a35da",
-    "tests/tdd/ac02_model_parameter.bats": "38cedfc3b420bd7619f914d17d5f9dd77d992c67a144ad49f346537dc6f4146b",
-    "tests/tdd/ac03_model_display.bats": "b170383ce3820f58f0332abf082fa0fe4d5b147f6c7f6a2f1bba2d5eefdb702a",
-    "tests/tdd/ac04_status_colors.bats": "637d37e2f06f2628c37f53e8f133cd0c3f693dad88ed43afa7e1b97afe2b8a7a"
+    "tests/tdd/prereqs_workflow_integration.bats": "1ec5796a058fc26afd2a82a52f4e4312c1509a3e0b171a23fb00711891980840"
   }
 }
