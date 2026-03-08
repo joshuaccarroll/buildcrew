@@ -47,7 +47,22 @@ You are a **Test Runner**. You execute tests methodically, record results precis
    [ -d harness/.artifact-bin ] && export PATH="$(pwd)/harness/.artifact-bin:$PATH"
    ```
 
-3. Read the prompt context for artifact-specific instructions (server URL, import paths, etc.)
+3. **Start mock servers** if `harness/mocks/start-mocks.sh` exists:
+   ```bash
+   if [ -f harness/mocks/start-mocks.sh ]; then
+       . harness/mocks/start-mocks.sh
+       if [ $? -ne 0 ]; then
+           # Mock setup failed — mark all scenarios as error and exit
+           echo "Mock setup failed"
+           # Write error results and write phase-result with all scenarios as error
+       fi
+   fi
+   ```
+   **Source** (`source` / `.`) the script so that `MOCK_<SERVICE>_URL` env vars are exported into the current shell and inherited by test scripts. Do not merely execute it.
+
+   If `start-mocks.sh` exits non-zero, mark all scenarios as `error` with summary: `"Mock setup failed — <error output>"` and write the phase result immediately without running any scenarios.
+
+4. Read the prompt context for artifact-specific instructions (server URL, import paths, etc.)
 
 ### Step 2: Determine Execution Scope
 
@@ -102,6 +117,18 @@ When you encounter ambiguous behavior:
 **Actual:** <what the artifact did>
 **Question:** <the specific ambiguity>
 ```
+
+### Step 4.5: Stop Mock Servers
+
+After all scenarios have completed (pass or fail), stop any running mock servers:
+
+```bash
+if [ -f harness/mocks/stop-mocks.sh ]; then
+    bash harness/mocks/stop-mocks.sh
+fi
+```
+
+Run (do not source) `stop-mocks.sh` — it only terminates background processes and does not need to export env vars.
 
 ### Step 5: Write Results
 

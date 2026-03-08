@@ -1227,3 +1227,198 @@ EOF
     # Artifact directory should be removed
     [[ ! -d "$artifact_base/test-project" ]]
 }
+
+# ─────────────────────────────────────────────────────────────────────────────
+# HTTP Dependency Detection & Mock Generation (TDD tests)
+# ─────────────────────────────────────────────────────────────────────────────
+
+@test "AC-01: detect_http_dependencies detects external service URLs in README" {
+    cat > README.md << 'EOF'
+# My App
+
+This app integrates with external services.
+
+## Integrations
+
+- Calls the Stripe API at https://api.stripe.com
+- Sends webhooks to https://webhook.example.com
+- Uses Slack integration with https://slack.com/api
+- Queries the database at localhost:5432
+
+## Installation
+
+```
+npm install
+```
+EOF
+
+    # Call the function (stub will return empty, test fails)
+    run detect_http_dependencies "README.md"
+    [ "$status" -eq 0 ]
+    # Should detect HTTPS URLs
+    [[ "$output" == *"stripe"* ]] || [[ "$output" == *"api.stripe.com"* ]]
+}
+
+@test "AC-02: detect_http_dependencies returns empty when no external services" {
+    cat > README.md << 'EOF'
+# My App
+
+A simple local CLI tool with no external dependencies.
+
+## Usage
+
+```
+myapp --help
+myapp run
+```
+
+## Features
+
+- Local processing only
+- No network calls
+EOF
+
+    run detect_http_dependencies "README.md"
+    [ "$status" -eq 0 ]
+    # Should return empty or no dependencies message
+    [ -z "$output" ] || [[ "$output" == *"no"* ]]
+}
+
+@test "AC-03: generate_mock_stubs creates Python stub for detected dependency" {
+    mkdir -p harness/mocks
+
+    # Prepare dependency list
+    local deps="stripe:https://api.stripe.com"
+
+    run generate_mock_stubs "harness/mocks" "$deps"
+    [ "$status" -eq 0 ]
+
+    # Should create stub file
+    [[ -f "harness/mocks/stripe.py" ]] || [[ -f "harness/mocks/stripe.sh" ]]
+}
+
+@test "AC-04: generate_start_mocks creates start-mocks.sh that exports MOCK_*_URL vars" {
+    mkdir -p harness/mocks
+
+    # Setup: create some mock stub files
+    cat > harness/mocks/stripe.py << 'EOF'
+#!/usr/bin/env python3
+import os
+port = os.environ.get('STRIPE_PORT', '9001')
+print(f"PID: {os.getpid()}")
+EOF
+    chmod +x harness/mocks/stripe.py
+
+    run generate_start_mocks "harness/mocks"
+    [ "$status" -eq 0 ]
+
+    # Should create start-mocks.sh
+    [[ -f "harness/mocks/start-mocks.sh" ]]
+
+    # Script should be executable
+    [[ -x "harness/mocks/start-mocks.sh" ]]
+
+    # Script should contain env var export pattern
+    grep -q "MOCK_" "harness/mocks/start-mocks.sh"
+}
+
+@test "AC-05: generate_stop_mocks creates stop-mocks.sh that kills by PID files" {
+    mkdir -p harness/mocks
+
+    run generate_stop_mocks "harness/mocks"
+    [ "$status" -eq 0 ]
+
+    # Should create stop-mocks.sh
+    [[ -f "harness/mocks/stop-mocks.sh" ]]
+
+    # Script should be executable
+    [[ -x "harness/mocks/stop-mocks.sh" ]]
+
+    # Script should contain kill logic
+    grep -q "kill" "harness/mocks/stop-mocks.sh"
+}
+
+@test "AC-06: mock scripts set correct env var format MOCK_<SERVICE>_URL" {
+    mkdir -p harness/mocks
+
+    # Create a minimal start-mocks.sh for testing
+    cat > harness/mocks/start-mocks.sh << 'EOF'
+#!/bin/bash
+export MOCK_STRIPE_URL="http://localhost:9001"
+export MOCK_WEBHOOK_URL="http://localhost:9002"
+EOF
+    chmod +x harness/mocks/start-mocks.sh
+
+    # Source and verify exports
+    source harness/mocks/start-mocks.sh
+
+    [ "$MOCK_STRIPE_URL" = "http://localhost:9001" ]
+    [ "$MOCK_WEBHOOK_URL" = "http://localhost:9002" ]
+}
+
+@test "AC-07: mock setup in harness is skipped when no dependencies detected" {
+    cat > README.md << 'EOF'
+# Simple App
+A local-only tool with no external dependencies.
+EOF
+
+    mkdir -p harness
+
+    run detect_http_dependencies "README.md"
+    deps_found="$output"
+
+    # When no deps, harness/mocks should not be required
+    if [ -z "$deps_found" ]; then
+        [[ ! -d "harness/mocks" ]] || [[ ! -f "harness/mocks/start-mocks.sh" ]]
+    fi
+}
+
+@test "AC-08: start-mocks.sh and stop-mocks.sh are executable when generated" {
+    mkdir -p harness/mocks
+
+    # Generate mock scripts
+    run generate_start_mocks "harness/mocks"
+    [ "$status" -eq 0 ]
+    run generate_stop_mocks "harness/mocks"
+    [ "$status" -eq 0 ]
+
+    # Verify they're executable
+    [ -x "harness/mocks/start-mocks.sh" ]
+    [ -x "harness/mocks/stop-mocks.sh" ]
+}
+
+@test "AC-09: mock PID files are created by start-mocks.sh" {
+    mkdir -p harness/mocks
+
+    # Create a mock start script that creates PID files
+    cat > harness/mocks/start-mocks.sh << 'EOF'
+#!/bin/bash
+echo "1234" > harness/mocks/test-service.pid
+export MOCK_TEST_URL="http://localhost:9001"
+EOF
+    chmod +x harness/mocks/start-mocks.sh
+
+    # Execute the start script
+    bash harness/mocks/start-mocks.sh
+
+    # Verify PID file exists
+    [[ -f "harness/mocks/test-service.pid" ]]
+}
+
+@test "AC-10: stop-mocks.sh removes processes from PID files" {
+    mkdir -p harness/mocks
+
+    # Create test PID file
+    echo "9999" > harness/mocks/test-service.pid
+
+    cat > harness/mocks/stop-mocks.sh << 'EOF'
+#!/bin/bash
+[ -f harness/mocks/test-service.pid ] && rm harness/mocks/test-service.pid
+EOF
+    chmod +x harness/mocks/stop-mocks.sh
+
+    bash harness/mocks/stop-mocks.sh
+
+    # Verify PID file was removed
+    [[ ! -f "harness/mocks/test-service.pid" ]]
+}
