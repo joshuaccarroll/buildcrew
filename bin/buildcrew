@@ -1070,10 +1070,10 @@ cmd_lessons() {
                 if [[ "$line" =~ ^##\ Lesson\ ${lesson_num}: ]]; then
                     in_target=true
                 elif [[ "$in_target" == "true" ]]; then
-                    if [[ "$line" =~ ^\*\*Phase\*\*:\ (.+) ]]; then
-                        lesson_phase="${BASH_REMATCH[1]}"
-                    elif [[ "$line" =~ ^\*\*Rule\*\*:\ (.+) ]]; then
-                        lesson_rule="${BASH_REMATCH[1]}"
+                    if [[ "$line" =~ ^\*\*Phase(\*\*:|:\*\*)\ (.+) ]]; then
+                        lesson_phase="${BASH_REMATCH[2]}"
+                    elif [[ "$line" =~ ^\*\*Rule(\*\*:|:\*\*)\ (.+) ]]; then
+                        lesson_rule="${BASH_REMATCH[2]}"
                     elif [[ "$line" == "---" ]]; then
                         break
                     fi
