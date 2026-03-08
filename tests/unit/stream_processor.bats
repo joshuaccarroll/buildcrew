@@ -20,12 +20,21 @@ teardown() {
     { echo '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Read","input":{"file_path":"src/auth/login.py"}}]}}'; sleep 2; } \
       | python3 "$SP" --activity-file /tmp/sp_test_tool --max-turns 10 &
     local PID=$!
-    sleep 1
-    grep -qx 'TOOL=Read' /tmp/sp_test_tool
-    grep -q 'TOOL_INPUT={"file_path"' /tmp/sp_test_tool
-    grep -qx 'TURN=1' /tmp/sp_test_tool
-    grep -qx 'MAX_TURNS=10' /tmp/sp_test_tool
-    grep -qx 'STATUS=tool_use' /tmp/sp_test_tool
+    # Poll up to 5 seconds (50 × 100 ms) for the activity file to contain expected data
+    local i=0
+    while [ $i -lt 50 ]; do
+        [ -f /tmp/sp_test_tool ] && grep -qx 'TOOL=Read' /tmp/sp_test_tool 2>/dev/null && break
+        sleep 0.1
+        i=$((i + 1))
+    done
+    [ -f /tmp/sp_test_tool ] || { echo "Activity file never written within 5s"; return 1; }
+    local content
+    content=$(<"/tmp/sp_test_tool")
+    grep -qx 'TOOL=Read' <<<"$content"
+    grep -q 'TOOL_INPUT={"file_path' <<<"$content"
+    grep -qx 'TURN=1' <<<"$content"
+    grep -qx 'MAX_TURNS=10' <<<"$content"
+    grep -qx 'STATUS=tool_use' <<<"$content"
     wait $PID
     [ $? -eq 0 ]
 }
