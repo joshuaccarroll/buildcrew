@@ -166,6 +166,7 @@ get_phase_max_turns() {
         tdd-scaffold) echo 40 ;;
         build)      echo 50 ;;
         simplify)   echo 30 ;;
+        docs)       echo 20 ;;
         codereview) echo 40 ;;
         verify)     echo 70 ;;
         *)          echo 30 ;;
@@ -550,6 +551,12 @@ run_optional_simplify() {
     fi
 
     run_phase_group "simplify" "$task" "$context" || true
+}
+
+run_optional_docs() {
+    local task="$1" context="$2"
+    [[ -d ".claude/skills/buildcrew-docs" ]] || return 0
+    run_phase_group "docs" "$task" "$context" || true
 }
 
 print_task_start() {
@@ -1243,6 +1250,8 @@ _batch_run_post_build() {
         run_optional_simplify "$task_summary" \
             "Batch mode: reviewing combined changes. See .claude/batch-combined-context.md" \
             "$base_branch"
+        run_optional_docs "$task_summary" \
+            "Batch mode: reviewing combined changes. See .claude/batch-combined-context.md"
     fi
 
     # Merged verify (includes AC verification)
@@ -3636,6 +3645,7 @@ _uat_rebuild_pipeline() {
     run_phase_group "build" "$task" "$rebuild_context" "$task_complexity" || return 1
     if [[ "$task_complexity" != "trivial" && "$task_complexity" != "simple" ]]; then
         run_optional_simplify "$task" ""
+        run_optional_docs "$task" ""
         run_phase_group "codereview" "$task" "" "$task_complexity" || return 1
         local cr_verdict
         cr_verdict=$(jq -r '.verdict' "$PHASE_RESULT_FILE")
@@ -4383,6 +4393,7 @@ process_task_isolated() {
             # --- simplify (non-blocking) ---
             if [[ "$task_complexity" != "trivial" && "$task_complexity" != "simple" ]]; then
                 run_optional_simplify "$task" "${__spec_context}"
+                run_optional_docs "$task" "${__spec_context}"
             fi
 
             # --- code review (independent phase) ---
@@ -4497,6 +4508,7 @@ process_task_isolated() {
                             cr_verdict="approved"
                         else
                             run_optional_simplify "$task" "${__spec_context}"
+                            run_optional_docs "$task" "${__spec_context}"
                             local _rebuild_cr_rc=0
                             run_phase_group "codereview" "$task" "${__spec_context}" "$task_complexity" || _rebuild_cr_rc=$?
                             if [[ $_rebuild_cr_rc -eq 4 ]]; then return 4; fi
@@ -4747,6 +4759,7 @@ main() {
         [[ "$SKIP_SPEC" != "true" ]] && [[ -d ".claude/skills/buildcrew-spec" ]] && _phase_count=$((_phase_count + 1))
         [[ "$SKIP_PREREQS" != "true" ]] && [[ -d ".claude/skills/buildcrew-prereqs" ]] && _phase_count=$((_phase_count + 1))
         [[ -d ".claude/skills/buildcrew-simplify" ]] && _phase_count=$((_phase_count + 1))
+        [[ -d ".claude/skills/buildcrew-docs" ]] && _phase_count=$((_phase_count + 1))
         [[ -d ".claude/skills/buildcrew-tdd-scaffold" ]] && _phase_count=$((_phase_count + 1))
         print_info "Mode: Phase-isolated ($_phase_count invocations per task)"
     fi
@@ -4896,6 +4909,13 @@ main() {
                         fi
                         if [[ -d ".claude/skills/buildcrew-simplify" ]]; then
                             phase_list="${phase_list/build codereview/build simplify codereview}"
+                        fi
+                        if [[ -d ".claude/skills/buildcrew-docs" ]]; then
+                            if [[ -d ".claude/skills/buildcrew-simplify" ]]; then
+                                phase_list="${phase_list/simplify codereview/simplify docs codereview}"
+                            else
+                                phase_list="${phase_list/build codereview/build docs codereview}"
+                            fi
                         fi
                         ;;
                 esac
