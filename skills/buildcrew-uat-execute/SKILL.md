@@ -75,7 +75,21 @@ You are a **Test Runner**. You execute tests methodically, record results precis
 - **Re-execute only** the specified failing/errored scenarios
 - Write a COMPLETE results array containing ALL scenarios (carried forward + re-executed)
 
-### Step 3: Execute Scenarios
+### Step 2.5: Determine Execution Mode
+
+Check whether parallel execution is enabled:
+
+1. Read `.buildcrew/config` (if it exists) and look for `UAT_MODE=parallel` or `UAT_MODE=sequential`.
+2. If `UAT_MODE=parallel` is set, use **parallel mode** (Step 3b).
+3. If `UAT_MODE=sequential` is set (or no config exists), use **sequential mode** (Step 3a — the default).
+
+Write the chosen mode to `.claude/uat-execution-mode` for observability:
+```bash
+mkdir -p .claude
+echo "parallel" > .claude/uat-execution-mode   # or "sequential"
+```
+
+### Step 3a: Execute Scenarios (Sequential — Default)
 
 Run each scenario and capture the results. For each scenario, record:
 
@@ -100,6 +114,38 @@ Run each scenario and capture the results. For each scenario, record:
 - Use timeouts for commands that might hang (30 seconds per individual command is reasonable)
 - If a scenario test script crashes, record it as `error` with the crash details
 - If the artifact produces behavior that is plausible but ambiguous relative to the README, mark as `disputed` and explain the ambiguity in `summary`
+
+### Step 3b: Execute Scenarios (Parallel — Subagent Mode)
+
+When parallel mode is enabled, spawn one Task subagent per scenario file to execute tests concurrently.
+
+**For each scenario file** in `harness/scenarios/*.md`:
+
+1. Build a subagent prompt containing:
+   - The scenario file contents
+   - PATH setup: `export PATH="$(pwd)/harness/.artifact-bin:$PATH"`
+   - Mock environment variables (read from `harness/.artifact-env` and inject as explicit `export` lines)
+   - Instructions to write results to `.claude/uat-results/<scenario-slug>.json` as a single JSON object with fields: `scenario`, `status`, `summary`, `expected`, `actual`
+   - The same status definitions and execution guidelines from Step 3a
+
+2. Launch all subagents concurrently using the Task tool.
+
+3. **Clear `.claude/uat-results/`** at the start of each iteration to avoid stale results.
+
+**On retry (previous results provided):**
+- Write all `pass` and `disputed` results from the previous run to `_carried-forward.json` in `.claude/uat-results/`
+- Only spawn subagents for failing/errored scenarios
+- Merge carried-forward results with new subagent results in Step 4b
+
+### Step 4b: Merge Parallel Results
+
+After all subagents complete:
+
+1. Read each `.claude/uat-results/<scenario-slug>.json` file
+2. If `_carried-forward.json` exists, read its entries too
+3. Combine all results into the final `results/iteration-<N>/scenario-results.json` array
+4. Verify all scenarios are accounted for (no drops or duplicates)
+5. Handle any subagent that failed to write results by recording its scenario as `error`
 
 ### Step 4: Handle Disputes
 

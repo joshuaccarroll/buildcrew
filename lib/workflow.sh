@@ -151,6 +151,15 @@ load_buildcrew_config() {
                         fi
                     fi
                     ;;
+                UAT_MODE)
+                    if [[ -z "${UAT_MODE+x}" ]]; then
+                        if [[ "$value" == "parallel" || "$value" == "sequential" ]]; then
+                            UAT_MODE="$value"
+                        else
+                            echo "Warning: invalid UAT_MODE in .buildcrew/config: $value (ignored, must be parallel or sequential)" >&2
+                        fi
+                    fi
+                    ;;
                 # Add future config keys here
             esac
         fi
@@ -2531,6 +2540,48 @@ extract_task_plan_ref() {
 }
 strip_task_plan_ref()   { _strip_task_annotation   "plan" "$1"; }
 
+# Extract [after:N] or [after:N,M,...] dependency values from anywhere in a task string.
+# Returns one dep per line (newline-separated).
+extract_task_after_deps() {
+    local task="$1"
+    local raw
+    raw=$(echo "$task" | grep -oE '\[after:[0-9,]+\]' | head -1)
+    [[ -z "$raw" ]] && return 0
+    echo "$raw" | sed 's/\[after://;s/\]//' | tr ',' '\n'
+}
+
+# Strip [after:N,...] annotation (and trailing space) from a task string.
+strip_task_after() {
+    local task="$1"
+    echo "$task" | sed 's/\[after:[0-9,]*\] *//'
+}
+
+# Check if a task's [after:N] dependencies are all resolved (completed or blocked).
+# Returns 0 (true) if the task IS blocked by unresolved deps.
+# Returns 1 (false) if the task has no deps or all deps are resolved.
+_after_dep_is_blocked() {
+    local task="$1"
+    local deps
+    deps=$(extract_task_after_deps "$task")
+    [[ -z "$deps" ]] && return 1
+
+    # Get all task lines (pending, completed, blocked) for ordinal lookup
+    local all_tasks
+    all_tasks=$(grep '^\- \[.\]' "$BACKLOG_FILE" 2>/dev/null) || return 1
+
+    local dep task_line
+    while IFS= read -r dep; do
+        [[ -z "$dep" ]] && continue
+        task_line=$(echo "$all_tasks" | sed -n "${dep}p")
+        # If dep task is still pending, this task is blocked
+        if [[ "$task_line" == "- [ ] "* ]]; then
+            return 0
+        fi
+    done <<< "$deps"
+
+    return 1
+}
+
 # Resolve the target directory for a task: inline [dir:...] > TARGET_DIR config > empty.
 resolve_task_target_dir() {
     local task="$1"
@@ -2703,30 +2754,61 @@ check_prerequisites() {
     fi
 }
 
-# Get the next uncompleted task from the backlog
+# Get the next uncompleted task from the backlog (skips tasks with unresolved [after:] deps)
 get_next_task() {
-    grep -m1 '^\- \[ \]' "$BACKLOG_FILE" 2>/dev/null | sed 's/^- \[ \] //' || echo ""
+    local line task
+    while IFS= read -r line; do
+        task=$(echo "$line" | sed 's/^- \[ \] //')
+        if ! _after_dep_is_blocked "$task"; then
+            echo "$task"
+            return
+        fi
+    done < <(grep '^\- \[ \]' "$BACKLOG_FILE" 2>/dev/null)
+    echo ""
 }
 
 # Collect all pending tasks into __BATCH_TASK_LIST (global) and set __BATCH_TASK_COUNT.
 # Must NOT be called via command substitution — subshell would lose both globals.
+# Tasks with unresolved [after:] dependencies are excluded.
 gather_pending_tasks() {
-    __BATCH_TASK_LIST=$(grep '^\- \[ \]' "$BACKLOG_FILE" 2>/dev/null \
-        | sed 's/^- \[ \] //' \
-        | sed -E 's/[[:space:]]*\{(trivial|simple|standard)\}[[:space:]]*$//' \
-        | awk '{printf "%2d. %s\n", NR, $0}') || __BATCH_TASK_LIST=""
-    __BATCH_TASK_COUNT=$(echo "$__BATCH_TASK_LIST" | awk 'NF {n++} END {print n+0}')
+    __BATCH_TASK_LIST=""
+    __BATCH_TASK_COUNT=0
+    local line task nr=0
+    while IFS= read -r line; do
+        task=$(echo "$line" | sed 's/^- \[ \] //' | sed -E 's/[[:space:]]*\{(trivial|simple|standard)\}[[:space:]]*$//')
+        if ! _after_dep_is_blocked "$task"; then
+            nr=$((nr + 1))
+            if [[ -n "$__BATCH_TASK_LIST" ]]; then
+                __BATCH_TASK_LIST="${__BATCH_TASK_LIST}
+$(printf '%2d. %s' "$nr" "$task")"
+            else
+                __BATCH_TASK_LIST="$(printf '%2d. %s' "$nr" "$task")"
+            fi
+        fi
+    done < <(grep '^\- \[ \]' "$BACKLOG_FILE" 2>/dev/null)
+    __BATCH_TASK_COUNT=$nr
 }
 
 # Get a specific task by name or number
-# If target is a number, returns the Nth pending task (1-indexed)
+# If target is a number, returns the Nth eligible pending task (1-indexed, skipping dep-blocked tasks)
 # If target is a string, returns the first pending task containing that string (case-insensitive)
 get_task_by_target() {
     local target="$1"
 
     if [[ "$target" =~ ^[0-9]+$ ]]; then
-        # Numeric: get the Nth pending task
-        grep '^\- \[ \]' "$BACKLOG_FILE" 2>/dev/null | sed -n "${target}p" | sed 's/^- \[ \] //' || echo ""
+        # Numeric: get the Nth eligible pending task (matching gather_pending_tasks numbering)
+        local line task nr=0
+        while IFS= read -r line; do
+            task=$(echo "$line" | sed 's/^- \[ \] //')
+            if ! _after_dep_is_blocked "$task"; then
+                nr=$((nr + 1))
+                if [[ "$nr" -eq "$target" ]]; then
+                    echo "$task"
+                    return
+                fi
+            fi
+        done < <(grep '^\- \[ \]' "$BACKLOG_FILE" 2>/dev/null)
+        echo ""
     else
         # String: find first pending task matching (case-insensitive)
         grep -i '^\- \[ \].*'"$target" "$BACKLOG_FILE" 2>/dev/null | head -1 | sed 's/^- \[ \] //' || echo ""
@@ -2790,20 +2872,20 @@ assess_task_complexity() {
 }
 
 # Mark a task as completed in the backlog
-# Tolerates optional [plan:...] and [dir:...] prefixes in the BACKLOG line, preserving them in output.
-# Line format: - [ ] [plan:X]? [dir:Y]? <task text> {trivial|simple|standard}?
+# Tolerates optional [plan:...], [dir:...], and [after:...] prefixes in the BACKLOG line, preserving them in output.
+# Line format: - [ ] [plan:X]? [dir:Y]? [after:N]? <task text> {trivial|simple|standard}?
 mark_task_complete() {
     local task="$1"
-    TASK="$task" perl -i -pe 's/^- \[ \] (\[plan:[^\]]+\] )?(\[dir:[^\]]+\] )?\Q$ENV{TASK}\E(\s*\{(?:trivial|simple|standard)\})?$/- [x] ${1}${2}$ENV{TASK}/' "$BACKLOG_FILE"
+    TASK="$task" perl -i -pe 's/^- \[ \] (\[plan:[^\]]+\] )?(\[dir:[^\]]+\] )?(\[after:[^\]]+\] )?\Q$ENV{TASK}\E(\s*\{(?:trivial|simple|standard)\})?$/- [x] ${1}${2}${3}$ENV{TASK}/' "$BACKLOG_FILE"
 }
 
 # Mark a task as blocked in the backlog
-# Tolerates optional [plan:...] and [dir:...] prefixes in the BACKLOG line, preserving them in output.
-# Line format: - [ ] [plan:X]? [dir:Y]? <task text> ...
+# Tolerates optional [plan:...], [dir:...], and [after:...] prefixes in the BACKLOG line, preserving them in output.
+# Line format: - [ ] [plan:X]? [dir:Y]? [after:N]? <task text> ...
 mark_task_blocked() {
     local task="$1"
     local reason="$2"
-    TASK="$task" REASON="$reason" perl -i -pe 's/^- \[ \] (\[plan:[^\]]+\] )?(\[dir:[^\]]+\] )?\Q$ENV{TASK}\E.*/- [!] ${1}${2}$ENV{TASK} (blocked: $ENV{REASON})/' "$BACKLOG_FILE"
+    TASK="$task" REASON="$reason" perl -i -pe 's/^- \[ \] (\[plan:[^\]]+\] )?(\[dir:[^\]]+\] )?(\[after:[^\]]+\] )?\Q$ENV{TASK}\E.*/- [!] ${1}${2}${3}$ENV{TASK} (blocked: $ENV{REASON})/' "$BACKLOG_FILE"
 }
 
 # ─────────────────────────────────────────────────────────────────────────────────
