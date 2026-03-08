@@ -163,6 +163,7 @@ get_phase_max_turns() {
         research)   echo 40 ;;
         review)     echo 50 ;;
         tdd-scaffold) echo 40 ;;
+        tdd-review) echo 30 ;;
         build)      echo 50 ;;
         docs)       echo 20 ;;
         codereview) echo 40 ;;
@@ -385,6 +386,7 @@ __inject_phase_result_protocol() {
                        extra=$'\nInclude "human_review": true and "human_review_reason": "..." when objective criteria are met.' ;;
         review)        verdicts="approved, needs_revision, rejected" ;;
         tdd-scaffold)  verdicts="complete, blocked" ;;
+        tdd-review)    verdicts="complete" ;;
         build)         verdicts="complete" ;;
         codereview)    verdicts="approved, needs_rebuild" ;;
         verify)        verdicts="complete, blocked"
@@ -4315,6 +4317,29 @@ process_task_isolated() {
         update_workflow_state "tdd-scaffold" "skipped"
     fi
 
+    # --- tdd-review (standard complexity, TDD mode) ---
+    if [[ "${TDD_MODE:-}" == "true" && "$task_complexity" == "standard" ]]; then
+        if [[ -f ".claude/tdd-manifest.json" ]]; then
+            if phase_completed "tdd-review"; then
+                print_info "Skipping phase: tdd-review (completed in previous run)"
+                update_workflow_state "tdd-review" "skipped"
+            else
+                local tdd_review_context="Review TDD test files listed in .claude/tdd-manifest.json"
+                run_phase_group "tdd-review" "$task" "$tdd_review_context" "$task_complexity" || true
+                local tdd_review_verdict
+                tdd_review_verdict=$(jq -r '.verdict // "unknown"' "$PHASE_RESULT_FILE" 2>/dev/null || echo "unknown")
+                if [[ "$tdd_review_verdict" != "complete" ]]; then
+                    print_warning "tdd-review returned unexpected verdict: $tdd_review_verdict — continuing"
+                fi
+                __completed_phases="${__completed_phases:+$__completed_phases }tdd-review" # mark "tdd-review" done
+                save_task_progress "$task" "$__completed_phases" "$__INVOCATION_COUNT"
+            fi
+        else
+            print_info "Skipping phase: tdd-review (no tdd-manifest.json)"
+            update_workflow_state "tdd-review" "skipped"
+        fi
+    fi
+
     # --- build → codereview (with rebuild loop, circuit breaker) ---
     if phase_completed "build"; then
         print_info "Skipping phase: build+codereview (completed in previous run)"
@@ -4736,6 +4761,7 @@ main() {
         [[ "$SKIP_PREREQS" != "true" ]] && [[ -d ".claude/skills/buildcrew-prereqs" ]] && _phase_count=$((_phase_count + 1))
         [[ -d ".claude/skills/buildcrew-docs" ]] && _phase_count=$((_phase_count + 1))
         [[ -d ".claude/skills/buildcrew-tdd-scaffold" ]] && _phase_count=$((_phase_count + 1))
+        [[ -d ".claude/skills/buildcrew-tdd-review" ]] && _phase_count=$((_phase_count + 1))
         print_info "Mode: Phase-isolated ($_phase_count invocations per task)"
     fi
     print_debug "Flags: skip_spec=$SKIP_SPEC skip_prereqs=$SKIP_PREREQS review=$HUMAN_REVIEW branch=$GIT_BRANCH resume=$RESUME_MODE full_pipeline=$FULL_PIPELINE complexity_aware=$COMPLEXITY_AWARE auto=$AUTO_MODE"

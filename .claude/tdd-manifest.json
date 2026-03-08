@@ -1,31 +1,29 @@
 {
   "test_files": [
-    "tests/tdd/ac01_simplify_deletion.bats"
+    "tests/tdd/ac_tdd_review_phase.bats"
   ],
-  "stub_files": [],
+  "stub_files": [
+    "skills/buildcrew-tdd-review/SKILL.md"
+  ],
   "test_dir": "tests/tdd",
-  "test_count": 9,
+  "test_count": 15,
   "all_failing": true,
   "framework": "bats",
-  "run_command": "bats tests/tdd/ac01_simplify_deletion.bats",
+  "run_command": "bats tests/tdd/ac_tdd_review_phase.bats",
   "ac_coverage": {
-    "AC-01": [
-      "AC-01: skills/buildcrew-simplify directory does not exist"
-    ],
-    "AC-02": [
-      "AC-02: No buildcrew-simplify references in skills/",
-      "AC-02: No buildcrew-simplify references in bin/",
-      "AC-02: No buildcrew-simplify references in lib/",
-      "AC-02: No simplify phase references in workflows/",
-      "AC-02: No run_optional_simplify references in source",
-      "AC-02: No simplify phase references in CLAUDE.md",
-      "AC-02: No simplify phase references in README.md"
-    ],
-    "AC-03": [
-      "AC-03: ./test.sh passes"
-    ]
+    "AC-01": ["AC-01: get_phase_max_turns returns 30 for tdd-review"],
+    "AC-02": ["AC-02: workflow.sh has tdd-review phase block", "AC-02: tdd-review appears in workflow after tdd-scaffold"],
+    "AC-03": ["AC-03: tdd-review phase block guards on TDD_MODE and complexity", "AC-03: tdd-review skips if tdd-manifest.json not found"],
+    "AC-04": ["AC-04: tdd-review phase call includes || true"],
+    "AC-05": ["AC-05: tdd-review is in phase_completed check"],
+    "AC-06": ["AC-06: tdd-review is appended to __completed_phases"],
+    "AC-07": ["AC-07: _phase_count increments for tdd-review"],
+    "AC-08": ["AC-08: skills/buildcrew-tdd-review/SKILL.md exists"],
+    "AC-09": ["AC-09: SKILL.md mentions test_files from tdd-manifest", "AC-09: SKILL.md describes RED state verification", "AC-09: SKILL.md mentions checksum updates"],
+    "AC-10": ["AC-10: workflow.sh documents tdd-review verdict as complete"],
+    "AC-11": ["AC-11: ./test.sh does not fail on workflow.sh syntax"]
   },
   "checksums": {
-    "tests/tdd/ac01_simplify_deletion.bats": "771f50d0c3aff296af182dba665b70663e2a34f0276c6412195a8703b06265a2"
+    "tests/tdd/ac_tdd_review_phase.bats": "2fc589680f851ad25564627bff51e26e0d6dafc938fea444dd64c72f30ba6600"
   }
 }
