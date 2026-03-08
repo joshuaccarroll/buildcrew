@@ -1,18 +1,21 @@
 {
-  "test_files": ["tests/tdd/ac01_no_uat_help_text.bats"],
-  "stub_files": [],
+  "test_files": ["tests/tdd/test_review_command.bats"],
+  "stub_files": ["bin/buildcrew", "skills/buildcrew-test-review/SKILL.md"],
   "test_dir": "tests/tdd",
-  "test_count": 4,
+  "test_count": 16,
   "all_failing": true,
   "framework": "bats",
-  "run_command": "bats tests/tdd/ac01_no_uat_help_text.bats",
+  "run_command": "bats tests/tdd/test_review_command.bats",
   "ac_coverage": {
-    "AC-01": ["test_AC-01_buildcrew_help_output_contains_exactly_one_instance_of_--no-uat_flag"],
-    "AC-02": ["test_AC-02_--no-uat_line_matches_exact_format_with_description"],
-    "AC-03": ["test_AC-03_--no-uat_line_immediately_follows_--no-tdd_line_in_help"],
-    "AC-04": ["test_AC-04_bin/buildcrew_source_contains_--no-uat_in_print_help_function"]
+    "AC-01": ["AC-01: test-review command is recognized (exits 0, not 'unknown command')"],
+    "AC-02": ["AC-02: errors when not in a git repository"],
+    "AC-03": ["AC-03: warns when working tree is dirty"],
+    "AC-04": ["AC-04: discovers JavaScript/TypeScript test files", "AC-04: discovers Bash/bats test files", "AC-04: discovers Python test files", "AC-04: excludes files in excluded directories", "AC-04: exits cleanly when no test files are found"],
+    "AC-05": ["AC-05: detects jest runner from *.test.js files", "AC-05: detects bats runner from *.bats files", "AC-05: detects pytest runner from test_*.py files"],
+    "AC-06": ["AC-06: runs baseline and reports success", "AC-06: detects baseline failure and enters report-only mode"],
+    "AC-07": ["AC-07: batches 10 files into 1 batch", "AC-07: batches 16 files into 2 batches (15+1)", "AC-07: batches 30 files into 2 batches (15+15)"]
   },
   "checksums": {
-    "tests/tdd/ac01_no_uat_help_text.bats": "c6f16c2e60aee7ea1d7a73400d7006efd110cbc89f965a5a73387cd16d1dafd3"
+    "tests/tdd/test_review_command.bats": "b67b669e6f250d81e9c626001bf58897f59c3897751e96f954ef67cd9ce94ffc"
   }
 }
