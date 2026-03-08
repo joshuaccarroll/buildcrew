@@ -62,10 +62,11 @@ teardown() {
     [[ "$output" == *"USAGE:"* ]]
 }
 
-@test "cli: help mentions --sequential flag" {
+@test "cli: help mentions --sequential flag as deprecated" {
     run "$BUILDCREW_HOME/bin/buildcrew" help
     [ "$status" -eq 0 ]
     [[ "$output" == *"--sequential"* ]]
+    [[ "$output" == *"deprecated"* ]]
 }
 
 @test "cli: help marks --batch as deprecated" {

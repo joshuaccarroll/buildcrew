@@ -567,10 +567,11 @@ UAT_SH="$BUILDCREW_ROOT/lib/uat.sh"
     [ "$SEQUENTIAL_MODE" = "false" ]
 }
 
-# Happy path: --sequential flag sets SEQUENTIAL_MODE=true, opting out of batch.
-@test "experience: --sequential sets SEQUENTIAL_MODE to true" {
-    parse_args --sequential
-    [ "$SEQUENTIAL_MODE" = "true" ]
+# --sequential is deprecated: prints deprecation warning and sets SEQUENTIAL_MODE=true.
+@test "experience: --sequential prints deprecation warning and sets SEQUENTIAL_MODE=true" {
+    run bash -c "source '$BUILDCREW_ROOT/lib/workflow.sh' 2>/dev/null; parse_args --sequential 2>&1; echo SEQUENTIAL_MODE=\$SEQUENTIAL_MODE"
+    [[ "$output" == *"deprecated"* ]]
+    [[ "$output" == *"SEQUENTIAL_MODE=true"* ]]
 }
 
 # Happy path: --single implicitly sets SEQUENTIAL_MODE=true (single task can't be parallel).
@@ -602,10 +603,10 @@ UAT_SH="$BUILDCREW_ROOT/lib/uat.sh"
 }
 
 # Happy path: workflow.sh help text documents --sequential and deprecated --batch.
-@test "experience: workflow.sh --help documents --sequential flag" {
+@test "experience: workflow.sh --help documents --sequential flag as deprecated" {
     run bash -c "source '$BUILDCREW_ROOT/lib/workflow.sh' 2>/dev/null; parse_args --help"
     [[ "$output" == *"--sequential"* ]]
-    [[ "$output" == *"opt out of parallel batch mode"* ]]
+    [[ "$output" == *"deprecated"* ]]
 }
 
 @test "experience: workflow.sh --help marks --batch as deprecated" {
@@ -615,9 +616,10 @@ UAT_SH="$BUILDCREW_ROOT/lib/uat.sh"
 }
 
 # Happy path: bin/buildcrew help text documents --sequential and deprecated --batch.
-@test "experience: bin/buildcrew help documents --sequential flag" {
+@test "experience: bin/buildcrew help documents --sequential flag as deprecated" {
     run "$BUILDCREW_ROOT/bin/buildcrew" help
     [[ "$output" == *"--sequential"* ]]
+    [[ "$output" == *"deprecated"* ]]
 }
 
 @test "experience: bin/buildcrew help marks --batch as deprecated" {
@@ -644,9 +646,9 @@ UAT_SH="$BUILDCREW_ROOT/lib/uat.sh"
     ! grep -q 'if \[\[ "\$BATCH_MODE" == "true" \]\]' "$WORKFLOW_SH"
 }
 
-# Happy path: batch mode prints info line about parallel mode.
+# Happy path: batch mode prints info line about parallel mode (updated message).
 @test "experience: batch mode prints parallel mode info line" {
-    grep -q 'Running in parallel mode (unattended). Use --sequential for interactive mode.' "$WORKFLOW_SH"
+    grep -q 'Running in parallel mode (unattended). Use --single to run one task, or --review for interactive mode.' "$WORKFLOW_SH"
 }
 
 # Happy path: flag forwarding in _batch_launch_task uses == true comparison (not :+).
@@ -662,17 +664,17 @@ UAT_SH="$BUILDCREW_ROOT/lib/uat.sh"
     ! grep -q '${VERBOSE:+--verbose}' "$WORKFLOW_SH"
 }
 
-# Error recovery: dirty worktree error message mentions --sequential as the opt-out.
-@test "experience: dirty worktree error suggests --sequential as opt-out" {
-    grep -q 'Commit or stash changes first, or use --sequential' "$WORKFLOW_SH"
+# Error recovery: dirty worktree error message mentions --single as the opt-out (not --sequential).
+@test "experience: dirty worktree error mentions --single not --sequential" {
+    grep -q 'Commit or stash changes first, or use --single' "$WORKFLOW_SH"
+    ! grep -q 'Commit or stash changes first, or use --sequential' "$WORKFLOW_SH"
 }
 
-# Adversarial: user passes --batch --sequential — both flags process without conflict.
-# --batch prints deprecation, --sequential sets SEQUENTIAL_MODE=true, sequential wins.
-@test "experience: --batch --sequential combo processes without error" {
+# Adversarial: user passes --batch --sequential — both flags are deprecated, both print warnings.
+@test "experience: --batch --sequential both print deprecation warnings" {
     run bash -c "source '$BUILDCREW_ROOT/lib/workflow.sh' 2>/dev/null; parse_args --batch --sequential 2>&1"
-    [[ "$output" == *"deprecated"* ]]
-    # Can't check SEQUENTIAL_MODE in subshell, but no crash is the assertion
+    deprecated_count=$(echo "$output" | grep -io "deprecated" | wc -l | tr -d ' ')
+    [ "$deprecated_count" -ge 2 ]
     [ "$status" -eq 0 ] || [ "$status" -eq 143 ] # 143 = SIGTERM from help exit
 }
 
@@ -696,7 +698,7 @@ UAT_SH="$BUILDCREW_ROOT/lib/uat.sh"
     parse_args --task-exact "Fix the bug"
     [ "$TARGET_TASK_EXACT" = "Fix the bug" ]
     [ "$SINGLE_TASK" = "true" ]
-    [ "$SEQUENTIAL_MODE" = "true" ]}
+    [ "$SEQUENTIAL_MODE" = "true" ]
 }
 
 # ─────────────────────────────────────────────────────────────────────────────

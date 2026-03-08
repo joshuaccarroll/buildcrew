@@ -53,8 +53,9 @@ EOF
     [ "$status" -eq 0 ]
     # Dry run should only mention the first task
     [[ "$output" == *"Task 1"* ]]
-    # Should exit after single task mode message
-    [[ "$output" == *"Single task mode"* ]]
+    # Should show dry-run output (not process Task 2 or 3)
+    [[ "$output" == *"[DRY RUN]"* ]]
+    [[ "$output" != *"Task 2"* ]]
 }
 
 @test "run: shows backlog status" {
@@ -69,11 +70,13 @@ EOF
     [[ "$output" == *"Pending:"* ]]
 }
 
-@test "run: displays workflow complete message" {
+@test "run: dry-run single mode shows task info and exits cleanly" {
     setup_phase_isolation
     echo "- [ ] Test task" > BACKLOG.md
     run "$BUILDCREW_HOME/lib/workflow.sh" --dry-run --single
-    [[ "$output" == *"Workflow Complete"* ]]
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"[DRY RUN]"* ]]
+    [[ "$output" == *"Test task"* ]]
 }
 
 @test "run: help flag shows usage" {
@@ -200,11 +203,11 @@ EOF
     [[ "$output" != *"No pending tasks"* ]]
 }
 
-@test "run: outside git repo without target dirs falls back to sequential" {
+@test "run: outside git repo without target dirs falls back to single task foreground" {
     echo "- [ ] Test task" > BACKLOG.md
     # TEST_DIR is not a git repo (setup_test_dir uses mktemp, no git init)
     run "$BUILDCREW_HOME/lib/workflow.sh"
-    [[ "$output" == *"falling back to sequential"* ]] || [[ "$output" == *"Non-git directory"* ]]
+    [[ "$output" == *"Running single task in foreground"* ]] || [[ "$output" == *"Non-git directory"* ]]
 }
 
 @test "run: outside git repo with [dir:...] prefix shows non-git info" {
@@ -254,14 +257,13 @@ EOF
     [[ "$output" == *"deprecated"* ]]
 }
 
-@test "run: --sequential --dry-run uses sequential path" {
+@test "run: --sequential --dry-run prints deprecation warning and shows dry-run output" {
     setup_phase_isolation
     echo "- [ ] Test task" > BACKLOG.md
     run "$BUILDCREW_HOME/lib/workflow.sh" --sequential --dry-run
     [ "$status" -eq 0 ]
-    # Sequential path uses different dry-run output (no "tasks in parallel")
+    [[ "$output" == *"deprecated"* ]]
     [[ "$output" == *"[DRY RUN]"* ]]
-    [[ "$output" != *"parallel"* ]]
 }
 
 @test "run: --batch --single --dry-run takes sequential path with deprecation warning" {

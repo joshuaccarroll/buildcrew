@@ -174,7 +174,6 @@ PHASE_RESULT_FILE=".claude/phase-result.json"
 STOP_FILE=".buildcrew/.stop-workflow"
 LOCKFILE=".buildcrew/.workflow-lock"
 MAX_TURNS=100
-PAUSE_BETWEEN_TASKS=5
 # 1. Load project config (only sets vars not already in environment)
 load_buildcrew_config
 # 2. Fall back to built-in default if nothing set it
@@ -271,7 +270,7 @@ parse_args() {
                 shift
                 ;;
             --single)
-                SINGLE_TASK=true
+                SINGLE_TASK="true"
                 SEQUENTIAL_MODE=true
                 shift
                 ;;
@@ -303,7 +302,7 @@ parse_args() {
                     exit 1
                 fi
                 TARGET_TASK_EXACT="$2"
-                SINGLE_TASK=true
+                SINGLE_TASK="true"
                 SEQUENTIAL_MODE=true
                 shift 2
                 ;;
@@ -335,10 +334,11 @@ parse_args() {
                 shift
                 ;;
             --batch)
-                print_warning "--batch is deprecated (batch mode is now the default). Use --sequential to opt out."
+                print_warning "--batch is deprecated (batch mode is now the default)."
                 shift
                 ;;
             --sequential)
+                print_warning "--sequential is deprecated and now runs only one task. Batch mode (the default) processes all tasks. Use --single to explicitly run one task."
                 SEQUENTIAL_MODE=true
                 shift
                 ;;
@@ -418,7 +418,7 @@ parse_args() {
                 echo "  --full-pipeline  Force all phases regardless of complexity assessment"
                 echo "  --auto       (deprecated) Auto mode is now the default. Use --interactive to opt out"
                 echo "  --interactive Restore interactive pauses (spec review, plan review, human review)"
-                echo "  --sequential Run tasks one at a time (opt out of parallel batch mode)"
+                echo "  --sequential (deprecated) Use --single instead"
                 echo "  --no-uat     Skip UAT after backlog completion (with 'run')"
                 echo "  --batch      (deprecated) Batch mode is now the default"
                 echo "  --max-parallel N  Max concurrent tasks in parallel mode (default: 5)"
@@ -5096,7 +5096,7 @@ main() {
 
         # 1. Advisory: --branch has no effect in parallel mode
         if [[ "$GIT_BRANCH" == "true" ]]; then
-            print_warning "--branch has no effect in parallel mode (worktree branches are automatic). Use --sequential --branch for manual PR workflow."
+            print_warning "--branch has no effect in parallel mode (worktree branches are automatic). Use --single --branch for manual PR workflow."
         fi
 
         # 2. Check for claude and jq
@@ -5114,7 +5114,7 @@ main() {
             __BATCH_PARENT_IS_GIT=true
             # 4. Working tree must be clean (only when parent is a git repo)
             if [[ -n "$(git status --porcelain 2>/dev/null)" ]]; then
-                print_error "Working tree is not clean. Commit or stash changes first, or use --sequential."
+                print_error "Working tree is not clean. Commit or stash changes first, or use --single to run one task without worktrees."
                 exit 1
             fi
         else
@@ -5126,7 +5126,7 @@ main() {
                     _has_dir_prefix=true
                 fi
                 if [[ "$_has_dir_prefix" != "true" ]]; then
-                    print_info "Non-git directory without [dir:...] prefixes — falling back to sequential mode."
+                    print_info "Non-git directory without [dir:...] prefixes — Running single task in foreground (no git repo detected)."
                     SEQUENTIAL_MODE=true
                 fi
             fi
@@ -5156,25 +5156,24 @@ main() {
                 _manifest_mtime=$(stat -f %m "$BATCH_MANIFEST" 2>/dev/null || stat -c %Y "$BATCH_MANIFEST" 2>/dev/null || echo 0)
                 _progress_mtime=$(stat -f %m "$PROGRESS_FILE" 2>/dev/null || stat -c %Y "$PROGRESS_FILE" 2>/dev/null || echo 0)
                 if [[ "$_manifest_mtime" -ge "$_progress_mtime" ]]; then
-                    print_info "Found both sequential and batch progress — resuming the more recent one (batch). Use --sequential to force sequential resume."
+                    print_info "Found batch manifest and task progress file — resuming batch (more recent)."
                     _batch_resume
                 else
-                    print_info "Found both sequential and batch progress — resuming the more recent one (sequential). Use --sequential to force sequential resume."
                     SEQUENTIAL_MODE=true
-                    # Fall through to sequential path below
+                    SINGLE_TASK=true
+                    print_info "Found in-progress task (more recent than batch manifest) — resuming single task."
                 fi
             elif [[ "$_has_manifest" == "true" ]]; then
                 print_info "Resuming batch from $BATCH_MANIFEST"
                 _batch_resume
             elif [[ "$_has_progress" == "true" ]]; then
-                print_info "Detected sequential progress file — resuming in sequential mode."
-                SEQUENTIAL_MODE=true
-                # Fall through to sequential path below
+                print_error "No resumable batch run found. Use --single --resume to resume the interrupted task."
+                exit 1
             else
-                print_error "No resumable run found (no batch manifest or sequential progress file)"
+                print_error "No resumable run found (no batch manifest or task progress file)"
                 exit 1
             fi
-            # _batch_resume calls exit 0 if it ran; if we fall through, sequential handles it
+            # _batch_resume calls exit 0 if it ran; if we fall through, foreground mode handles it
         fi
     fi
 
@@ -5202,7 +5201,7 @@ main() {
 
         # 8. Advisory messages
         if [[ "$__BATCH_TASK_COUNT" -eq 1 ]]; then
-            print_info "Only 1 pending task -- batch mode will still work, but sequential mode may be more thorough"
+            print_info "Only 1 pending task — batch mode will still work."
         fi
 
         # 9. Dry-run support
@@ -5216,7 +5215,7 @@ main() {
         fi
 
         # 10. Setup and execute
-        print_info "Running in parallel mode (unattended). Use --sequential for interactive mode."
+        print_info "Running in parallel mode (unattended). Use --single to run one task, or --review for interactive mode."
         mkdir -p .buildcrew
         log_init
         log_msg "Batch mode: $__BATCH_TASK_COUNT tasks, max_parallel=$MAX_PARALLEL"
@@ -5226,6 +5225,16 @@ main() {
 
         enter_batch_mode "$task_list"
         # enter_batch_mode calls exit 0, control does not return here
+    fi
+
+    # Force single-task for all foreground runs
+    SINGLE_TASK=true
+
+    # Empty backlog check — prevent silent 0/0 summary
+    if is_fresh_backlog || is_completed_phase; then
+        print_info "No pending tasks. Run 'buildcrew run' (batch mode) or 'buildcrew run --plan' to add tasks."
+        clear_workflow_state
+        exit 0
     fi
 
     check_prerequisites
@@ -5320,123 +5329,121 @@ main() {
         fi
     fi
 
-    # Track dry-run progress (since dry-run doesn't modify the backlog)
-    local dry_run_remaining=0
-    if [[ "$DRY_RUN" == "true" ]]; then
-        dry_run_remaining=$(count_tasks pending)
+    # Get next task (or targeted task)
+    local task
+    if [[ -n "$TARGET_TASK_EXACT" ]]; then
+        # Exact task text provided (e.g., from batch child) — use directly, skip backlog search
+        task="$TARGET_TASK_EXACT"
+        TARGET_TASK_EXACT=""
+    elif [[ -n "$TARGET_TASK" ]]; then
+        task=$(get_task_by_target "$TARGET_TASK")
+        if [[ -z "$task" ]]; then
+            print_error "No pending task matching '$TARGET_TASK'"
+            task=""
+        fi
+        TARGET_TASK=""
+    else
+        task=$(get_next_task)
     fi
 
-    while true; do
-        # Check for stop signal
-        if check_stop_signal; then
-            handle_stop
-            break
-        fi
+    if [[ -z "$task" ]]; then
+        # No task found — show summary and exit
+        local end_time
+        end_time=$(date +%s)
+        local duration=$((end_time - start_time))
+        print_header "Workflow Complete"
+        echo -e "  ${GREEN}Completed:${NC} $completed"
+        echo -e "  ${YELLOW}Failed:${NC}    $failed"
+        echo -e "  ${CYAN}Duration:${NC}  ${duration}s"
+        echo ""
+        clear_workflow_state
+        cleanup_log "$failed"
+        exit 0
+    fi
 
-        # Get next task (or targeted task)
-        local task
-        if [[ -n "$TARGET_TASK_EXACT" ]]; then
-            # Exact task text provided (e.g., from batch child) — use directly, skip backlog search
-            task="$TARGET_TASK_EXACT"
-            TARGET_TASK_EXACT=""
-        elif [[ -n "$TARGET_TASK" ]]; then
-            task=$(get_task_by_target "$TARGET_TASK")
-            if [[ -z "$task" ]]; then
-                print_error "No pending task matching '$TARGET_TASK'"
-                break
-            fi
-            # Clear so subsequent iterations (shouldn't happen with SINGLE_TASK) use normal order
-            TARGET_TASK=""
+    # Extract and strip [plan:] annotation before complexity assessment
+    local plan_ref=""
+    plan_ref=$(extract_task_plan_ref "$task")
+    task=$(strip_task_plan_ref "$task")
+
+    # Assess complexity and strip tag before processing
+    local task_complexity="standard"
+    if [[ "$FULL_PIPELINE" != "true" ]] && [[ "$COMPLEXITY_AWARE" == "true" ]]; then
+        task_complexity=$(assess_task_complexity "$task")
+    fi
+    task=$(strip_task_tag "$task")
+
+    print_task_start "$task"
+
+    if [[ "$DRY_RUN" == "true" ]]; then
+        if [[ "$GIT_BRANCH" == "true" ]]; then
+            print_info "[DRY RUN] Would create branch: $(task_to_branch_name "$task")"
+        fi
+        if [[ "$RESUME_MODE" == "true" ]] && [[ -f "$PROGRESS_FILE" ]]; then
+            local skip_phases
+            skip_phases=$(jq -r '.completed_phases // [] | join(", ")' "$PROGRESS_FILE" 2>/dev/null)
+            print_info "[DRY RUN] Would resume task, skipping phases: ${skip_phases:-none}"
         else
-            task=$(get_next_task)
+            local phase_list
+            case "$task_complexity" in
+                trivial)
+                    phase_list="build verify"
+                    ;;
+                simple)
+                    phase_list="research build verify"
+                    ;;
+                *)
+                    phase_list="research review build codereview verify"
+                    if [[ "$SKIP_SPEC" != "true" ]] && [[ -d ".claude/skills/buildcrew-spec" ]]; then
+                        phase_list="spec $phase_list"
+                    fi
+                    if [[ "$SKIP_PREREQS" != "true" ]] && [[ -d ".claude/skills/buildcrew-prereqs" ]]; then
+                        phase_list="${phase_list/research/prereqs research}"
+                    fi
+                    if [[ -d ".claude/skills/buildcrew-tdd-scaffold" ]]; then
+                        phase_list="${phase_list/review build/review tdd-scaffold build}"
+                    fi
+                    if [[ -d ".claude/skills/buildcrew-docs" ]]; then
+                        phase_list="${phase_list/build codereview/build docs codereview}"
+                    fi
+                    ;;
+            esac
+            if [[ "$task_complexity" != "standard" ]]; then
+                print_info "[DRY RUN] Complexity: $task_complexity"
+            fi
+            print_info "[DRY RUN] Would execute phases: $phase_list"
+        fi
+        print_info "[DRY RUN] Would mark complete: $task"
+        ((completed++))
+        exit 0
+    else
+        # Create feature branch if --branch is set
+        local branch_ok=true
+        if [[ "$GIT_BRANCH" == "true" ]]; then
+            if ! create_task_branch "$task"; then
+                mark_task_blocked "$task" "Failed to create branch"
+                ((failed++))
+                branch_ok=false
+            fi
         fi
 
-        if [[ -z "$task" ]]; then
-            break
-        fi
-
-        # Extract and strip [plan:] annotation before complexity assessment
-        local plan_ref=""
-        plan_ref=$(extract_task_plan_ref "$task")
-        task=$(strip_task_plan_ref "$task")
-
-        # Assess complexity and strip tag before processing
-        local task_complexity="standard"
-        if [[ "$FULL_PIPELINE" != "true" ]] && [[ "$COMPLEXITY_AWARE" == "true" ]]; then
-            task_complexity=$(assess_task_complexity "$task")
-        fi
-        task=$(strip_task_tag "$task")
-
-        print_task_start "$task"
-
-        if [[ "$DRY_RUN" == "true" ]]; then
-            if [[ "$GIT_BRANCH" == "true" ]]; then
-                print_info "[DRY RUN] Would create branch: $(task_to_branch_name "$task")"
-            fi
-            if [[ "$RESUME_MODE" == "true" ]] && [[ -f "$PROGRESS_FILE" ]]; then
-                local skip_phases
-                skip_phases=$(jq -r '.completed_phases // [] | join(", ")' "$PROGRESS_FILE" 2>/dev/null)
-                print_info "[DRY RUN] Would resume task, skipping phases: ${skip_phases:-none}"
-            else
-                local phase_list
-                case "$task_complexity" in
-                    trivial)
-                        phase_list="build verify"
-                        ;;
-                    simple)
-                        phase_list="research build verify"
-                        ;;
-                    *)
-                        phase_list="research review build codereview verify"
-                        if [[ "$SKIP_SPEC" != "true" ]] && [[ -d ".claude/skills/buildcrew-spec" ]]; then
-                            phase_list="spec $phase_list"
-                        fi
-                        if [[ "$SKIP_PREREQS" != "true" ]] && [[ -d ".claude/skills/buildcrew-prereqs" ]]; then
-                            phase_list="${phase_list/research/prereqs research}"
-                        fi
-                        if [[ -d ".claude/skills/buildcrew-tdd-scaffold" ]]; then
-                            phase_list="${phase_list/review build/review tdd-scaffold build}"
-                        fi
-                        if [[ -d ".claude/skills/buildcrew-docs" ]]; then
-                            phase_list="${phase_list/build codereview/build docs codereview}"
-                        fi
-                        ;;
-                esac
-                if [[ "$task_complexity" != "standard" ]]; then
-                    print_info "[DRY RUN] Complexity: $task_complexity"
-                fi
-                print_info "[DRY RUN] Would execute phases: $phase_list"
-            fi
-            print_info "[DRY RUN] Would mark complete: $task"
-            ((completed++))
-            ((dry_run_remaining--))
-            if (( dry_run_remaining <= 0 )); then
-                break
-            fi
-        else
-            # Create feature branch if --branch is set
-            if [[ "$GIT_BRANCH" == "true" ]]; then
-                if ! create_task_branch "$task"; then
-                    mark_task_blocked "$task" "Failed to create branch"
-                    ((failed++))
-                    continue
-                fi
-            fi
-
-            # Run the appropriate processor
+        if [[ "$branch_ok" == "true" ]]; then
+            # Run the appropriate processor with rate-limit retry loop
             ((task_num++))
             __WF_TASK_NUM="$task_num"
             local task_result=0
-            process_task_isolated "$task" "$task_num" "$total_tasks" "$task_complexity" "$plan_ref" || task_result=$?
-
-            if [[ $task_result -eq 4 ]]; then
-                # Rate/usage limit — pause and retry same task (it remains pending)
-                print_warning "API rate/usage limit hit. Task will be retried."
-                echo "Press Enter to retry now, or wait for the timeout (5 min auto-retry)..."
-                read -t 300 -r || true
-                ((task_num--))  # undo increment so task numbering stays correct on retry
-                continue
-            fi
+            while true; do
+                task_result=0
+                process_task_isolated "$task" "$task_num" "$total_tasks" "$task_complexity" "$plan_ref" || task_result=$?
+                if [[ $task_result -eq 4 ]]; then
+                    # Rate/usage limit — pause and retry same task (it remains pending)
+                    print_warning "API rate/usage limit hit. Task will be retried."
+                    echo "Press Enter to retry now, or wait for the timeout (5 min auto-retry)..."
+                    read -t 300 -r || true
+                    continue
+                fi
+                break
+            done
 
             if [[ $task_result -eq 0 ]]; then
                 ((completed++))
@@ -5460,27 +5467,7 @@ main() {
                     git commit -m "chore(backlog): update task status" 2>/dev/null || true
             fi
         fi
-
-        # Check if we should exit after one task
-        if [[ "$SINGLE_TASK" == "true" ]]; then
-            print_info "Single task mode - exiting after first task"
-            break
-        fi
-
-        # Pause between tasks with stop signal check
-        if [[ -n "$(get_next_task)" ]]; then
-            echo ""
-            print_info "Next task in ${PAUSE_BETWEEN_TASKS}s... (run 'buildcrew stop' to exit)"
-            for ((i=PAUSE_BETWEEN_TASKS; i>0; i--)); do
-                if check_stop_signal; then
-                    handle_stop
-                    # Break out of both loops
-                    break 2
-                fi
-                sleep 1
-            done
-        fi
-    done
+    fi
 
     # Final summary
     local end_time
@@ -5502,7 +5489,7 @@ main() {
     else
         print_success "All backlog tasks processed!"
 
-        # Post-completion UAT
+        # Post-completion UAT (skipped in foreground single-task mode)
         if [[ "$NO_UAT" != "true" && "$failed" -eq 0 && -f "README.md" && "$SINGLE_TASK" != "true" ]]; then
             local _uat_project _uat_result=0
             _uat_project="${TARGET_DIR:-$(basename "$(pwd)")}"

@@ -179,7 +179,8 @@ buildcrew reset              # Clear blocked tasks and clean up artifacts
 | `--no-tdd` | Disable TDD mode (skip tdd-scaffold phase for standard tasks) |
 | `--full-pipeline` | Force all phases regardless of complexity |
 | `--interactive` | Restore interactive review pauses (spec, plan) |
-| `--sequential` | Run tasks one at a time (default is parallel). Auto-forced by `--single`, `--task`, `--review` |
+| `--sequential` | **(deprecated)** Use `--single` instead |
+| `--batch` | **(deprecated)** Batch mode is now the default |
 | `--max-parallel N` | Max concurrent tasks in parallel mode (default: 5) |
 | `--no-uat` | Skip UAT after backlog completion |
 | `--max-invocations N` | Max Claude invocations per run (default: 15) |
