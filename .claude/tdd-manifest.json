@@ -1,19 +1,70 @@
 {
-  "test_files": [],
-  "stub_files": [],
-  "test_dir": null,
-  "test_count": 0,
+  "test_files": [
+    "tests/tdd/ac01_docs_skill_structure.bats",
+    "tests/tdd/ac02_docs_git_diff_detection.bats",
+    "tests/tdd/ac03_docs_readme_update.bats",
+    "tests/tdd/ac04_docs_no_changes.bats",
+    "tests/tdd/ac05_docs_phase_result.bats",
+    "tests/tdd/ac06_docs_git_diff_usage.bats"
+  ],
+  "stub_files": [
+    "skills/buildcrew-docs/SKILL.md"
+  ],
+  "test_dir": "tests/tdd",
+  "test_count": 30,
   "all_failing": false,
-  "framework": "test.sh (bats)",
-  "run_command": "./test.sh",
+  "framework": "test.sh",
+  "run_command": "bats tests/tdd/ac0[1-6]_docs*.bats",
   "ac_coverage": {
-    "AC-01": "Skill file existence verified at build time",
-    "AC-02": "Prerequisite detection tested implicitly via workflow execution",
-    "AC-03": "Verification command execution tested implicitly via workflow execution",
-    "AC-04": "File output tested implicitly via workflow execution",
-    "AC-05": "Phase result verdict tested implicitly via workflow execution",
-    "AC-06": "No new tests required for skill-only file per AC"
+    "AC-01": [
+      "AC-01a: skills/buildcrew-docs/SKILL.md file exists",
+      "AC-01b: SKILL.md has YAML frontmatter with name field",
+      "AC-01c: SKILL.md has description field in frontmatter",
+      "AC-01d: SKILL.md has allowed-tools field in frontmatter",
+      "AC-01e: SKILL.md contains phase header with 'docs' phase name",
+      "AC-01f: SKILL.md contains phase result section mentioning complete verdict"
+    ],
+    "AC-02": [
+      "AC-02a: Skill detects CLI changes in bin/ directory as user-facing",
+      "AC-02b: Skill detects config file changes (.buildcrew/config) as user-facing",
+      "AC-02c: Skill detects package.json changes as user-facing (dependency change)",
+      "AC-02d: Skill detects schema file changes as user-facing",
+      "AC-02e: Skill detects no changes when git diff is empty"
+    ],
+    "AC-03": [
+      "AC-03a: README.md is updated when CLI file changes",
+      "AC-03b: README.md maintains structure when updated",
+      "AC-03c: README.md is updated when config file changes",
+      "AC-03d: README.md is updated when dependencies change (package.json)"
+    ],
+    "AC-04": [
+      "AC-04a: README.md is NOT modified when only internal lib/ files change",
+      "AC-04b: README.md is NOT modified when only test files change",
+      "AC-04c: README.md is NOT modified when only internal build artifacts change",
+      "AC-04d: README.md is NOT modified when git diff returns empty (no changes)"
+    ],
+    "AC-05": [
+      "AC-05a: Phase result file .claude/phase-result.json is created",
+      "AC-05b: Phase result contains required 'phase' field with value 'docs'",
+      "AC-05c: Phase result contains 'verdict' field with value 'complete'",
+      "AC-05d: Phase result contains 'details' field describing what changed",
+      "AC-05e: Phase result is valid JSON"
+    ],
+    "AC-06": [
+      "AC-06a: SKILL.md mentions 'git diff' explicitly",
+      "AC-06b: SKILL.md specifies correct git diff command format",
+      "AC-06c: SKILL.md mentions classifying changes as user-facing",
+      "AC-06d: SKILL.md mentions file pattern classification",
+      "AC-06e: SKILL.md instructs README.md update",
+      "AC-06f: SKILL.md specifies write to .claude/phase-result.json"
+    ]
   },
-  "checksums": {},
-  "note": "This task creates a skill prompt file (SKILL.md), not executable library code. Skills are tested implicitly when executed by the BuildCrew workflow. The acceptance criteria explicitly states 'no new tests required for a skill-only file'. Existing unit tests (1045+) continue to pass with no modifications."
+  "checksums": {
+    "tests/tdd/ac01_docs_skill_structure.bats": "afe493f95e5311a8e0116063b29fa9ba577636a061292813160de0adf82825fe",
+    "tests/tdd/ac02_docs_git_diff_detection.bats": "3bcd9b2349dddfa91486d5ffb9334211c8575bcbcd77f02d580e581180d61b09",
+    "tests/tdd/ac03_docs_readme_update.bats": "1a11a5b821a2be7bbb65ae3f1493ae5fd13036a8f0e8bb556e0482a3fb68dc49",
+    "tests/tdd/ac04_docs_no_changes.bats": "38366fcfa42f9d0965b298e2424c5772521dbd757d4d62a3748421c2c1d872c9",
+    "tests/tdd/ac05_docs_phase_result.bats": "b07f3bbe3f17f61217b0e7864897faf7c8dc54dcd63833dd6e5486c4c5990a31",
+    "tests/tdd/ac06_docs_git_diff_usage.bats": "84f557edea40e6ef6120dd73fd06d8b1c6e397f5219b28186faf22ef44009a54"
+  }
 }
