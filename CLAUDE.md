@@ -29,6 +29,7 @@ An unknown verdict hits the catch-all and marks the task blocked:
 | build      | `complete`                                   |
 | codereview | `approved`, `needs_rebuild`                  |
 | tdd-scaffold | `complete`, `blocked`                      |
+| tdd-review | `approved`, `needs_revision`               |
 | verify     | `complete`, `blocked`                        |
 | uat-stories | `pass`, `fail`                              |
 | uat-scenarios | `pass`, `fail`                            |

@@ -1,29 +1,20 @@
 {
-  "test_files": [
-    "tests/tdd/ac_tdd_review_phase.bats"
-  ],
-  "stub_files": [
-    "skills/buildcrew-tdd-review/SKILL.md"
-  ],
+  "test_files": ["tests/tdd/tdd_review_phase.bats"],
+  "stub_files": ["skills/buildcrew-tdd-review/SKILL.md"],
   "test_dir": "tests/tdd",
-  "test_count": 15,
+  "test_count": 14,
   "all_failing": true,
   "framework": "bats",
-  "run_command": "bats tests/tdd/ac_tdd_review_phase.bats",
+  "run_command": "bats tests/tdd/tdd_review_phase.bats",
   "ac_coverage": {
-    "AC-01": ["AC-01: get_phase_max_turns returns 30 for tdd-review"],
-    "AC-02": ["AC-02: workflow.sh has tdd-review phase block", "AC-02: tdd-review appears in workflow after tdd-scaffold"],
-    "AC-03": ["AC-03: tdd-review phase block guards on TDD_MODE and complexity", "AC-03: tdd-review skips if tdd-manifest.json not found"],
-    "AC-04": ["AC-04: tdd-review phase call includes || true"],
-    "AC-05": ["AC-05: tdd-review is in phase_completed check"],
-    "AC-06": ["AC-06: tdd-review is appended to __completed_phases"],
-    "AC-07": ["AC-07: _phase_count increments for tdd-review"],
-    "AC-08": ["AC-08: skills/buildcrew-tdd-review/SKILL.md exists"],
-    "AC-09": ["AC-09: SKILL.md mentions test_files from tdd-manifest", "AC-09: SKILL.md describes RED state verification", "AC-09: SKILL.md mentions checksum updates"],
-    "AC-10": ["AC-10: workflow.sh documents tdd-review verdict as complete"],
-    "AC-11": ["AC-11: ./test.sh does not fail on workflow.sh syntax"]
+    "AC-01": ["AC-01a: get_phase_max_turns returns valid value for tdd-review", "AC-01b: get_phase_max_turns returns 30 for tdd-review", "AC-01c: phase_completed function recognizes tdd-review as phase"],
+    "AC-02": ["AC-02a: get_phase_verdicts returns valid verdicts for tdd-review"],
+    "AC-03": ["AC-03a: buildcrew-tdd-review skill directory can be created", "AC-03b: SKILL.md for tdd-review will be placed in correct location", "AC-03c: tdd-review SKILL.md front matter includes Task tool", "AC-03d: SKILL.md specifies allowed-tools without Bash or Edit"],
+    "AC-04": ["AC-04a: tdd-review phase can write findings to .claude/tdd-review.md", "AC-04b: tdd-review findings include all three lenses"],
+    "AC-05": ["AC-05a: phase verdict approved is recognized as valid", "AC-05b: phase verdict needs_revision is recognized as valid", "AC-05c: needs_revision verdict requires tdd-scaffold to rewrite"],
+    "AC-06": ["AC-06a: tdd-manifest.json is readable and structured"]
   },
   "checksums": {
-    "tests/tdd/ac_tdd_review_phase.bats": "2fc589680f851ad25564627bff51e26e0d6dafc938fea444dd64c72f30ba6600"
+    "tests/tdd/tdd_review_phase.bats": "f8741f35154c32b18a09cdb4142a48d87b910347646842a188815b0addbbb1df"
   }
 }

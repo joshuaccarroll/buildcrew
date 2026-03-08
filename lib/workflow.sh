@@ -172,6 +172,27 @@ get_phase_max_turns() {
     esac
 }
 
+# Valid verdicts per phase — used by tests and external tooling
+get_phase_verdicts() {
+    case "$1" in
+        spec)          echo "complete, needs_probing, vague" ;;
+        research)      echo "complete" ;;
+        review)        echo "approved, needs_revision, rejected" ;;
+        tdd-scaffold)  echo "complete, blocked" ;;
+        tdd-review)    echo "approved, needs_revision" ;;
+        build)         echo "complete" ;;
+        simplify)      echo "complete" ;;
+        codereview)    echo "approved, needs_rebuild" ;;
+        verify)        echo "complete, blocked" ;;
+        uat-stories)   echo "pass, fail" ;;
+        uat-scenarios) echo "pass, fail" ;;
+        uat-harness)   echo "pass, fail, disputed" ;;
+        uat-execute)   echo "pass, fail, error, disputed" ;;
+        *)             echo "complete" ;;
+    esac
+}
+export -f get_phase_verdicts
+
 # ─────────────────────────────────────────────────────────────────────────────────
 # Argument parsing (only when executed directly)
 # ─────────────────────────────────────────────────────────────────────────────────
@@ -379,23 +400,13 @@ parse_args() {
 __inject_phase_result_protocol() {
     local phase="$1"
     local verdicts extra=""
+    # Get verdicts from single source of truth
+    verdicts="$(get_phase_verdicts "$phase")"
+    # Add phase-specific extra context
     case "$phase" in
-        spec)          verdicts="complete, needs_probing, vague"
-                       extra=$'\nFor needs_probing, include "questions": ["..."] array.' ;;
-        research)      verdicts="complete"
-                       extra=$'\nInclude "human_review": true and "human_review_reason": "..." when objective criteria are met.' ;;
-        review)        verdicts="approved, needs_revision, rejected" ;;
-        tdd-scaffold)  verdicts="complete, blocked" ;;
-        tdd-review)    verdicts="complete" ;;
-        build)         verdicts="complete" ;;
-        codereview)    verdicts="approved, needs_rebuild" ;;
-        verify)        verdicts="complete, blocked"
-                       extra=$'\nFor blocked, include "failing_check": "tests|quality|security|architecture|acceptance".' ;;
-        uat-stories)   verdicts="pass, fail" ;;
-        uat-scenarios) verdicts="pass, fail" ;;
-        uat-harness)   verdicts="pass, fail, disputed" ;;
-        uat-execute)   verdicts="pass, fail, error, disputed" ;;
-        *)             verdicts="complete" ;;
+        spec)          extra=$'\nFor needs_probing, include "questions": ["..."] array.' ;;
+        research)      extra=$'\nInclude "human_review": true and "human_review_reason": "..." when objective criteria are met.' ;;
+        verify)        extra=$'\nFor blocked, include "failing_check": "tests|quality|security|architecture|acceptance".' ;;
     esac
     printf '## Phase Result\nWrite `.claude/phase-result.json` when done: { "phase": "%s", "verdict": "<verdict>", "details": "<summary>" }\nValid verdicts: %s%s\nWriting this file is mandatory. Do not end your response without writing it. Then exit.' \
         "$phase" "$verdicts" "$extra"
@@ -4284,10 +4295,12 @@ process_task_isolated() {
     fi
 
     # --- tdd-scaffold (standard complexity) ---
+    local tdd_scaffold_verdict="blocked"
     if [[ "$task_complexity" == "standard" ]]; then
         if phase_completed "tdd-scaffold"; then
             print_info "Skipping phase: tdd-scaffold (completed in previous run)"
             update_workflow_state "tdd-scaffold" "skipped"
+            tdd_scaffold_verdict="complete"  # if it was blocked, task would have stopped earlier
         else
             local tdd_context="$__spec_context"
             local _tdd_rc=0
@@ -4304,8 +4317,12 @@ process_task_isolated() {
                         mark_task_blocked "$task" "TDD scaffold invalid: tests pass before build"
                         clear_task_progress; return 1
                     fi
+                    tdd_scaffold_verdict="complete"
                     ;;
-                blocked)  print_warning "TDD scaffold blocked — proceeding without TDD" ;;
+                blocked)
+                    print_warning "TDD scaffold blocked — proceeding without TDD"
+                    tdd_scaffold_verdict="blocked"
+                    ;;
                 *) mark_task_blocked "$task" "Unexpected tdd-scaffold verdict: $tdd_verdict"
                    clear_task_progress; return 1 ;;
             esac
@@ -4317,27 +4334,34 @@ process_task_isolated() {
         update_workflow_state "tdd-scaffold" "skipped"
     fi
 
-    # --- tdd-review (standard complexity, TDD mode) ---
-    if [[ "${TDD_MODE:-}" == "true" && "$task_complexity" == "standard" ]]; then
-        if [[ -f ".claude/tdd-manifest.json" ]]; then
-            if phase_completed "tdd-review"; then
-                print_info "Skipping phase: tdd-review (completed in previous run)"
-                update_workflow_state "tdd-review" "skipped"
-            else
-                local tdd_review_context="Review TDD test files listed in .claude/tdd-manifest.json"
-                run_phase_group "tdd-review" "$task" "$tdd_review_context" "$task_complexity" || true
-                local tdd_review_verdict
-                tdd_review_verdict=$(jq -r '.verdict // "unknown"' "$PHASE_RESULT_FILE" 2>/dev/null || echo "unknown")
-                if [[ "$tdd_review_verdict" != "complete" ]]; then
-                    print_warning "tdd-review returned unexpected verdict: $tdd_review_verdict — continuing"
-                fi
-                __completed_phases="${__completed_phases:+$__completed_phases }tdd-review" # mark "tdd-review" done
-                save_task_progress "$task" "$__completed_phases" "$__INVOCATION_COUNT"
-            fi
-        else
-            print_info "Skipping phase: tdd-review (no tdd-manifest.json)"
+    # --- tdd-review (only when tdd-scaffold verdict was complete) ---
+    if [[ "$task_complexity" == "standard" ]] && [[ "$tdd_scaffold_verdict" == "complete" ]]; then
+        if phase_completed "tdd-review"; then
+            print_info "Skipping phase: tdd-review (completed in previous run)"
             update_workflow_state "tdd-review" "skipped"
+        else
+            run_phase_group "tdd-review" "$task" "$__spec_context" "$task_complexity" || {
+                mark_task_blocked "$task" "tdd-review phase failed"
+                clear_task_progress; return 1
+            }
+            local tdd_review_verdict
+            tdd_review_verdict=$(jq -r '.verdict // "unknown"' "$PHASE_RESULT_FILE")
+            case "$tdd_review_verdict" in
+                approved) print_info "TDD review approved — proceeding to build" ;;
+                needs_revision)
+                    mark_task_blocked "$task" "tdd-review: test quality issues found — see .claude/tdd-review.md"
+                    clear_task_progress; return 1 ;;
+                *) mark_task_blocked "$task" "Unexpected tdd-review verdict: $tdd_review_verdict"
+                   clear_task_progress; return 1 ;;
+            esac
+            __completed_phases="${__completed_phases:+$__completed_phases }tdd-review"
+            save_task_progress "$task" "$__completed_phases" "$__INVOCATION_COUNT"
         fi
+    else
+        if [[ "$task_complexity" == "standard" ]]; then
+            print_info "Skipping phase: tdd-review (tdd-scaffold was blocked)"
+        fi
+        update_workflow_state "tdd-review" "skipped"
     fi
 
     # --- build → codereview (with rebuild loop, circuit breaker) ---

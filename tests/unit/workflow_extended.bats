@@ -1966,7 +1966,7 @@ EOF
     mark_task_blocked()      { echo "$*" > "$blocked_file"; }
     load_task_progress() {
         __RESUME_TASK="test task"
-        __RESUME_PHASES="research review tdd-scaffold"
+        __RESUME_PHASES="research review tdd-scaffold tdd-review"
         __RESUME_INVOCATIONS=0
         return 0
     }
@@ -2036,7 +2036,7 @@ EOF
     mark_task_blocked()      { echo "$*" > "$blocked_file"; }
     load_task_progress() {
         __RESUME_TASK="test task"
-        __RESUME_PHASES="research review tdd-scaffold"
+        __RESUME_PHASES="research review tdd-scaffold tdd-review"
         __RESUME_INVOCATIONS=0
         return 0
     }
