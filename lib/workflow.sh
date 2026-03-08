@@ -124,6 +124,33 @@ load_buildcrew_config() {
                         fi
                     fi
                     ;;
+                MAX_REBASE_ROUNDS)
+                    if [[ -z "${MAX_REBASE_ROUNDS+x}" ]]; then
+                        if [[ "$value" =~ ^[0-9]+$ ]] && [[ "$value" -ge 0 ]] && [[ "$value" -le 10 ]]; then
+                            MAX_REBASE_ROUNDS="$value"
+                        else
+                            echo "Warning: invalid MAX_REBASE_ROUNDS in .buildcrew/config: $value (ignored, must be 0-10)" >&2
+                        fi
+                    fi
+                    ;;
+                NO_REBASE)
+                    if [[ -z "${NO_REBASE+x}" ]]; then
+                        if [[ "$value" == "true" || "$value" == "false" ]]; then
+                            NO_REBASE="$value"
+                        else
+                            echo "Warning: invalid NO_REBASE in .buildcrew/config: $value (ignored, must be true or false)" >&2
+                        fi
+                    fi
+                    ;;
+                MERGE_STRATEGY)
+                    if [[ -z "${MERGE_STRATEGY+x}" ]]; then
+                        if [[ "$value" == "smallest-first" || "$value" == "priority-first" || "$value" == "fifo" ]]; then
+                            MERGE_STRATEGY="$value"
+                        else
+                            echo "Warning: invalid MERGE_STRATEGY in .buildcrew/config: $value (ignored, must be smallest-first/priority-first/fifo)" >&2
+                        fi
+                    fi
+                    ;;
                 # Add future config keys here
             esac
         fi
@@ -146,6 +173,9 @@ MAX_INVOCATIONS=${MAX_INVOCATIONS:-15}
 COMPLEXITY_AWARE=${COMPLEXITY_AWARE:-true}
 AUTO_MODE=${AUTO_MODE:-true}
 MAX_PARALLEL=${MAX_PARALLEL:-5}
+MAX_REBASE_ROUNDS=${MAX_REBASE_ROUNDS:-2}
+NO_REBASE=${NO_REBASE:-false}
+MERGE_STRATEGY=${MERGE_STRATEGY:-smallest-first}
 TARGET_DIR=${TARGET_DIR:-}
 NO_UAT=${NO_UAT:-false}
 CLAUDE_MODEL=${CLAUDE_MODEL:-auto}
@@ -327,6 +357,26 @@ parse_args() {
                 MAX_PARALLEL="$2"
                 shift 2
                 ;;
+            --max-rebase-rounds)
+                if [[ -z "${2:-}" ]] || ! [[ "$2" =~ ^[0-9]+$ ]] || [[ "$2" -gt 10 ]]; then
+                    echo "Error: --max-rebase-rounds requires an integer (0-10)"
+                    exit 1
+                fi
+                MAX_REBASE_ROUNDS="$2"
+                shift 2
+                ;;
+            --no-rebase)
+                NO_REBASE=true
+                shift
+                ;;
+            --merge-strategy)
+                if [[ -z "${2:-}" ]] || ! [[ "$2" =~ ^(smallest-first|priority-first|fifo)$ ]]; then
+                    echo "Error: --merge-strategy requires a value: smallest-first, priority-first, or fifo"
+                    exit 1
+                fi
+                MERGE_STRATEGY="$2"
+                shift 2
+                ;;
             --model)
                 if [[ -z "${2:-}" ]]; then
                     echo "Error: --model requires a value (e.g. opus, sonnet, claude-sonnet-4-6)"
@@ -363,6 +413,9 @@ parse_args() {
                 echo "  --no-uat     Skip UAT after backlog completion (with 'run')"
                 echo "  --batch      (deprecated) Batch mode is now the default"
                 echo "  --max-parallel N  Max concurrent tasks in parallel mode (default: 5)"
+                echo "  --max-rebase-rounds N  Max rebase-rebuild attempts for merge conflicts (default: 2, 0 to disable)"
+                echo "  --no-rebase    Skip rebase-rebuild for merge conflicts"
+                echo "  --merge-strategy S  Merge order: smallest-first (default), priority-first, fifo"
                 echo "  --model MODEL  Claude model: auto (default, per-phase), opus, sonnet, haiku, or full model ID"
                 echo "  --effort LEVEL Effort level: low, medium, high (default: medium)"
                 echo "  --verbose    Show orchestrator decisions, phase verdicts, and invocation counts"
@@ -643,6 +696,7 @@ _batch_plan_refs=()
 __BATCH_PARENT_IS_GIT=true
 # Absolute CWD captured once at batch startup (avoids repeated $(pwd) calls)
 __BATCH_CWD=""
+_batch_conflict_indices=()
 _batch_pids=()
 _batch_running=0
 _batch_completed=0
@@ -685,7 +739,9 @@ _batch_add_task() {
        --arg pr "$plan_ref" \
        '.tasks += [{index: $idx, text: $text, slug: $slug, branch: $branch,
                     worktree: $wt, target_dir: $td, plan_ref: $pr, status: "pending",
-                    exit_code: null, started_at: null, completed_at: null}]' \
+                    exit_code: null, started_at: null, completed_at: null,
+                    merge_order: null, merge_attempt: 0, diff_size: null,
+                    original_branch: $branch, rebase_branch: null}]' \
        "$BATCH_MANIFEST" > "$BATCH_MANIFEST.tmp" \
        && mv "$BATCH_MANIFEST.tmp" "$BATCH_MANIFEST"
 }
@@ -1129,13 +1185,14 @@ _batch_merge_worktrees() {
     local merge_branch="buildcrew/batch-merged-$(date +%Y%m%d-%H%M%S)"
 
     cd "$__BATCH_CWD" || return 1
+    _batch_conflict_indices=()
 
     local base_commit
     base_commit=$(jq -r '.base_commit' "$BATCH_MANIFEST")
 
     git checkout -b "$merge_branch" "$base_branch" 2>/dev/null || return 1
 
-    # Sort completed tasks by diff size (smallest first)
+    # Collect completed tasks with diff sizes and timestamps
     local sorted_entries=()
     local i
     for i in "${!_batch_tasks[@]}"; do
@@ -1145,26 +1202,49 @@ _batch_merge_worktrees() {
         local branch="buildcrew/${_batch_slugs[$i]}"
         local diff_size=999
         diff_size=$(git diff --numstat "${base_commit}..${branch}" 2>/dev/null | awk '{s+=$1+$2}END{print s+0}') || diff_size=999
-        sorted_entries+=("$diff_size:$i")
+        # Record diff_size on manifest
+        _batch_update_task_field $((i + 1)) "diff_size" "$diff_size"
+        local completed_at
+        completed_at=$(jq -r --argjson idx "$((i + 1))" '.tasks[] | select(.index == $idx) | .completed_at // "9999"' "$BATCH_MANIFEST")
+        sorted_entries+=("$diff_size:$completed_at:$i")
     done
-    # Sort by diff size (numeric)
-    local sorted_sorted=()
-    while IFS= read -r line; do
-        [[ -n "$line" ]] && sorted_sorted+=("$line")
-    done < <(printf '%s\n' "${sorted_entries[@]}" | sort -t: -k1 -n)
 
-    local merged_count=0 conflict_count=0
+    # Sort by selected merge strategy
+    local sorted_sorted=()
+    case "${MERGE_STRATEGY:-smallest-first}" in
+        smallest-first)
+            while IFS= read -r line; do
+                [[ -n "$line" ]] && sorted_sorted+=("$line")
+            done < <(printf '%s\n' "${sorted_entries[@]}" | sort -t: -k1 -n)
+            ;;
+        priority-first)
+            while IFS= read -r line; do
+                [[ -n "$line" ]] && sorted_sorted+=("$line")
+            done < <(printf '%s\n' "${sorted_entries[@]}" | sort -t: -k3 -n)
+            ;;
+        fifo)
+            while IFS= read -r line; do
+                [[ -n "$line" ]] && sorted_sorted+=("$line")
+            done < <(printf '%s\n' "${sorted_entries[@]}" | sort -t: -k2)
+            ;;
+    esac
+
+    local merged_count=0 conflict_count=0 merge_order=0
     local entry
     for entry in "${sorted_sorted[@]}"; do
-        i="${entry#*:}"
+        # Extract index (last field after last colon)
+        i="${entry##*:}"
         local manifest_idx=$((i + 1))
         local branch="buildcrew/${_batch_slugs[$i]}"
+        merge_order=$((merge_order + 1))
+        _batch_update_task_field "$manifest_idx" "merge_order" "$merge_order"
 
         if git merge --squash "$branch" 2>/dev/null && git commit -m "batch: ${_batch_tasks[$i]}" 2>/dev/null; then
             merged_count=$((merged_count + 1))
         else
             git merge --abort 2>/dev/null || git reset --hard HEAD 2>/dev/null || true
             conflict_count=$((conflict_count + 1))
+            _batch_conflict_indices+=("$manifest_idx")
             _batch_mark_task "$manifest_idx" "merge_conflict"
             log_msg "Merge conflict: task $manifest_idx (${_batch_tasks[$i]})"
         fi
@@ -1178,6 +1258,255 @@ _batch_merge_worktrees() {
 
     print_info "Merged $merged_count task(s). Conflicts: $conflict_count" >&2
     echo "$merge_branch"
+}
+
+# Update a single field on a manifest task entry via jq.
+_batch_update_task_field() {
+    local index="$1" field="$2" value="$3"
+    jq --argjson idx "$index" \
+       --arg field "$field" \
+       --argjson val "$value" \
+       '(.tasks[] | select(.index == $idx))[$field] = $val' \
+       "$BATCH_MANIFEST" > "$BATCH_MANIFEST.tmp" \
+       && mv "$BATCH_MANIFEST.tmp" "$BATCH_MANIFEST"
+}
+
+# Copy reusable phase artifacts from one worktree to another.
+_batch_copy_phase_artifacts() {
+    local source_wt="$1" dest_wt="$2"
+    mkdir -p "$dest_wt/.claude" "$dest_wt/.buildcrew"
+
+    # Copy core phase artifacts
+    local f
+    for f in spec.md current-plan.md research.md plan-review.md tdd-manifest.json; do
+        [[ -f "$source_wt/.claude/$f" ]] && cp "$source_wt/.claude/$f" "$dest_wt/.claude/$f"
+    done
+
+    # Copy buildcrew state
+    for f in config lessons.md; do
+        [[ -f "$source_wt/.buildcrew/$f" ]] && cp "$source_wt/.buildcrew/$f" "$dest_wt/.buildcrew/$f"
+    done
+
+    # Copy TDD test files referenced in manifest
+    if [[ -f "$source_wt/.claude/tdd-manifest.json" ]]; then
+        local test_file
+        while IFS= read -r test_file; do
+            [[ -z "$test_file" ]] && continue
+            if [[ -f "$source_wt/$test_file" ]]; then
+                mkdir -p "$dest_wt/$(dirname "$test_file")"
+                cp "$source_wt/$test_file" "$dest_wt/$test_file"
+            fi
+        done < <(jq -r '.test_files[]? // empty' "$source_wt/.claude/tdd-manifest.json" 2>/dev/null)
+    fi
+}
+
+# JSON-level merge of tdd-manifest.json from source into dest.
+# Combines test_files arrays (deduplicated), sums test_count.
+_batch_merge_tdd_manifests() {
+    local source_wt="$1" dest_wt="$2"
+    local src_manifest="$source_wt/.claude/tdd-manifest.json"
+    local dst_manifest="$dest_wt/.claude/tdd-manifest.json"
+
+    # If dest has no manifest, just copy
+    if [[ ! -f "$dst_manifest" ]]; then
+        if [[ -f "$src_manifest" ]]; then
+            mkdir -p "$dest_wt/.claude"
+            cp "$src_manifest" "$dst_manifest"
+        fi
+        return 0
+    fi
+
+    # If source has no manifest, nothing to merge
+    [[ -f "$src_manifest" ]] || return 0
+
+    # Merge: combine test_files (deduplicated), sum test_count
+    jq -s '
+        .[0] as $dst | .[1] as $src |
+        $dst * {
+            test_files: ([$dst.test_files[]?, $src.test_files[]?] | unique),
+            test_count: (($dst.test_count // 0) + ($src.test_count // 0))
+        }
+    ' "$dst_manifest" "$src_manifest" > "$dst_manifest.tmp" \
+        && mv "$dst_manifest.tmp" "$dst_manifest"
+}
+
+# Core rebase-rebuild loop for merge-conflicting tasks.
+# Attempts to rebuild conflicting tasks on top of the integration branch tip.
+_batch_rebase_rebuild() {
+    local merge_branch="$1" base_branch="$2"
+
+    # Guard: skip if disabled or no conflicts
+    if [[ "$NO_REBASE" == "true" ]]; then
+        print_info "Rebase-rebuild skipped (--no-rebase)"
+        return 0
+    fi
+    if [[ ${#_batch_conflict_indices[@]} -eq 0 ]]; then
+        return 0
+    fi
+    if [[ "$MAX_REBASE_ROUNDS" -eq 0 ]]; then
+        print_info "Rebase-rebuild skipped (MAX_REBASE_ROUNDS=0)"
+        return 0
+    fi
+
+    print_header "Rebase-Rebuild: ${#_batch_conflict_indices[@]} conflicting task(s)"
+
+    local round conflict_list rebase_merged=0 rebase_failed=0
+    # Copy conflict indices to a working list
+    conflict_list=("${_batch_conflict_indices[@]}")
+
+    for round in $(seq 1 "$MAX_REBASE_ROUNDS"); do
+        [[ ${#conflict_list[@]} -eq 0 ]] && break
+        print_info "Rebase round $round/${MAX_REBASE_ROUNDS}: ${#conflict_list[@]} task(s) to rebuild"
+
+        local next_conflict_list=()
+        local manifest_idx
+        for manifest_idx in "${conflict_list[@]}"; do
+            local i=$((manifest_idx - 1))
+            local task="${_batch_tasks[$i]}"
+            local slug="${_batch_slugs[$i]}"
+            local target_dir="${_batch_target_dirs[$i]:-}"
+            local original_wt
+            original_wt=$(_batch_worktree_path "$slug" "$target_dir")
+            local rebase_slug="${slug}-rebase-r${round}"
+            local rebase_branch="buildcrew/$rebase_slug"
+            local rebase_wt
+            rebase_wt=$(_batch_worktree_path "$rebase_slug" "$target_dir")
+
+            print_info "Rebasing task $manifest_idx: $task (round $round)"
+
+            # Update manifest
+            _batch_mark_task "$manifest_idx" "rebase_rebuilding"
+            _batch_update_task_field "$manifest_idx" "merge_attempt" "$round"
+            _batch_update_task_field "$manifest_idx" "rebase_branch" "\"$rebase_branch\""
+
+            # Create fresh worktree from integration tip
+            local repo_dir="."
+            [[ -n "$target_dir" ]] && repo_dir="$target_dir"
+            git -C "$repo_dir" worktree prune 2>/dev/null || true
+            if git -C "$repo_dir" rev-parse --verify "$rebase_branch" >/dev/null 2>&1; then
+                git -C "$repo_dir" branch -D "$rebase_branch" 2>/dev/null || true
+            fi
+            if [[ -d "$rebase_wt" ]]; then
+                git -C "$repo_dir" worktree remove --force "$rebase_wt" 2>/dev/null || rm -rf "$rebase_wt"
+            fi
+
+            if ! git -C "$repo_dir" worktree add -b "$rebase_branch" "$rebase_wt" "$merge_branch" 2>/dev/null; then
+                print_warning "Failed to create rebase worktree for task $manifest_idx"
+                _batch_mark_task "$manifest_idx" "rebase_failed"
+                rebase_failed=$((rebase_failed + 1))
+                next_conflict_list+=("$manifest_idx")
+                continue
+            fi
+
+            # Copy skills and settings (same as _batch_create_worktree)
+            local source_dir="$repo_dir"
+            if [[ -d "$source_dir/.claude/skills" ]] || [[ -L "$source_dir/.claude/skills" ]]; then
+                mkdir -p "$rebase_wt/.claude/skills"
+                cp -a "$source_dir/.claude/skills/"* "$rebase_wt/.claude/skills/" 2>/dev/null || true
+            fi
+            if [[ ! -d "$rebase_wt/.claude/skills/buildcrew" ]] && [[ -d "$BUILDCREW_HOME/skills" ]]; then
+                mkdir -p "$rebase_wt/.claude/skills"
+                local skill_dir skill_name
+                for skill_dir in "$BUILDCREW_HOME/skills"/*/; do
+                    [ -d "$skill_dir" ] || continue
+                    skill_name="$(basename "$skill_dir")"
+                    if [[ ! -e "$rebase_wt/.claude/skills/$skill_name" ]]; then
+                        ln -s "$skill_dir" "$rebase_wt/.claude/skills/$skill_name"
+                    fi
+                done
+            fi
+            local sf
+            for sf in .claude/settings.json .claude/settings.local.json .claude/.buildcrew-link; do
+                if [[ -f "$source_dir/$sf" ]]; then
+                    mkdir -p "$rebase_wt/$(dirname "$sf")"
+                    cp "$source_dir/$sf" "$rebase_wt/$sf" 2>/dev/null || true
+                fi
+            done
+            if [[ ! -f "$rebase_wt/.claude/.buildcrew-link" ]]; then
+                mkdir -p "$rebase_wt/.claude"
+                echo "BUILDCREW_HOME=$BUILDCREW_HOME" > "$rebase_wt/.claude/.buildcrew-link"
+            fi
+
+            # Copy artifacts from original worktree
+            _batch_copy_phase_artifacts "$original_wt" "$rebase_wt"
+            _batch_merge_tdd_manifests "$original_wt" "$rebase_wt"
+
+            # Launch child workflow synchronously with rebase mode
+            local child_exit=0
+            (
+                cd "$rebase_wt" || exit 1
+                export BUILDCREW_REBASE_MODE=true
+                export BUILDCREW_HOME
+                export AUTO_MODE=true
+                mkdir -p .buildcrew/logs
+
+                "$BUILDCREW_HOME/lib/workflow.sh" \
+                    --single --task-exact "$task" \
+                    --skip-spec --skip-prereqs \
+                    --max-invocations "$MAX_INVOCATIONS" \
+                    --model "$CLAUDE_MODEL" \
+                    $( [[ -n "${CLAUDE_EFFORT:-}" ]] && echo "--effort $CLAUDE_EFFORT" ) \
+                    --no-uat \
+                    $( [[ "$VERBOSE" == "true" ]] && echo "--verbose" ) \
+                    > ".buildcrew/logs/rebase-${rebase_slug}.log" 2>&1
+            ) || child_exit=$?
+
+            # Check sentinel
+            local sentinel=""
+            if [[ -f "$rebase_wt/.claude/phase-result.json" ]]; then
+                sentinel=$(jq -r '"\(.phase)/\(.verdict)"' "$rebase_wt/.claude/phase-result.json" 2>/dev/null) || sentinel=""
+            fi
+
+            if [[ "$sentinel" == "verify/complete" ]]; then
+                # Squash-merge onto integration branch
+                cd "$__BATCH_CWD" || continue
+                git checkout "$merge_branch" 2>/dev/null || continue
+                if git merge --squash "$rebase_branch" 2>/dev/null && git commit -m "batch(rebase): ${task}" 2>/dev/null; then
+                    _batch_mark_task "$manifest_idx" "rebase_merged"
+                    rebase_merged=$((rebase_merged + 1))
+                    print_success "Rebase-rebuild succeeded for task $manifest_idx: $task"
+                    # Sync to BACKLOG.md
+                    local _saved_bf="$BACKLOG_FILE"
+                    [[ "$BACKLOG_FILE" != /* ]] && BACKLOG_FILE="$__BATCH_CWD/$BACKLOG_FILE"
+                    mark_task_complete "$task"
+                    BACKLOG_FILE="$_saved_bf"
+                else
+                    git merge --abort 2>/dev/null || git reset --hard HEAD 2>/dev/null || true
+                    _batch_mark_task "$manifest_idx" "rebase_failed"
+                    rebase_failed=$((rebase_failed + 1))
+                    next_conflict_list+=("$manifest_idx")
+                    print_warning "Rebase-rebuild: merge still conflicts for task $manifest_idx"
+                fi
+            else
+                _batch_mark_task "$manifest_idx" "rebase_failed"
+                rebase_failed=$((rebase_failed + 1))
+                next_conflict_list+=("$manifest_idx")
+                print_warning "Rebase-rebuild failed for task $manifest_idx (sentinel=${sentinel:-missing})"
+            fi
+
+            # Clean up rebase worktree
+            git -C "$repo_dir" worktree remove --force "$rebase_wt" 2>/dev/null || rm -rf "$rebase_wt"
+            git -C "$repo_dir" branch -D "$rebase_branch" 2>/dev/null || true
+        done
+
+        conflict_list=("${next_conflict_list[@]}")
+    done
+
+    # Summary
+    echo ""
+    print_info "Rebase-rebuild summary: $rebase_merged resolved, $rebase_failed unresolved"
+    if [[ ${#conflict_list[@]} -gt 0 ]]; then
+        print_warning "Unresolved tasks after $MAX_REBASE_ROUNDS round(s):"
+        for manifest_idx in "${conflict_list[@]}"; do
+            local i=$((manifest_idx - 1))
+            echo -e "  ${YELLOW}!${NC} buildcrew/${_batch_slugs[$i]}  --  ${_batch_tasks[$i]}"
+        done
+        echo ""
+        print_info "Options for unresolved tasks:"
+        echo "  - Manual merge: git merge buildcrew/<slug>"
+        echo "  - Single rebuild: buildcrew run --single --task '<task>'"
+        echo "  - Skip and ship: proceed without these changes"
+    fi
 }
 
 # Assemble combined context from all merged task worktrees into .claude/batch-combined-context.md.
@@ -1303,18 +1632,39 @@ _batch_post_completion() {
         echo ""
     fi
 
-    # List merge conflicts (single pass: collect lines, then print if any)
+    # List rebase-merged tasks
+    local rebase_merged_lines=""
+    for i in "${!_batch_tasks[@]}"; do
+        local status
+        status=$(_batch_get_task_status $((i + 1)))
+        if [[ "$status" == "rebase_merged" ]]; then
+            rebase_merged_lines="${rebase_merged_lines}  ${GREEN}*${NC} buildcrew/${_batch_slugs[$i]}  --  ${_batch_tasks[$i]} (resolved via rebase)"$'\n'
+        fi
+    done
+    if [[ -n "$rebase_merged_lines" ]]; then
+        print_info "Rebase-resolved tasks:"
+        echo -e "$rebase_merged_lines"
+    fi
+
+    # List merge conflicts and rebase failures
     local merge_conflict_lines=""
     for i in "${!_batch_tasks[@]}"; do
         local status
         status=$(_batch_get_task_status $((i + 1)))
-        if [[ "$status" == "merge_conflict" ]]; then
-            merge_conflict_lines="${merge_conflict_lines}  ${YELLOW}!${NC} buildcrew/${_batch_slugs[$i]}  --  ${_batch_tasks[$i]}"$'\n'
+        if [[ "$status" == "merge_conflict" || "$status" == "rebase_failed" ]]; then
+            local slug="${_batch_slugs[$i]}"
+            local log_path="$BATCH_WORKTREE_DIR/$slug/.buildcrew/logs/rebase-${slug}-rebase-r*.log"
+            merge_conflict_lines="${merge_conflict_lines}  ${YELLOW}!${NC} buildcrew/${slug}  --  ${_batch_tasks[$i]}"$'\n'
         fi
     done
     if [[ -n "$merge_conflict_lines" ]]; then
-        print_warning "Merge conflicts (inspect branches manually):"
+        print_warning "Unresolved merge conflicts:"
         echo -e "$merge_conflict_lines"
+        print_info "Options for unresolved tasks:"
+        echo "  - Manual merge: git merge buildcrew/<slug>"
+        echo "  - Single rebuild: buildcrew run --single --task '<task>'"
+        echo "  - Skip and ship: proceed without these changes"
+        echo ""
     fi
 
     # Assemble combined context (before worktree cleanup)
@@ -1327,6 +1677,11 @@ _batch_post_completion() {
     if (( _batch_completed > 0 )) && [[ "$__BATCH_PARENT_IS_GIT" == "true" ]]; then
         print_header "Post-Build: Merge + Verify"
         merge_branch=$(_batch_merge_worktrees "$base_branch") || true
+
+        # Rebase-rebuild conflicting tasks
+        if [[ -n "$merge_branch" ]] && [[ ${#_batch_conflict_indices[@]} -gt 0 ]]; then
+            _batch_rebase_rebuild "$merge_branch" "$base_branch"
+        fi
 
         if [[ -n "$merge_branch" ]]; then
             if _batch_run_post_build "$merge_branch" "$base_branch"; then
@@ -3978,6 +4333,15 @@ process_task_isolated() {
     fi
 
     # ─────────────────────────────────────────────────────────────────────────
+    # Rebase mode: skip early phases, run only build → codereview → verify
+    # ─────────────────────────────────────────────────────────────────────────
+    if [[ "${BUILDCREW_REBASE_MODE:-}" == "true" ]]; then
+        SKIP_SPEC=true
+        SKIP_PREREQS=true
+        print_info "Rebase mode: skipping spec/research/review/tdd phases, running build → codereview → verify"
+    fi
+
+    # ─────────────────────────────────────────────────────────────────────────
     # Outer loop: supports circuit breaker re-planning
     # ─────────────────────────────────────────────────────────────────────────
     local __outer_iterations=0
@@ -4144,7 +4508,13 @@ process_task_isolated() {
     fi
 
     # --- research + plan ---
-    if [[ "$__plan_ref_skip" == "true" ]]; then
+    if [[ "${BUILDCREW_REBASE_MODE:-}" == "true" ]]; then
+        print_info "Skipping phase: research (rebase mode — plan pre-copied)"
+        update_workflow_state "research" "skipped"
+        if [[ -f ".claude/spec.md" ]]; then
+            __spec_context="Specification available at .claude/spec.md — read it for acceptance criteria."
+        fi
+    elif [[ "$__plan_ref_skip" == "true" ]]; then
         print_info "Skipping phase: research (reviewed plan provided: $plan_ref)"
         update_workflow_state "research" "skipped"
     elif phase_completed "research"; then
@@ -4179,7 +4549,10 @@ process_task_isolated() {
     fi
 
     # --- plan-review (max 3 external cycles, circuit breaker at 2 consecutive failures) ---
-    if [[ "$__plan_ref_skip" == "true" ]]; then
+    if [[ "${BUILDCREW_REBASE_MODE:-}" == "true" ]]; then
+        print_info "Skipping phase: review (rebase mode)"
+        update_workflow_state "review" "skipped"
+    elif [[ "$__plan_ref_skip" == "true" ]]; then
         print_info "Skipping phase: review (reviewed plan provided: $plan_ref)"
         update_workflow_state "review" "skipped"
     elif phase_completed "review"; then
@@ -4296,7 +4669,14 @@ process_task_isolated() {
 
     # --- tdd-scaffold (standard complexity) ---
     local tdd_scaffold_verdict="blocked"
-    if [[ "$task_complexity" == "standard" ]]; then
+    if [[ "${BUILDCREW_REBASE_MODE:-}" == "true" ]]; then
+        print_info "Skipping phase: tdd-scaffold (rebase mode — artifacts pre-copied)"
+        update_workflow_state "tdd-scaffold" "skipped"
+        # If TDD artifacts exist, treat as complete
+        if [[ -f ".claude/tdd-manifest.json" ]]; then
+            tdd_scaffold_verdict="complete"
+        fi
+    elif [[ "$task_complexity" == "standard" ]]; then
         if phase_completed "tdd-scaffold"; then
             print_info "Skipping phase: tdd-scaffold (completed in previous run)"
             update_workflow_state "tdd-scaffold" "skipped"
@@ -4335,7 +4715,10 @@ process_task_isolated() {
     fi
 
     # --- tdd-review (only when tdd-scaffold verdict was complete) ---
-    if [[ "$task_complexity" == "standard" ]] && [[ "$tdd_scaffold_verdict" == "complete" ]]; then
+    if [[ "${BUILDCREW_REBASE_MODE:-}" == "true" ]]; then
+        print_info "Skipping phase: tdd-review (rebase mode)"
+        update_workflow_state "tdd-review" "skipped"
+    elif [[ "$task_complexity" == "standard" ]] && [[ "$tdd_scaffold_verdict" == "complete" ]]; then
         if phase_completed "tdd-review"; then
             print_info "Skipping phase: tdd-review (completed in previous run)"
             update_workflow_state "tdd-review" "skipped"
