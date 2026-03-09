@@ -92,6 +92,7 @@ When context is compacted, always preserve:
 2. **research** — Explore codebase, write implementation plan
 3. **review** — 3-pass adversarial plan review
 3.5. **tdd-scaffold** (standard complexity) — Write failing tests from spec+plan before implementation
+3.6. **tdd-review** (standard complexity) — Review test quality; loops back to tdd-scaffold on `needs_revision` (circuit breaker at 2 consecutive failures)
 4. **build** — Implement per plan
 5. **codereview** — Adversarial code review + elegance check; may request rebuild
 6. **verify** — Security audit + AC cross-reference + commit

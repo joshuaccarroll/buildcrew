@@ -82,7 +82,10 @@ flowchart TD
         REPLAN_R -- Yes --> research
         REPLAN_R -- No --> BLOCKED_R([Task blocked])
         review -- approved --> tdd[tdd-scaffold (Haiku)]
-        tdd --> build[build (Sonnet)]
+        tdd --> tddreview[tdd-review (Haiku)]
+        tddreview -- approved --> build[build (Sonnet)]
+        tddreview -- "needs_revision (1st)" --> tdd
+        tddreview -- "needs_revision (2nd)" --> BLOCKED_TDD([Task blocked])
         build -- max-turns --> chunked[chunked build]
         chunked -- complete --> simplify[simplify (Haiku)]
         chunked -- fail --> BLOCKED_C([Task blocked])
@@ -121,6 +124,7 @@ Each task runs through the following phases (each a separate Claude invocation).
 | 2 | Research + Plan | Research Agent | Explores codebase, creates implementation plan |
 | 3 | Plan Review | Principal Engineer | 3-pass adversarial review with cross-reference lint |
 | 4 | TDD Scaffold | QA Engineer | Writes failing tests before implementation (standard complexity) |
+| 4.5 | TDD Review | QA Engineer | Reviews test quality; may loop back to TDD Scaffold (up to 2 attempts) |
 | 5 | Build | Feature Engineer | Implements the plan; TDD test files are locked read-only |
 | 6 | Simplify | Principal Engineer | Non-blocking targeted simplifications |
 | 7 | Code Review | Principal Engineer | Adversarial review + elegance check; may request rebuild |
@@ -131,7 +135,7 @@ Each task runs through the following phases (each a separate Claude invocation).
 - **Adversarial reviews** — reviewers are asked to find flaws, not approve quickly
 - **Complexity-aware skipping** — tag tasks `{trivial}`, `{simple}`, or `{standard}` to control which phases run. Auto-detected when no tag is present. Use `--full-pipeline` to force all phases.
 - **Circuit breaker** — two consecutive failures at any phase trigger a full re-plan from scratch (one re-plan attempt per task)
-- **TDD by default** — for standard-complexity tasks, failing tests are written before implementation and validated to actually fail; tamper detection via SHA-256 checksums
+- **TDD by default** — for standard-complexity tasks, failing tests are written before implementation and validated to actually fail; tamper detection via SHA-256 checksums. A TDD review phase validates test quality before build — on rejection, tests are regenerated with review feedback (circuit breaker at 2 consecutive failures)
 - **Post-completion UAT** — after all backlog tasks complete, the project is tested against its own README by a blind agent that never sees source code. On failure, triggers a rebuild loop and retries. UAT failure is non-fatal. Opt out with `--no-uat`. Run manually with `buildcrew uat`.
 - **Build retry feedback** — on rebuild, code review findings are injected into the build context so the agent knows what to fix
 - **Lessons system** — failures are automatically recorded in `.buildcrew/lessons.md` and injected into future runs
