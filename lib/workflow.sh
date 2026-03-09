@@ -2565,16 +2565,56 @@ _after_dep_is_blocked() {
     deps=$(extract_task_after_deps "$task")
     [[ -z "$deps" ]] && return 1
 
-    # Get all task lines (pending, completed, blocked) for ordinal lookup
-    local all_tasks
-    all_tasks=$(grep '^\- \[.\]' "$BACKLOG_FILE" 2>/dev/null) || return 1
+    # Detect phase-header mode: backlog has at least one ## Phase N header
+    local phase_header_count
+    # grep -c exits 1 when no matches; || guard prevents set -e abort
+    phase_header_count=$(grep -cE '^## Phase [0-9]+([^0-9]|$)' "$BACKLOG_FILE" 2>/dev/null) || phase_header_count=0
 
-    local dep task_line
+    if [[ "$phase_header_count" -eq 0 ]]; then
+        # Ordinal fallback: original behavior
+        local all_tasks
+        all_tasks=$(grep '^\- \[.\]' "$BACKLOG_FILE" 2>/dev/null) || return 1
+        local dep task_line
+        while IFS= read -r dep; do
+            [[ -z "$dep" ]] && continue
+            task_line=$(echo "$all_tasks" | sed -n "${dep}p")
+            if [[ "$task_line" == "- [ ] "* ]]; then
+                return 0
+            fi
+        done <<< "$deps"
+        return 1
+    fi
+
+    # Phase-header mode: resolve each dep against ## Phase N section
+    local dep phase_start phase_end pending
     while IFS= read -r dep; do
         [[ -z "$dep" ]] && continue
-        task_line=$(echo "$all_tasks" | sed -n "${dep}p")
-        # If dep task is still pending, this task is blocked
-        if [[ "$task_line" == "- [ ] "* ]]; then
+
+        # Find line number of ## Phase N header (non-digit boundary prevents
+        # "Phase 4" matching "Phase 40")
+        phase_start=$(grep -nE "^## Phase ${dep}([^0-9]|$)" "$BACKLOG_FILE" 2>/dev/null \
+            | head -1 | cut -d: -f1)
+
+        if [[ -z "$phase_start" ]]; then
+            echo "Phase ${dep} not found in backlog — treating [after:${dep}] as resolved" >&2
+            continue
+        fi
+
+        # Find start of next ## Phase section after phase_start
+        phase_end=$(awk -v start="$phase_start" \
+            'NR > start && /^## Phase [0-9]/ { print NR; exit }' \
+            "$BACKLOG_FILE" 2>/dev/null)
+
+        # Extract lines in this phase section, check for pending tasks
+        if [[ -n "$phase_end" ]]; then
+            pending=$(sed -n "$((phase_start + 1)),$((phase_end - 1))p" "$BACKLOG_FILE" \
+                | grep -c '^\- \[ \]' 2>/dev/null) || pending=0
+        else
+            pending=$(sed -n "$((phase_start + 1)),\$p" "$BACKLOG_FILE" \
+                | grep -c '^\- \[ \]' 2>/dev/null) || pending=0
+        fi
+
+        if [[ "$pending" -gt 0 ]]; then
             return 0
         fi
     done <<< "$deps"

@@ -1,20 +1,23 @@
 {
-  "test_files": ["tests/tdd/tdd_review_phase.bats"],
-  "stub_files": ["skills/buildcrew-tdd-review/SKILL.md"],
-  "test_dir": "tests/tdd",
-  "test_count": 14,
+  "test_files": ["tests/unit/after_dep.bats"],
+  "stub_files": [],
+  "test_dir": "tests/unit",
+  "test_count": 9,
   "all_failing": true,
   "framework": "bats",
-  "run_command": "bats tests/tdd/tdd_review_phase.bats",
+  "run_command": "bats tests/unit/after_dep.bats",
   "ac_coverage": {
-    "AC-01": ["AC-01a: get_phase_max_turns returns valid value for tdd-review", "AC-01b: get_phase_max_turns returns 30 for tdd-review", "AC-01c: phase_completed function recognizes tdd-review as phase"],
-    "AC-02": ["AC-02a: get_phase_verdicts returns valid verdicts for tdd-review"],
-    "AC-03": ["AC-03a: buildcrew-tdd-review skill directory can be created", "AC-03b: SKILL.md for tdd-review will be placed in correct location", "AC-03c: tdd-review SKILL.md front matter includes Task tool", "AC-03d: SKILL.md specifies allowed-tools without Bash or Edit"],
-    "AC-04": ["AC-04a: tdd-review phase can write findings to .claude/tdd-review.md", "AC-04b: tdd-review findings include all three lenses"],
-    "AC-05": ["AC-05a: phase verdict approved is recognized as valid", "AC-05b: phase verdict needs_revision is recognized as valid", "AC-05c: needs_revision verdict requires tdd-scaffold to rewrite"],
-    "AC-06": ["AC-06a: tdd-manifest.json is readable and structured"]
+    "AC-01": ["_after_dep_is_blocked: phase mode — blocked when phase has pending task"],
+    "AC-02": ["_after_dep_is_blocked: phase mode — not blocked when all phase tasks done"],
+    "AC-03": ["_after_dep_is_blocked: phase mode — prefix collision Phase 4 done Phase 40 pending"],
+    "AC-04": ["_after_dep_is_blocked: phase mode — empty phase not blocked, no stderr"],
+    "AC-05": ["_after_dep_is_blocked: phase mode — missing phase warns stderr and resolves"],
+    "AC-06": ["_after_dep_is_blocked: backward compat — ordinal fallback when no phase headers"],
+    "AC-07": ["_after_dep_is_blocked: phase mode — last phase reads through EOF"],
+    "AC-08": ["_after_dep_is_blocked: phase mode — multi-dep blocked when one phase pending"],
+    "AC-09": ["_after_dep_is_blocked: phase mode resolves by section not ordinal position"]
   },
   "checksums": {
-    "tests/tdd/tdd_review_phase.bats": "f8741f35154c32b18a09cdb4142a48d87b910347646842a188815b0addbbb1df"
+    "tests/unit/after_dep.bats": "c90421adc37f0da04182e32f9a2e1f419dff73163b2fed863985991ae92b9b17"
   }
 }

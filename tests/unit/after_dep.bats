@@ -131,6 +131,103 @@ EOF
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
+# _after_dep_is_blocked tests — Phase-header mode (AC-01 through AC-08)
+# ─────────────────────────────────────────────────────────────────────────────
+
+@test "_after_dep_is_blocked: phase mode — not blocked when all phase tasks done" {
+    cat > BACKLOG.md << 'EOF'
+## Phase 2: Build
+- [x] Task one
+- [!] Task two
+EOF
+    run _after_dep_is_blocked "[after:2] My task"
+    [ "$status" -eq 1 ]
+}
+
+@test "_after_dep_is_blocked: phase mode — blocked when phase has pending task" {
+    cat > BACKLOG.md << 'EOF'
+## Phase 2: Build
+- [ ] Task one
+- [x] Task two
+EOF
+    run _after_dep_is_blocked "[after:2] My task"
+    [ "$status" -eq 0 ]
+}
+
+@test "_after_dep_is_blocked: phase mode — empty phase not blocked, no stderr" {
+    cat > BACKLOG.md << 'EOF'
+## Phase 2: Build
+## Phase 3: Test
+- [ ] Something
+EOF
+    run _after_dep_is_blocked "[after:2] My task"
+    [ "$status" -eq 1 ]
+    [ -z "$output" ]
+}
+
+@test "_after_dep_is_blocked: phase mode — missing phase warns stderr and resolves" {
+    cat > BACKLOG.md << 'EOF'
+## Phase 1: Setup
+- [x] Done task
+EOF
+    run _after_dep_is_blocked "[after:5] My task"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"Phase 5 not found in backlog"* ]]
+}
+
+@test "_after_dep_is_blocked: phase mode — multi-dep blocked when one phase pending" {
+    cat > BACKLOG.md << 'EOF'
+## Phase 1: Alpha
+- [x] Done
+## Phase 2: Beta
+- [ ] Pending
+EOF
+    run _after_dep_is_blocked "[after:1,2] My task"
+    [ "$status" -eq 0 ]
+}
+
+@test "_after_dep_is_blocked: phase mode — prefix collision Phase 4 done Phase 40 pending" {
+    cat > BACKLOG.md << 'EOF'
+## Phase 4: Foo
+- [x] Done task
+## Phase 40: Bar
+- [ ] Pending task
+EOF
+    run _after_dep_is_blocked "[after:4] My task"
+    [ "$status" -eq 1 ]
+}
+
+@test "_after_dep_is_blocked: phase mode — last phase reads through EOF" {
+    cat > BACKLOG.md << 'EOF'
+## Phase 3: Last
+- [ ] Pending at eof
+EOF
+    run _after_dep_is_blocked "[after:3] My task"
+    [ "$status" -eq 0 ]
+}
+
+@test "_after_dep_is_blocked: backward compat — ordinal fallback when no phase headers" {
+    cat > BACKLOG.md << 'EOF'
+- [ ] Task one
+- [ ] [after:1] Task two
+EOF
+    run _after_dep_is_blocked "[after:1] Task two"
+    [ "$status" -eq 0 ]
+}
+
+@test "_after_dep_is_blocked: phase mode resolves by section not ordinal position" {
+    cat > BACKLOG.md << 'EOF'
+## Phase 1: Setup
+- [x] Done
+- [ ] Pending in phase 1
+## Phase 2: Build
+- [x] All done here
+EOF
+    run _after_dep_is_blocked "[after:2] My task"
+    [ "$status" -eq 1 ]
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
 # get_next_task with [after:] deps
 # ─────────────────────────────────────────────────────────────────────────────
 
