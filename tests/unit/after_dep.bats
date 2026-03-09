@@ -337,3 +337,49 @@ EOF
     run cat BACKLOG.md
     [ "$output" = "- [!] [plan:PROJECT_foo.md] [dir:myapp] [after:2] Build auth system (blocked: too vague)" ]
 }
+
+# ─────────────────────────────────────────────────────────────────────────────
+# get_next_task — edge cases
+# ─────────────────────────────────────────────────────────────────────────────
+
+@test "get_next_task: returns empty string when all tasks are circularly dep-blocked" {
+    cat > BACKLOG.md << 'EOF'
+- [ ] [after:2] Task one
+- [ ] [after:1] Task two
+EOF
+    run get_next_task
+    [ "$status" -eq 0 ]
+    [ "$output" = "" ]
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# gather_pending_tasks — [after:] tag stripping in output (AC: batch agent sees clean text)
+# ─────────────────────────────────────────────────────────────────────────────
+
+@test "gather_pending_tasks: strips [after:] tags from batch task list" {
+    cat > BACKLOG.md << 'EOF'
+- [x] First task
+- [ ] [after:1] Second task
+EOF
+    gather_pending_tasks
+    [ "$__BATCH_TASK_COUNT" -eq 1 ]
+    [[ "$__BATCH_TASK_LIST" == *"Second task"* ]]
+    [[ "$__BATCH_TASK_LIST" != *"[after:"* ]]
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# get_task_by_target — dep-awareness for string targets
+# ─────────────────────────────────────────────────────────────────────────────
+
+@test "get_task_by_target: string match skips dep-blocked tasks and returns first unblocked" {
+    cat > BACKLOG.md << 'EOF'
+## Phase 1: Setup
+- [ ] First phase task
+## Phase 2: Build
+- [ ] [after:1] auth blocked task
+- [ ] auth unblocked task
+EOF
+    run get_task_by_target "auth"
+    [ "$status" -eq 0 ]
+    [ "$output" = "auth unblocked task" ]
+}

@@ -2914,16 +2914,18 @@ get_next_task() {
 gather_pending_tasks() {
     __BATCH_TASK_LIST=""
     __BATCH_TASK_COUNT=0
-    local line task nr=0
+    local line task clean_task nr=0
     while IFS= read -r line; do
         task=$(echo "$line" | sed 's/^- \[ \] //' | sed -E 's/[[:space:]]*\{(trivial|simple|standard)\}[[:space:]]*$//')
         if ! _after_dep_is_blocked "$task"; then
             nr=$((nr + 1))
+            # Strip [after:] tags from output so batch agents see clean task text
+            clean_task=$(strip_task_after "$task")
             if [[ -n "$__BATCH_TASK_LIST" ]]; then
                 __BATCH_TASK_LIST="${__BATCH_TASK_LIST}
-$(printf '%2d. %s' "$nr" "$task")"
+$(printf '%2d. %s' "$nr" "$clean_task")"
             else
-                __BATCH_TASK_LIST="$(printf '%2d. %s' "$nr" "$task")"
+                __BATCH_TASK_LIST="$(printf '%2d. %s' "$nr" "$clean_task")"
             fi
         fi
     done < <(grep '^\- \[ \]' "$BACKLOG_FILE" 2>/dev/null)
@@ -2951,8 +2953,16 @@ get_task_by_target() {
         done < <(grep '^\- \[ \]' "$BACKLOG_FILE" 2>/dev/null)
         echo ""
     else
-        # String: find first pending task matching (case-insensitive)
-        grep -i '^\- \[ \].*'"$target" "$BACKLOG_FILE" 2>/dev/null | head -1 | sed 's/^- \[ \] //' || echo ""
+        # String: find first pending task matching (case-insensitive), skip dep-blocked
+        local line task
+        while IFS= read -r line; do
+            task="${line#- \[ \] }"
+            if ! _after_dep_is_blocked "$task"; then
+                echo "$task"
+                return
+            fi
+        done < <(grep -i '^\- \[ \].*'"$target" "$BACKLOG_FILE" 2>/dev/null)
+        echo ""
     fi
 }
 
