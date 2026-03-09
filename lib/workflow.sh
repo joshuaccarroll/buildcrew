@@ -1109,7 +1109,7 @@ _batch_stop_heartbeat() {
 
 # Trap handler for Ctrl-C during batch execution.
 _batch_parallel_cleanup() {
-    trap '' INT TERM
+    trap '' INT TERM EXIT
     echo ""
     print_warning "Batch interrupted. Terminating running tasks..."
 
@@ -1150,7 +1150,7 @@ _batch_parallel_cleanup() {
 
     print_info "Batch state saved to $BATCH_MANIFEST"
     print_info "Resume with: buildcrew run --batch --resume"
-    return 130 2>/dev/null || exit 130
+    exit 130
 }
 
 # Push branches and create PRs for completed tasks.
@@ -2059,7 +2059,8 @@ _batch_dispatch_loop() {
                 fi
             fi
             _batch_refresh_dashboard
-            sleep 3
+            sleep 3 &
+            wait $! 2>/dev/null || true
             continue
         fi
 
@@ -2085,7 +2086,8 @@ _batch_dispatch_loop() {
                 break
             fi
             _batch_refresh_dashboard
-            sleep 3
+            sleep 3 &
+            wait $! 2>/dev/null || true
             continue
         fi
 
@@ -2120,7 +2122,8 @@ _batch_dispatch_loop() {
         done
 
         _batch_refresh_dashboard
-        sleep 3
+        sleep 3 &
+        wait $! 2>/dev/null || true
     done
 
     if [[ "$_batch_quit" == "true" ]]; then
@@ -2210,6 +2213,7 @@ _batch_resume() {
 
     clear_stop_signal
     _batch_dispatch_loop "$base_branch"
+    trap - EXIT INT TERM
 }
 
 # ── Main batch entry point ────────────────────────────────────────────────────
@@ -2321,6 +2325,7 @@ enter_batch_mode() {
 
     clear_stop_signal
     _batch_dispatch_loop "$base_branch"
+    trap - EXIT INT TERM
 }
 
 # Pause for human review when --review is set
@@ -3686,7 +3691,8 @@ _batch_handle_rate_limit_pause() {
                 ;;
             w|W)
                 print_info "Waiting $(( backoff / 60 )) minute(s) before retry..."
-                sleep "$backoff"
+                sleep "$backoff" &
+                wait $! 2>/dev/null || true
                 ;;
             *)
                 print_info "Retrying now..."
