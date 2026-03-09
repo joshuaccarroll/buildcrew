@@ -4890,83 +4890,123 @@ process_task_isolated() {
         save_task_progress "$task" "$__completed_phases" "$__INVOCATION_COUNT"
     fi
 
-    # --- tdd-scaffold (standard complexity) ---
+    # --- tdd-scaffold + tdd-review (standard complexity, with retry loop) ---
     local tdd_scaffold_verdict="blocked"
     if [[ "${BUILDCREW_REBASE_MODE:-}" == "true" ]]; then
         print_info "Skipping phase: tdd-scaffold (rebase mode — artifacts pre-copied)"
         update_workflow_state "tdd-scaffold" "skipped"
+        print_info "Skipping phase: tdd-review (rebase mode)"
+        update_workflow_state "tdd-review" "skipped"
         # If TDD artifacts exist, treat as complete
         if [[ -f ".claude/tdd-manifest.json" ]]; then
             tdd_scaffold_verdict="complete"
         fi
     elif [[ "$task_complexity" == "standard" ]]; then
-        if phase_completed "tdd-scaffold"; then
-            print_info "Skipping phase: tdd-scaffold (completed in previous run)"
+        if phase_completed "tdd-review"; then
+            # Both phases completed in a prior run — skip entirely
+            print_info "Skipping phase: tdd-scaffold+tdd-review (completed in previous run)"
             update_workflow_state "tdd-scaffold" "skipped"
-            tdd_scaffold_verdict="complete"  # if it was blocked, task would have stopped earlier
+            update_workflow_state "tdd-review" "skipped"
+            tdd_scaffold_verdict="complete"
         else
-            local tdd_context="$__spec_context"
-            local _tdd_rc=0
-            run_phase_group "tdd-scaffold" "$task" "$tdd_context" "$task_complexity" || _tdd_rc=$?
-            if [[ $_tdd_rc -eq 4 ]]; then return 4; fi
-            if [[ $_tdd_rc -ne 0 ]]; then mark_task_blocked "$task" "tdd-scaffold phase failed"; clear_task_progress; return 1; fi
-            local tdd_verdict
-            tdd_verdict=$(jq -r '.verdict // "unknown"' "$PHASE_RESULT_FILE")
-            case "$tdd_verdict" in
-                complete)
-                    print_info "TDD scaffold complete — failing tests written"
-                    if ! __validate_tdd_scaffold; then
-                        print_warning "TDD scaffold produced passing tests — treating as blocked"
-                        mark_task_blocked "$task" "TDD scaffold invalid: tests pass before build"
-                        clear_task_progress; return 1
-                    fi
+            local consecutive_tdd_failures=0
+            local tdd_review_cycle=0
+            while true; do
+                ((tdd_review_cycle++))
+
+                # --- tdd-scaffold ---
+                if phase_completed "tdd-scaffold" && (( tdd_review_cycle == 1 )); then
+                    print_info "Skipping phase: tdd-scaffold (completed in previous run)"
+                    update_workflow_state "tdd-scaffold" "skipped"
                     tdd_scaffold_verdict="complete"
-                    ;;
-                blocked)
-                    print_warning "TDD scaffold blocked — proceeding without TDD"
-                    tdd_scaffold_verdict="blocked"
-                    ;;
-                *) mark_task_blocked "$task" "Unexpected tdd-scaffold verdict: $tdd_verdict"
-                   clear_task_progress; return 1 ;;
-            esac
+                else
+                    local tdd_context="$__spec_context"
+
+                    # On retry: inject tdd-review feedback
+                    if (( tdd_review_cycle > 1 )) && [[ -f ".claude/tdd-review.md" ]]; then
+                        local tdd_review_feedback
+                        tdd_review_feedback=$(head -80 ".claude/tdd-review.md")
+                        tdd_context="$tdd_context"$'\n\n'"## TDD Review Feedback (from previous attempt)"$'\n'"$tdd_review_feedback"
+                        tdd_context="$tdd_context | TDD REVISION CYCLE $tdd_review_cycle: Previous tests rejected by tdd-review. Regenerate tests addressing the feedback above."
+                        # Clean slate for re-scaffold
+                        __cleanup_tdd_artifacts
+                    fi
+
+                    local _tdd_rc=0
+                    run_phase_group "tdd-scaffold" "$task" "$tdd_context" "$task_complexity" || _tdd_rc=$?
+                    if [[ $_tdd_rc -eq 4 ]]; then return 4; fi
+                    if [[ $_tdd_rc -ne 0 ]]; then mark_task_blocked "$task" "tdd-scaffold phase failed"; clear_task_progress; return 1; fi
+
+                    local tdd_verdict
+                    tdd_verdict=$(jq -r '.verdict // "unknown"' "$PHASE_RESULT_FILE")
+                    case "$tdd_verdict" in
+                        complete)
+                            print_info "TDD scaffold complete — failing tests written"
+                            if ! __validate_tdd_scaffold; then
+                                print_warning "TDD scaffold produced passing tests — treating as blocked"
+                                mark_task_blocked "$task" "TDD scaffold invalid: tests pass before build"
+                                clear_task_progress; return 1
+                            fi
+                            tdd_scaffold_verdict="complete"
+                            ;;
+                        blocked)
+                            print_warning "TDD scaffold blocked — proceeding without TDD"
+                            tdd_scaffold_verdict="blocked"
+                            break
+                            ;;
+                        *) mark_task_blocked "$task" "Unexpected tdd-scaffold verdict: $tdd_verdict"
+                           clear_task_progress; return 1 ;;
+                    esac
+                fi
+
+                # --- tdd-review ---
+                local _tdd_review_rc=0
+                run_phase_group "tdd-review" "$task" "$__spec_context" "$task_complexity" || _tdd_review_rc=$?
+                if [[ $_tdd_review_rc -eq 4 ]]; then return 4; fi
+                if [[ $_tdd_review_rc -ne 0 ]]; then
+                    mark_task_blocked "$task" "tdd-review phase failed"
+                    clear_task_progress; return 1
+                fi
+
+                local tdd_review_verdict
+                tdd_review_verdict=$(jq -r '.verdict // "unknown"' "$PHASE_RESULT_FILE")
+                case "$tdd_review_verdict" in
+                    approved)
+                        print_info "TDD review approved — proceeding to build"
+                        break ;;
+                    needs_revision)
+                        ((consecutive_tdd_failures++))
+                        if (( consecutive_tdd_failures >= 2 )); then
+                            local tdd_failure_summary
+                            tdd_failure_summary=$(jq -r '.details // "TDD review failed twice"' "$PHASE_RESULT_FILE")
+                            print_warning "[CIRCUIT BREAKER] TDD tests failed review $consecutive_tdd_failures times. Marking task blocked."
+                            print_debug "Circuit breaker: consecutive_tdd_failures=$consecutive_tdd_failures"
+                            append_lesson "tdd-review" \
+                                "TDD review NEEDS_REVISION after $tdd_review_cycle cycles: $tdd_failure_summary" \
+                                "Triggered circuit breaker — task blocked" \
+                                "When tdd-review rejects tests twice, the spec or plan may be too ambiguous for test generation"
+                            mark_task_blocked "$task" "tdd-review: test quality issues persist after $tdd_review_cycle attempts — see .claude/tdd-review.md"
+                            clear_task_progress; return 1
+                        fi
+                        append_lesson "tdd-review" \
+                            "TDD review NEEDS_REVISION on cycle $tdd_review_cycle" \
+                            "Retrying tdd-scaffold with review feedback" \
+                            "Read tdd-review feedback carefully — regenerate tests addressing specific issues"
+                        continue ;;
+                    *) mark_task_blocked "$task" "Unexpected tdd-review verdict: $tdd_review_verdict"
+                       clear_task_progress; return 1 ;;
+                esac
+            done
+
             __completed_phases="${__completed_phases:+$__completed_phases }tdd-scaffold"
+            if [[ "$tdd_scaffold_verdict" == "complete" ]]; then
+                __completed_phases="${__completed_phases:+$__completed_phases }tdd-review"
+            fi
             save_task_progress "$task" "$__completed_phases" "$__INVOCATION_COUNT"
         fi
     else
         print_info "Skipping phase: tdd-scaffold (complexity: $task_complexity)"
         update_workflow_state "tdd-scaffold" "skipped"
-    fi
-
-    # --- tdd-review (only when tdd-scaffold verdict was complete) ---
-    if [[ "${BUILDCREW_REBASE_MODE:-}" == "true" ]]; then
-        print_info "Skipping phase: tdd-review (rebase mode)"
-        update_workflow_state "tdd-review" "skipped"
-    elif [[ "$task_complexity" == "standard" ]] && [[ "$tdd_scaffold_verdict" == "complete" ]]; then
-        if phase_completed "tdd-review"; then
-            print_info "Skipping phase: tdd-review (completed in previous run)"
-            update_workflow_state "tdd-review" "skipped"
-        else
-            run_phase_group "tdd-review" "$task" "$__spec_context" "$task_complexity" || {
-                mark_task_blocked "$task" "tdd-review phase failed"
-                clear_task_progress; return 1
-            }
-            local tdd_review_verdict
-            tdd_review_verdict=$(jq -r '.verdict // "unknown"' "$PHASE_RESULT_FILE")
-            case "$tdd_review_verdict" in
-                approved) print_info "TDD review approved — proceeding to build" ;;
-                needs_revision)
-                    mark_task_blocked "$task" "tdd-review: test quality issues found — see .claude/tdd-review.md"
-                    clear_task_progress; return 1 ;;
-                *) mark_task_blocked "$task" "Unexpected tdd-review verdict: $tdd_review_verdict"
-                   clear_task_progress; return 1 ;;
-            esac
-            __completed_phases="${__completed_phases:+$__completed_phases }tdd-review"
-            save_task_progress "$task" "$__completed_phases" "$__INVOCATION_COUNT"
-        fi
-    else
-        if [[ "$task_complexity" == "standard" ]]; then
-            print_info "Skipping phase: tdd-review (tdd-scaffold was blocked)"
-        fi
         update_workflow_state "tdd-review" "skipped"
     fi
 
