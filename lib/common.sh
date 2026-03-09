@@ -97,7 +97,7 @@ resolve_phase_model() {
     local base
     case "$phase" in
         review|codereview|verify) base="opus" ;;
-        tdd-scaffold|uat-stories|uat-scenarios) base="haiku" ;;
+        uat-stories|uat-scenarios) base="haiku" ;;
         *) base="sonnet" ;;
     esac
 
