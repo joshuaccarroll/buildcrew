@@ -81,16 +81,15 @@ flowchart TD
         review -- rejected --> BLOCKED_REJ([Task blocked])
         REPLAN_R -- Yes --> research
         REPLAN_R -- No --> BLOCKED_R([Task blocked])
-        review -- approved --> tdd[tdd-scaffold (Haiku)]
-        tdd --> tddreview[tdd-review (Haiku)]
+        review -- approved --> tdd[tdd-scaffold (Sonnet)]
+        tdd --> tddreview[tdd-review (Sonnet)]
         tddreview -- approved --> build[build (Sonnet)]
         tddreview -- "needs_revision (1st)" --> tdd
         tddreview -- "needs_revision (2nd)" --> BLOCKED_TDD([Task blocked])
         build -- max-turns --> chunked[chunked build]
-        chunked -- complete --> simplify[simplify (Haiku)]
+        chunked -- complete --> codereview[codereview (Opus)]
         chunked -- fail --> BLOCKED_C([Task blocked])
-        build --> simplify
-        simplify --> codereview[codereview (Opus)]
+        build --> codereview
         codereview -- needs_rebuild --> build
         codereview -- "needs_rebuild (2nd consecutive)" --> REPLAN_CR{Replan\navailable?}
         codereview -- "needs_rebuild (during verify rebuild)" --> BLOCKED_VCR([Task blocked])
@@ -123,13 +122,13 @@ Each task runs through the following phases (each a separate Claude invocation).
 | 1 | Spec | PM | Converts backlog item to testable acceptance criteria |
 | 2 | Research + Plan | Research Agent | Explores codebase, creates implementation plan |
 | 3 | Plan Review | Principal Engineer | 3-pass adversarial review with cross-reference lint |
+| 3.5 | Prereqs | Research Agent | Detects manual setup requirements before build (skip with `--skip-prereqs`) |
 | 4 | TDD Scaffold | QA Engineer | Writes failing tests before implementation (standard complexity) |
 | 4.5 | TDD Review | QA Engineer | Reviews test quality; may loop back to TDD Scaffold (up to 2 attempts) |
 | 5 | Build | Feature Engineer | Implements the plan; TDD test files are locked read-only |
-| 6 | Simplify | Principal Engineer | Non-blocking targeted simplifications |
-| 7 | Code Review | Principal Engineer | Adversarial review + elegance check; may request rebuild |
-| 8 | Verify + Commit | Security Engineer | Security audit, acceptance criteria verification, commit |
-| 9 | UAT | QA Engineer | Blind scenario-based acceptance testing against README after backlog completion (opt out: `--no-uat`) |
+| 6 | Code Review | Principal Engineer | Adversarial review + elegance check; may request rebuild |
+| 7 | Verify + Commit | Security Engineer | Security audit, acceptance criteria verification, commit |
+| 8 | UAT | QA Engineer | Blind scenario-based acceptance testing against README after backlog completion (opt out: `--no-uat`) |
 
 **Key behaviors:**
 - **Adversarial reviews** — reviewers are asked to find flaws, not approve quickly
@@ -232,6 +231,7 @@ Project-level config lives in `.buildcrew/config` (created by `buildcrew init`):
 | `MAX_REBASE_ROUNDS` | `2` | Max rebase-rebuild attempts for merge conflicts (0-10) |
 | `NO_REBASE` | `false` | Skip rebase-rebuild for merge conflicts |
 | `MERGE_STRATEGY` | `smallest-first` | Merge order: `smallest-first`, `priority-first`, `fifo` |
+| `UAT_MODE` | (auto) | UAT execution mode: `parallel` (stateless artifacts) or `sequential` (stateful artifacts). Auto-detected when not set |
 
 UAT-specific config keys (`UAT_MAX_RETRIES`, `UAT_ARTIFACT_TYPE`, `UAT_RUN_COMMAND`, `UAT_ARTIFACT_TIMEOUT`, `UAT_EXECUTE_TIMEOUT`) are documented in the [UAT section](#uat-configuration) below.
 
