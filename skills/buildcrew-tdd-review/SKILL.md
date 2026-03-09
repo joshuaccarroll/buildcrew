@@ -131,3 +131,19 @@ Read all three lens agent responses. Write `.claude/tdd-review.md` with this str
 - Tests that assert on the wrong thing entirely (wrong AC coverage)
 
 Note: slow tests, style issues, and minor coupling are NOT blocking — only issues that undermine correctness of the RED-state guarantee block.
+
+## Step 5 — Write phase-result.json
+
+Use the Write tool to write `.claude/phase-result.json` as your final step:
+
+For approved verdict:
+```json
+{ "phase": "tdd-review", "verdict": "approved", "details": "<one-line summary>" }
+```
+
+For needs_revision verdict:
+```json
+{ "phase": "tdd-review", "verdict": "needs_revision", "details": "<one-line summary of blocking issues>" }
+```
+
+Writing `.claude/phase-result.json` is mandatory. Do not end your response without writing it.

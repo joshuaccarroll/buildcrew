@@ -4959,8 +4959,12 @@ process_task_isolated() {
                     esac
                 fi
 
-                # --- tdd-review ---
                 local _tdd_review_rc=0
+                if phase_completed "tdd-review" && (( tdd_review_cycle == 1 )); then
+                    print_info "Skipping phase: tdd-review (completed in previous run)"
+                    update_workflow_state "tdd-review" "skipped"
+                    break
+                fi
                 run_phase_group "tdd-review" "$task" "$__spec_context" "$task_complexity" || _tdd_review_rc=$?
                 if [[ $_tdd_review_rc -eq 4 ]]; then return 4; fi
                 if [[ $_tdd_review_rc -ne 0 ]]; then
