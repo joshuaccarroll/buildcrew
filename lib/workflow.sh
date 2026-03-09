@@ -227,6 +227,7 @@ get_phase_verdicts() {
         uat-scenarios) echo "pass, fail" ;;
         uat-harness)   echo "pass, fail, disputed" ;;
         uat-execute)   echo "pass, fail, error, disputed" ;;
+        prereqs)       echo "none_required, all_satisfied, blocked" ;;
         *)             echo "complete" ;;
     esac
 }
@@ -2050,6 +2051,7 @@ _batch_resume() {
 
     # Capture CWD once for consistent path resolution
     __BATCH_CWD="$(pwd)"
+    _clear_rate_limit_pause "$__BATCH_CWD"
 
     # Load tasks from manifest
     _batch_tasks=()
@@ -2119,6 +2121,7 @@ enter_batch_mode() {
 
     # Capture CWD once for consistent path resolution
     __BATCH_CWD="$(pwd)"
+    _clear_rate_limit_pause "$__BATCH_CWD"
 
     # Force auto mode for background processes
     if [[ "$AUTO_MODE" != "true" ]]; then
@@ -4611,7 +4614,7 @@ process_task_isolated() {
             local prereqs_verdict
             prereqs_verdict=$(jq -r '.verdict // "complete"' "$PHASE_RESULT_FILE")
             case "$prereqs_verdict" in
-                complete|skipped)
+                complete|skipped|none_required|all_satisfied)
                     __completed_phases="${__completed_phases:+$__completed_phases }prereqs"
                     save_task_progress "$task" "$__completed_phases" "$__INVOCATION_COUNT"
                     ;;

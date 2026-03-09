@@ -67,11 +67,11 @@ teardown() {
     [ -z "$output" ]
 }
 
-@test "rate_limit_event: stdout contains 'Rate limit reached'" {
+@test "rate_limit_event: suppressed (transient, not a hard error)" {
     if ! command -v python3 &>/dev/null; then skip "python3 not available"; fi
     run bash -c "echo '{\"type\":\"rate_limit_event\"}' | python3 \"$SP\" --activity-file /tmp/sp_test_rate_limit --max-turns 10"
     [ "$status" -eq 0 ]
-    [ "$output" = "Rate limit reached" ]
+    [ -z "$output" ]
 }
 
 @test "error event with rate_limit_error: stdout contains 'Rate limit reached'" {

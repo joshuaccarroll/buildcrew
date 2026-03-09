@@ -82,7 +82,7 @@ def main():
                 if event.get('stop_reason') == 'max_turns':
                     print('Max turns limit reached')
             elif etype == 'rate_limit_event':
-                print('Rate limit reached')
+                pass  # transient; suppress to avoid false positives
             elif etype == 'error':
                 err = event.get('error')
                 if isinstance(err, dict) and err.get('type') == 'rate_limit_error':
