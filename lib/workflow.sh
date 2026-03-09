@@ -1270,6 +1270,94 @@ _batch_merge_worktrees() {
     echo "$merge_branch"
 }
 
+# Merge completed task branches per-repo (non-git parent mode).
+# Groups completed tasks by _batch_target_dirs[], then squash-merges each
+# task branch onto the base branch of its respective child repo.
+_batch_merge_per_repo() {
+    local overall_merged=0 overall_conflicts=0
+    local status i td
+
+    # Collect unique target_dirs from completed tasks
+    local repo_dirs=()
+    local seen_dirs=""
+    for i in "${!_batch_tasks[@]}"; do
+        status=$(_batch_get_task_status $((i + 1)))
+        [[ "$status" != "completed" ]] && continue
+        td="${_batch_target_dirs[$i]:-}"
+        [[ -z "$td" ]] && continue
+        # Deduplicate (Bash 3.2 compatible — no associative arrays)
+        case "$seen_dirs" in
+            *"|${td}|"*) continue ;;
+        esac
+        seen_dirs="${seen_dirs}|${td}|"
+        repo_dirs+=("$td")
+    done
+
+    if [[ ${#repo_dirs[@]} -eq 0 ]]; then
+        print_warning "No target directories found for completed tasks — skipping per-repo merge"
+        return 0
+    fi
+
+    for td in "${repo_dirs[@]}"; do
+        local abs_td
+        abs_td="$(cd "$__BATCH_CWD/$td" 2>/dev/null && pwd)" || {
+            print_warning "Target directory $td not found — skipping"
+            continue
+        }
+
+        # Resolve the current base branch from the target repo
+        local repo_base
+        repo_base=$(git -C "$abs_td" rev-parse --abbrev-ref HEAD)
+
+        # Ensure the repo working tree is clean before merging
+        if ! git -C "$abs_td" diff --quiet HEAD 2>/dev/null; then
+            print_warning "Repo $td has uncommitted changes — skipping merge"
+            continue
+        fi
+
+        # Squash-merge each completed task branch onto base
+        local merged_count=0 conflict_count=0
+        for i in "${!_batch_tasks[@]}"; do
+            status=$(_batch_get_task_status $((i + 1)))
+            [[ "$status" != "completed" ]] && continue
+            [[ "${_batch_target_dirs[$i]:-}" != "$td" ]] && continue
+            local branch="buildcrew/${_batch_slugs[$i]}"
+
+            # Verify branch exists before attempting merge
+            if ! git -C "$abs_td" rev-parse --verify "refs/heads/$branch" >/dev/null 2>&1; then
+                print_warning "Branch $branch not found in $td — skipping"
+                _batch_mark_task $((i + 1)) "merge_conflict"
+                log_msg "Branch missing in $td: task $((i + 1)) (${_batch_tasks[$i]})"
+                conflict_count=$((conflict_count + 1))
+                continue
+            fi
+
+            if git -C "$abs_td" merge --squash "$branch" 2>/dev/null && \
+               git -C "$abs_td" commit -m "batch: ${_batch_tasks[$i]}" 2>/dev/null; then
+                merged_count=$((merged_count + 1))
+            else
+                # squash-merge does not leave MERGE_HEAD, so merge --abort is a no-op;
+                # reset --hard is the correct cleanup for both conflict and empty-diff cases
+                git -C "$abs_td" reset --hard HEAD 2>/dev/null || true
+                conflict_count=$((conflict_count + 1))
+                _batch_mark_task $((i + 1)) "merge_conflict"
+                log_msg "Merge conflict in $td: task $((i + 1)) (${_batch_tasks[$i]})"
+            fi
+        done
+
+        if (( merged_count > 0 )); then
+            print_info "Merged $merged_count task(s) into $repo_base in $td (conflicts: $conflict_count)"
+        else
+            print_warning "No tasks merged cleanly in $td"
+        fi
+
+        overall_merged=$((overall_merged + merged_count))
+        overall_conflicts=$((overall_conflicts + conflict_count))
+    done
+
+    print_info "Per-repo merge complete: $overall_merged merged, $overall_conflicts conflict(s) across ${#repo_dirs[@]} repo(s)"
+}
+
 # Update a single field on a manifest task entry via jq.
 _batch_update_task_field() {
     local index="$1" field="$2" value="$3"
@@ -1605,6 +1693,12 @@ _batch_post_completion() {
     end_time=$(date +%s)
     duration=$(( end_time - _batch_start_time ))
 
+    # Per-repo merge (non-git parent mode) — runs before summary so statuses are accurate
+    if (( _batch_completed > 0 )) && [[ "$__BATCH_PARENT_IS_GIT" != "true" ]]; then
+        print_header "Post-Build: Per-Repo Merge"
+        _batch_merge_per_repo
+    fi
+
     echo ""
     print_header "Batch Execution Complete"
     echo -e "  ${GREEN}Completed:${NC}  $_batch_completed"
@@ -1614,7 +1708,11 @@ _batch_post_completion() {
 
     # List branches for completed tasks
     if (( _batch_completed > 0 )); then
-        print_info "Completed task branches:"
+        if [[ "$__BATCH_PARENT_IS_GIT" != "true" ]]; then
+            print_info "Merged task branches:"
+        else
+            print_info "Completed task branches:"
+        fi
         local i
         for i in "${!_batch_tasks[@]}"; do
             local status

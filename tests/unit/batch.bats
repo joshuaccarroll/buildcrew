@@ -1494,3 +1494,249 @@ EOF
     # New task should have target dir set (non-empty or empty string)
     [[ -n "${_batch_target_dirs[1]}" || "${_batch_target_dirs[1]}" == "" ]]
 }
+
+# ─────────────────────────────────────────────────────────────────────────────
+# _batch_merge_per_repo (non-git parent mode)
+# ─────────────────────────────────────────────────────────────────────────────
+
+_setup_per_repo_merge() {
+    # Create a non-git parent directory
+    local parent_dir="$TEST_DIR/parent"
+    mkdir -p "$parent_dir"
+    __BATCH_CWD="$parent_dir"
+
+    # Stub helpers
+    print_info() { echo "INFO: $*"; }
+    print_warning() { echo "WARN: $*"; }
+    print_header() { echo "HEADER: $*"; }
+    log_msg() { echo "LOG: $*" >> "$TEST_DIR/log.txt"; }
+
+    export __BATCH_CWD
+}
+
+_create_child_repo() {
+    local name="$1"
+    local repo_dir="$__BATCH_CWD/$name"
+    mkdir -p "$repo_dir"
+    git -C "$repo_dir" init -b main >/dev/null 2>&1
+    git -C "$repo_dir" config user.email "test@buildcrew.test"
+    git -C "$repo_dir" config user.name "Test"
+    echo "init" > "$repo_dir/README.md"
+    git -C "$repo_dir" add README.md
+    git -C "$repo_dir" commit -m "init" >/dev/null 2>&1
+    echo "$repo_dir"
+}
+
+@test "_batch_merge_per_repo: basic single-repo single-task merge" {
+    _setup_per_repo_merge
+    local repo_dir
+    repo_dir=$(_create_child_repo "myrepo")
+
+    # Create task branch with a change
+    git -C "$repo_dir" checkout -b "buildcrew/add-feature" >/dev/null 2>&1
+    echo "feature" > "$repo_dir/feature.txt"
+    git -C "$repo_dir" add feature.txt
+    git -C "$repo_dir" commit -m "add feature" >/dev/null 2>&1
+    git -C "$repo_dir" checkout main >/dev/null 2>&1
+
+    # Set up batch arrays
+    _batch_tasks=("Add feature")
+    _batch_slugs=("add-feature")
+    _batch_target_dirs=("myrepo")
+
+    # Set up manifest
+    _batch_init_manifest "main" "abc123"
+    _batch_add_task 1 "Add feature" "add-feature"
+    _batch_mark_task 1 "completed" "0"
+    _batch_get_task_status() { echo "completed"; }
+
+    run _batch_merge_per_repo
+    [ "$status" -eq 0 ]
+
+    # Verify squash commit on main
+    git -C "$repo_dir" log --oneline | grep -q "batch: Add feature"
+    # Verify the file is on main
+    [ -f "$repo_dir/feature.txt" ]
+    # Task branch still exists (not deleted by this function)
+    git -C "$repo_dir" rev-parse --verify "refs/heads/buildcrew/add-feature" >/dev/null 2>&1
+}
+
+@test "_batch_merge_per_repo: multiple tasks in same repo" {
+    _setup_per_repo_merge
+    local repo_dir
+    repo_dir=$(_create_child_repo "myrepo")
+
+    # Create first task branch
+    git -C "$repo_dir" checkout -b "buildcrew/task-one" >/dev/null 2>&1
+    echo "one" > "$repo_dir/one.txt"
+    git -C "$repo_dir" add one.txt
+    git -C "$repo_dir" commit -m "task one" >/dev/null 2>&1
+    git -C "$repo_dir" checkout main >/dev/null 2>&1
+
+    # Create second task branch
+    git -C "$repo_dir" checkout -b "buildcrew/task-two" >/dev/null 2>&1
+    echo "two" > "$repo_dir/two.txt"
+    git -C "$repo_dir" add two.txt
+    git -C "$repo_dir" commit -m "task two" >/dev/null 2>&1
+    git -C "$repo_dir" checkout main >/dev/null 2>&1
+
+    _batch_tasks=("Task one" "Task two")
+    _batch_slugs=("task-one" "task-two")
+    _batch_target_dirs=("myrepo" "myrepo")
+
+    _batch_init_manifest "main" "abc123"
+    _batch_add_task 1 "Task one" "task-one"
+    _batch_add_task 2 "Task two" "task-two"
+    _batch_mark_task 1 "completed" "0"
+    _batch_mark_task 2 "completed" "0"
+    _batch_get_task_status() { echo "completed"; }
+
+    run _batch_merge_per_repo
+    [ "$status" -eq 0 ]
+
+    # Both squash commits should be on main
+    local log_output
+    log_output=$(git -C "$repo_dir" log --oneline)
+    echo "$log_output" | grep -q "batch: Task one"
+    echo "$log_output" | grep -q "batch: Task two"
+    # Both files present
+    [ -f "$repo_dir/one.txt" ]
+    [ -f "$repo_dir/two.txt" ]
+}
+
+@test "_batch_merge_per_repo: merge conflict marks task merge_conflict" {
+    _setup_per_repo_merge
+    local repo_dir
+    repo_dir=$(_create_child_repo "myrepo")
+
+    # Create task branch that modifies README.md
+    git -C "$repo_dir" checkout -b "buildcrew/edit-readme" >/dev/null 2>&1
+    echo "branch change" > "$repo_dir/README.md"
+    git -C "$repo_dir" add README.md
+    git -C "$repo_dir" commit -m "edit readme" >/dev/null 2>&1
+    git -C "$repo_dir" checkout main >/dev/null 2>&1
+
+    # Advance base branch with conflicting change
+    echo "conflicting change" > "$repo_dir/README.md"
+    git -C "$repo_dir" add README.md
+    git -C "$repo_dir" commit -m "conflict on main" >/dev/null 2>&1
+
+    _batch_tasks=("Edit readme")
+    _batch_slugs=("edit-readme")
+    _batch_target_dirs=("myrepo")
+
+    _batch_init_manifest "main" "abc123"
+    _batch_add_task 1 "Edit readme" "edit-readme"
+    _batch_mark_task 1 "completed" "0"
+    _batch_get_task_status() { echo "completed"; }
+
+    run _batch_merge_per_repo
+    [ "$status" -eq 0 ]
+
+    # Task should be marked merge_conflict in manifest
+    [ "$(jq -r '.tasks[0].status' "$BATCH_MANIFEST")" = "merge_conflict" ]
+    # Working tree should be clean (reset --hard cleanup)
+    git -C "$repo_dir" diff --quiet HEAD
+    git -C "$repo_dir" diff --cached --quiet
+}
+
+@test "_batch_merge_per_repo: dirty repo skipped" {
+    _setup_per_repo_merge
+    local repo_dir
+    repo_dir=$(_create_child_repo "myrepo")
+
+    # Create task branch
+    git -C "$repo_dir" checkout -b "buildcrew/some-task" >/dev/null 2>&1
+    echo "change" > "$repo_dir/new.txt"
+    git -C "$repo_dir" add new.txt
+    git -C "$repo_dir" commit -m "some task" >/dev/null 2>&1
+    git -C "$repo_dir" checkout main >/dev/null 2>&1
+
+    # Make repo dirty (uncommitted tracked change)
+    echo "dirty" > "$repo_dir/README.md"
+
+    _batch_tasks=("Some task")
+    _batch_slugs=("some-task")
+    _batch_target_dirs=("myrepo")
+
+    _batch_init_manifest "main" "abc123"
+    _batch_add_task 1 "Some task" "some-task"
+    _batch_mark_task 1 "completed" "0"
+    _batch_get_task_status() { echo "completed"; }
+
+    run _batch_merge_per_repo
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"uncommitted changes"* ]]
+
+    # No batch commit on main (merge was skipped)
+    ! git -C "$repo_dir" log --oneline | grep -q "batch:"
+}
+
+@test "_batch_merge_per_repo: missing branch marks merge_conflict" {
+    _setup_per_repo_merge
+    local repo_dir
+    repo_dir=$(_create_child_repo "myrepo")
+
+    # No branch created — it doesn't exist
+    _batch_tasks=("Ghost task")
+    _batch_slugs=("ghost-task")
+    _batch_target_dirs=("myrepo")
+
+    _batch_init_manifest "main" "abc123"
+    _batch_add_task 1 "Ghost task" "ghost-task"
+    _batch_mark_task 1 "completed" "0"
+    _batch_get_task_status() { echo "completed"; }
+
+    run _batch_merge_per_repo
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"not found"* ]]
+
+    # Task marked merge_conflict
+    [ "$(jq -r '.tasks[0].status' "$BATCH_MANIFEST")" = "merge_conflict" ]
+    # Base branch unchanged (only init commit)
+    [ "$(git -C "$repo_dir" log --oneline | wc -l)" -eq 1 ]
+}
+
+@test "_batch_merge_per_repo: multiple repos merge independently" {
+    _setup_per_repo_merge
+    local repo_a repo_b
+    repo_a=$(_create_child_repo "repo-a")
+    repo_b=$(_create_child_repo "repo-b")
+
+    # repo-a: create task branch, then add conflicting base change
+    git -C "$repo_a" checkout -b "buildcrew/task-a" >/dev/null 2>&1
+    echo "branch-a" > "$repo_a/README.md"
+    git -C "$repo_a" add README.md
+    git -C "$repo_a" commit -m "task a" >/dev/null 2>&1
+    git -C "$repo_a" checkout main >/dev/null 2>&1
+    echo "conflict-a" > "$repo_a/README.md"
+    git -C "$repo_a" add README.md
+    git -C "$repo_a" commit -m "conflict on main" >/dev/null 2>&1
+
+    # repo-b: create task branch (no conflict)
+    git -C "$repo_b" checkout -b "buildcrew/task-b" >/dev/null 2>&1
+    echo "feature-b" > "$repo_b/feature.txt"
+    git -C "$repo_b" add feature.txt
+    git -C "$repo_b" commit -m "task b" >/dev/null 2>&1
+    git -C "$repo_b" checkout main >/dev/null 2>&1
+
+    _batch_tasks=("Task A" "Task B")
+    _batch_slugs=("task-a" "task-b")
+    _batch_target_dirs=("repo-a" "repo-b")
+
+    _batch_init_manifest "main" "abc123"
+    _batch_add_task 1 "Task A" "task-a"
+    _batch_add_task 2 "Task B" "task-b"
+    _batch_mark_task 1 "completed" "0"
+    _batch_mark_task 2 "completed" "0"
+    _batch_get_task_status() { echo "completed"; }
+
+    run _batch_merge_per_repo
+    [ "$status" -eq 0 ]
+
+    # repo-a: conflict → merge_conflict status
+    [ "$(jq -r '.tasks[0].status' "$BATCH_MANIFEST")" = "merge_conflict" ]
+    # repo-b: success → merged
+    git -C "$repo_b" log --oneline | grep -q "batch: Task B"
+    [ -f "$repo_b/feature.txt" ]
+}
