@@ -90,9 +90,10 @@ EOF
     [ "$SEQUENTIAL_MODE" = "false" ]
 }
 
-@test "parse_args: --sequential sets SEQUENTIAL_MODE=true" {
-    parse_args --sequential
-    [ "$SEQUENTIAL_MODE" = "true" ]
+@test "parse_args: --sequential prints deprecation warning and sets SEQUENTIAL_MODE=true" {
+    run bash -c "source '$BUILDCREW_ROOT/lib/workflow.sh' 2>/dev/null; parse_args --sequential 2>&1; echo SEQUENTIAL_MODE=\$SEQUENTIAL_MODE"
+    [[ "$output" == *"deprecated"* ]]
+    [[ "$output" == *"SEQUENTIAL_MODE=true"* ]]
 }
 
 @test "parse_args: --single sets SEQUENTIAL_MODE=true" {
@@ -113,9 +114,10 @@ EOF
     [ "$SEQUENTIAL_MODE" = "true" ]
 }
 
-@test "parse_args: --help mentions --sequential" {
+@test "parse_args: --help mentions --sequential as deprecated" {
     run bash -c "source '$BUILDCREW_ROOT/lib/workflow.sh' 2>/dev/null; parse_args --help"
     [[ "$output" == *"--sequential"* ]]
+    [[ "$output" == *"deprecated"* ]]
 }
 
 @test "parse_args: --help mentions --batch deprecated" {
@@ -454,9 +456,10 @@ EOF
 # Adversarial flag combinations
 # ─────────────────────────────────────────────────────────────────────────────
 
-@test "parse_args: --batch --sequential both process without error" {
+@test "parse_args: --batch --sequential both print deprecation warnings" {
     run bash -c "source '$BUILDCREW_ROOT/lib/workflow.sh' 2>/dev/null; parse_args --batch --sequential 2>&1; echo SEQUENTIAL_MODE=\$SEQUENTIAL_MODE"
-    [[ "$output" == *"deprecated"* ]]
+    deprecated_count=$(echo "$output" | grep -io "deprecated" | wc -l | tr -d ' ')
+    [ "$deprecated_count" -ge 2 ]
     [[ "$output" == *"SEQUENTIAL_MODE=true"* ]]
 }
 

@@ -79,7 +79,7 @@ print_help() {
     echo "    --tdd         (deprecated) TDD is enabled by default; this flag is a no-op"
     echo "    --no-tdd      Disable TDD mode (skip tdd-scaffold phase for standard tasks)"
     echo "    --no-uat      Skip UAT after backlog completion (with 'run')"
-    echo "    --sequential  Run tasks one at a time (opt out of parallel batch mode, with 'run')"
+    echo "    --sequential  (deprecated) Use --single instead (with 'run')"
     echo "    --batch       (deprecated) Batch mode is now the default (with 'run')"
     echo "    --max-parallel N  Max concurrent tasks in parallel mode (default: 5, with 'run')"
     echo "    --max-rebase-rounds N  Max rebase-rebuild attempts for merge conflicts (default: 2, with 'run')"
